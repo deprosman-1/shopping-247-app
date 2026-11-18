@@ -1,0 +1,6 @@
+{
+  "name": "24/7 SHOPPING",
+  "description": "24/7 SHOPPING - shopping with ease and comfort. Quality products, bargaining box, 3D catalog, offline cache, and Supabase cloud sync.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

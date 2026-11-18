@@ -1,0 +1,79 @@
+name: Build Android APK & Publish Release
+
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    name: Build 24/7 SHOPPING APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK & accept licenses
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
+
+      - name: Prepare debug keystore & env
+        run: |
+          if [ ! -f debug.keystore ] && [ -f debug.keystore.base64 ]; then
+            base64 -d debug.keystore.base64 > debug.keystore
+          fi
+          if [ ! -f .env ]; then
+            touch .env
+          fi
+
+      - name: Set up Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Build Debug APK
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Package APK for download
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/247-shopping.apk
+          ls -lh dist/247-shopping.apk
+
+      - name: Upload APK to Actions Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: 247-shopping-apk
+          path: dist/247-shopping.apk
+          if-no-files-found: error
+
+      - name: Publish APK to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v1.0-latest
+          name: 24/7 SHOPPING — Latest Android APK
+          body: |
+            Automatically compiled Android APK for **24/7 SHOPPING**.
+
+            ### How to download & install
+            1. Click **`247-shopping.apk`** in **Assets** below to download to your phone or computer.
+            2. Open the downloaded file to install **24/7 SHOPPING**.
+            3. Use this direct release link inside **Admin Control Room → Store & Security → GitHub Releases APK Download URL** so customers can download updates anytime.
+          files: dist/247-shopping.apk
+          draft: false
+          prerelease: false

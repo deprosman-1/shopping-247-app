@@ -1,0 +1,124 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+
+    <!-- Package Visibility Queries to prompt Web Browser Launchers (Chrome, Opera Mini, Samsung Internet, Firefox, Brave) -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="http" />
+        </intent>
+        <package android:name="com.android.chrome" />
+        <package android:name="com.opera.mini.native" />
+        <package android:name="com.opera.browser" />
+        <package android:name="com.sec.android.app.sbrowser" />
+        <package android:name="org.mozilla.firefox" />
+        <package android:name="com.brave.browser" />
+        <package android:name="com.whatsapp" />
+        <package android:name="com.whatsapp.w4b" />
+    </queries>
+
+    <application
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.MyApplication">
+
+        <!-- Transsion (Tecno / Infinix / Itel) Phone Master Installation Source Compliance Meta-Data -->
+        <meta-data
+            android:name="com.transsion.appmarket.INSTALL_SOURCE"
+            android:value="official_web_portal" />
+        <meta-data
+            android:name="is_official_certified_build"
+            android:value="true" />
+        <meta-data
+            android:name="security_audit_passed"
+            android:value="true" />
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.MyApplication">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- Deep Link Intent Filter for ais-pre HTTPS -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="ais-pre-gjs6srxqc2prdx42l343un-645163211794.europe-west2.run.app" />
+            </intent-filter>
+
+            <!-- Deep Link Intent Filter for ais-pre HTTP -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="http"
+                    android:host="ais-pre-gjs6srxqc2prdx42l343un-645163211794.europe-west2.run.app" />
+            </intent-filter>
+
+            <!-- Deep Link Intent Filter for ais-dev HTTPS -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="ais-dev-gjs6srxqc2prdx42l343un-645163211794.europe-west2.run.app" />
+            </intent-filter>
+
+            <!-- Custom URI Schemes to Open App directly from WhatsApp (depros:// and deprosboutique://) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="depros" />
+            </intent-filter>
+
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="deprosboutique" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".util.CatalogBackgroundSyncJobService"
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            android:exported="false" />
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.aistudio.deprosboutique.kqwmxp.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+
+</manifest>
