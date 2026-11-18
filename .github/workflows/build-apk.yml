@@ -38,6 +38,12 @@ jobs:
             yes | "$SDKMANAGER" --sdk_root="$SDK_DIR" --licenses > /dev/null 2>&1 || true
           fi
 
+      - name: Restore cached debug keystore
+        uses: actions/cache@v4
+        with:
+          path: debug.keystore
+          key: 247-shopping-debug-keystore-v1
+
       - name: Prepare debug keystore & env
         run: |
           if [ ! -s debug.keystore ] && [ -s debug.keystore.base64 ]; then

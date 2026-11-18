@@ -5316,8 +5316,18 @@ private fun SupabaseCloudTab(
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
+                val adminStoreProfile by viewModel.storeProfile.collectAsState()
                 var customPortalUrl by remember {
-                    mutableStateOf(com.example.util.WebPortalExporter.getSavedCustomPortalUrl(context))
+                    mutableStateOf(
+                        com.example.util.WebPortalExporter.getSavedCustomPortalUrl(context)
+                            .ifBlank { adminStoreProfile.apkDownloadUrl }
+                    )
+                }
+                LaunchedEffect(adminStoreProfile.apkDownloadUrl) {
+                    val savedPortal = com.example.util.WebPortalExporter.getSavedCustomPortalUrl(context)
+                    if (customPortalUrl.isBlank() && adminStoreProfile.apkDownloadUrl.isNotBlank()) {
+                        customPortalUrl = savedPortal.ifBlank { adminStoreProfile.apkDownloadUrl }
+                    }
                 }
                 var showWebPortalPreview by remember { mutableStateOf(false) }
                 var showShareHubDialog by remember { mutableStateOf(false) }
@@ -5687,11 +5697,13 @@ private fun SupabaseCloudTab(
                                             ).show()
                                         }
                                         else -> {
-                                            com.example.util.WebPortalExporter.saveCustomPortalUrl(context, candidate)
-                                            customPortalUrl = com.example.util.WebPortalExporter.getSavedCustomPortalUrl(context)
+                                            val savedClean = viewModel.savePermanentShareUrl(candidate)
+                                            customPortalUrl = savedClean.ifBlank {
+                                                com.example.util.WebPortalExporter.getSavedCustomPortalUrl(context)
+                                            }
                                             Toast.makeText(
                                                 context,
-                                                "✅ Saved GitHub Web Address! QR Codes & Share Links now use $customPortalUrl",
+                                                "✅ Saved permanently! QR Codes & Share Hub now auto-fill $customPortalUrl",
                                                 Toast.LENGTH_LONG
                                             ).show()
                                         }
@@ -8401,7 +8413,13 @@ private fun AdminSecuritySettingsTab(viewModel: MainViewModel) {
     var extraBankNumberInput by remember(storeProfile.extraBankAccountNumber) { mutableStateOf(storeProfile.extraBankAccountNumber) }
     var extraBankHolderInput by remember(storeProfile.extraBankAccountName) { mutableStateOf(storeProfile.extraBankAccountName) }
 
-    var apkDownloadUrlInput by remember(storeProfile.apkDownloadUrl) { mutableStateOf(storeProfile.apkDownloadUrl) }
+    var apkDownloadUrlInput by remember(storeProfile.apkDownloadUrl) {
+        mutableStateOf(
+            storeProfile.apkDownloadUrl.ifBlank {
+                com.example.util.WebPortalExporter.getSavedCustomPortalUrl(context)
+            }
+        )
+    }
     var latestVersionCodeInput by remember(storeProfile.latestAppVersionCode) { mutableStateOf(storeProfile.latestAppVersionCode.toString()) }
     var latestVersionNameInput by remember(storeProfile.latestAppVersionName) { mutableStateOf(storeProfile.latestAppVersionName) }
     var updateNotesInput by remember(storeProfile.updateReleaseNotes) { mutableStateOf(storeProfile.updateReleaseNotes) }

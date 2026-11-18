@@ -118,17 +118,40 @@ fun ShareAppDialog(
             !(viewModel?.repository?.supabaseSync?.isPlaceholderConfig(savedSbUrl, savedSbKey) ?: false)
     }
 
+    val fallbackSavedUrl = remember(storeProfile.apkDownloadUrl) {
+        val savedPortal = com.example.util.WebPortalExporter.getSavedCustomPortalUrl(context)
+        if (savedPortal.isNotBlank()) {
+            savedPortal
+        } else {
+            com.example.util.WebPortalExporter.normalizeWebUrl(storeProfile.apkDownloadUrl)
+                .takeIf { it.isNotBlank() && !com.example.util.WebPortalExporter.isAiStudioPreviewHost(it) }
+                ?: ""
+        }
+    }
+
     var customUrl by remember {
         mutableStateOf(
-            com.example.util.WebPortalExporter.getSavedCustomPortalUrl(context)
-                .ifBlank { sharePrefs.getString("custom_share_url", "") ?: "" }
+            fallbackSavedUrl.ifBlank { sharePrefs.getString("custom_share_url", "") ?: "" }
         )
     }
+
+    LaunchedEffect(storeProfile.apkDownloadUrl) {
+        val cleanApk = com.example.util.WebPortalExporter.normalizeWebUrl(storeProfile.apkDownloadUrl)
+        if (customUrl.isBlank() && cleanApk.isNotBlank() && !com.example.util.WebPortalExporter.isAiStudioPreviewHost(cleanApk)) {
+            customUrl = cleanApk
+            if (viewModel != null) {
+                viewModel.savePermanentShareUrl(cleanApk)
+            } else {
+                com.example.util.WebPortalExporter.saveCustomPortalUrl(context, cleanApk)
+            }
+        }
+    }
+
     var linkMode by remember {
         val savedMode = sharePrefs.getInt("share_link_mode", -1)
         val initialMode = when {
             savedMode in 0..2 -> savedMode
-            customUrl.isNotBlank() && !com.example.util.WebPortalExporter.isAiStudioPreviewHost(customUrl) -> 2
+            fallbackSavedUrl.isNotBlank() -> 2
             hasCloudCreds -> 1
             else -> 2
         }
@@ -158,7 +181,9 @@ fun ShareAppDialog(
     }
 
     val activeShareUrl = remember(rawShareUrl, includeCloudCreds, hasCloudCreds, savedSbUrl, savedSbKey, linkMode) {
-        if (linkMode == 1 || !rawShareUrl.startsWith("http", ignoreCase = true)) {
+        val isDirectApkLink = rawShareUrl.endsWith(".apk", ignoreCase = true) ||
+            rawShareUrl.contains("/releases/download/", ignoreCase = true)
+        if (linkMode == 1 || !rawShareUrl.startsWith("http", ignoreCase = true) || isDirectApkLink) {
             rawShareUrl
         } else if (includeCloudCreds && hasCloudCreds) {
             val sep = if (rawShareUrl.contains("?")) "&" else "?"
@@ -370,6 +395,50 @@ fun ShareAppDialog(
                                     .fillMaxWidth()
                                     .testTag("custom_share_url_input")
                             )
+                            val savedNorm = com.example.util.WebPortalExporter.normalizeWebUrl(customUrl)
+                            if (savedNorm.isNotBlank() && !com.example.util.WebPortalExporter.isAiStudioPreviewHost(savedNorm)) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "✅ Link saved permanently — ready for QR, WhatsApp & Updates",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = SuccessGreen
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Button(
+                                onClick = {
+                                    val normalized = if (viewModel != null) {
+                                        viewModel.savePermanentShareUrl(customUrl)
+                                    } else {
+                                        com.example.util.WebPortalExporter.saveCustomPortalUrl(context, customUrl)
+                                        com.example.util.WebPortalExporter.getSavedCustomPortalUrl(context)
+                                    }
+                                    if (normalized.isNotBlank()) {
+                                        customUrl = normalized
+                                        linkMode = 2
+                                        Toast.makeText(
+                                            context,
+                                            "✅ Saved permanently! It will stay inside this box automatically.",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    } else {
+                                        Toast.makeText(
+                                            context,
+                                            "⚠️ Paste a valid https:// GitHub link first.",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = Color.White),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(44.dp)
+                                    .testTag("save_permanent_share_url_button")
+                            ) {
+                                Text("Save Link Permanently", fontSize = 11.sp, fontWeight = FontWeight.Black)
+                            }
                             Spacer(modifier = Modifier.height(6.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),

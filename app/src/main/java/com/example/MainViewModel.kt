@@ -614,6 +614,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _latestVersionName.value = clean.latestAppVersionName
         _releaseNotes.value = clean.updateReleaseNotes
         _updateDownloadUrl.value = clean.apkDownloadUrl
+        if (clean.apkDownloadUrl.isNotBlank() &&
+            com.example.util.WebPortalExporter.getSavedCustomPortalUrl(getApplication()).isBlank()
+        ) {
+            com.example.util.WebPortalExporter.saveCustomPortalUrl(getApplication(), clean.apkDownloadUrl)
+        }
+    }
+
+    fun savePermanentShareUrl(rawUrl: String): String {
+        val cleanUrl = com.example.util.WebPortalExporter.normalizeWebUrl(rawUrl)
+        val ctx = getApplication<Application>()
+        if (cleanUrl.isBlank()) {
+            com.example.util.WebPortalExporter.saveCustomPortalUrl(ctx, "")
+            return ""
+        }
+        com.example.util.WebPortalExporter.saveCustomPortalUrl(ctx, cleanUrl)
+        val currentProfile = _storeProfile.value
+        val looksLikeApkLink = cleanUrl.endsWith(".apk", ignoreCase = true) ||
+            cleanUrl.contains("/releases/download/", ignoreCase = true)
+        if (currentProfile.apkDownloadUrl.isBlank() || looksLikeApkLink) {
+            val updated = currentProfile.copy(apkDownloadUrl = cleanUrl)
+            updateStoreProfile(updated)
+            viewModelScope.launch {
+                val manifest = AppUpdateManifest(
+                    versionCode = updated.latestAppVersionCode.coerceAtLeast(1),
+                    versionName = updated.latestAppVersionName.ifBlank { "1.0" },
+                    releaseNotes = updated.updateReleaseNotes.ifBlank {
+                        "New code & design updates for 24/7 SHOPPING."
+                    },
+                    downloadUrl = cleanUrl
+                )
+                repository.supabaseSync.publishAppUpdateManifest(manifest)
+            }
+        }
+        return cleanUrl
     }
 
     // Automatically persisted customer delivery information so it stays permanent on the Order Confirmation page
@@ -1139,6 +1173,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _releaseNotes.value = _storeProfile.value.updateReleaseNotes
         }
         _updateDownloadUrl.value = _storeProfile.value.apkDownloadUrl
+        if (_storeProfile.value.apkDownloadUrl.isNotBlank() &&
+            com.example.util.WebPortalExporter.getSavedCustomPortalUrl(application).isBlank()
+        ) {
+            com.example.util.WebPortalExporter.saveCustomPortalUrl(application, _storeProfile.value.apkDownloadUrl)
+        }
         CatalogBackgroundSyncJobService.schedulePeriodicSync(application)
 
         // Monitor restocked items for any customer Back-in-Stock Watch alerts
@@ -1362,6 +1401,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val effectiveDownloadUrl = remoteManifest?.downloadUrl?.takeIf { it.isNotBlank() }
                 ?: profile.apkDownloadUrl.takeIf { it.isNotBlank() }
                 ?: portalUrl
+
+            if (effectiveDownloadUrl.isNotBlank() &&
+                !com.example.util.WebPortalExporter.isAiStudioPreviewHost(effectiveDownloadUrl)
+            ) {
+                if (com.example.util.WebPortalExporter.getSavedCustomPortalUrl(getApplication()).isBlank()) {
+                    com.example.util.WebPortalExporter.saveCustomPortalUrl(getApplication(), effectiveDownloadUrl)
+                }
+                if (profile.apkDownloadUrl.isBlank()) {
+                    updateStoreProfile(profile.copy(apkDownloadUrl = effectiveDownloadUrl))
+                }
+            }
 
             if (effectiveRemoteCode > installedCode) {
                 _latestVersionName.value = effectiveRemoteName

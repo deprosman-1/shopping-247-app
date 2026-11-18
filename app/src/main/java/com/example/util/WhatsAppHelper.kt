@@ -38,11 +38,21 @@ object WhatsAppHelper {
         } else {
             "https://api.whatsapp.com/send?text=$encoded"
         }
-        try {
-            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-        } catch (_: Exception) {
-            Toast.makeText(context, "WhatsApp is not installed on this device.", Toast.LENGTH_SHORT).show()
+        val uri = Uri.parse(url)
+        val packagesToTry = listOf("com.whatsapp", "com.whatsapp.w4b", null)
+        for (pkg in packagesToTry) {
+            try {
+                val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                    if (pkg != null) setPackage(pkg)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+                return
+            } catch (_: Exception) {
+                // Try next WhatsApp target or system browser
+            }
         }
+        Toast.makeText(context, "WhatsApp is not installed on this device.", Toast.LENGTH_SHORT).show()
     }
 
     fun sendCustomerOrderReceiptToStore(
