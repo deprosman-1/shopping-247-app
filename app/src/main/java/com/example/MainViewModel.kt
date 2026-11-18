@@ -1919,7 +1919,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onGoogleSignInSuccess(onSuccess: () -> Unit) {
-        val user = repository.firebaseRepo.auth.currentUser
+        val user = repository.firebaseRepo.auth?.currentUser
         if (user != null) {
             val customer = Customer(
                 id = user.uid,

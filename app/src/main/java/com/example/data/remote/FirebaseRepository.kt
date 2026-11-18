@@ -9,6 +9,7 @@ import com.example.data.model.Order
 import com.example.data.model.OrderStatus
 import com.example.data.model.PaymentMethod
 import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
@@ -27,6 +28,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
@@ -48,8 +50,8 @@ fun handleFirestoreError(exception: Throwable, operationType: OperationType, pat
         ?: causes.firstOrNull { it !is CancellationException }
         ?: exception
 
-    val auth = FirebaseAuth.getInstance()
-    val currentUser = auth.currentUser
+    val auth = try { FirebaseAuth.getInstance() } catch (_: Exception) { null }
+    val currentUser = auth?.currentUser
 
     val providerInfoList = currentUser?.providerData?.map { provider ->
         JSONObject().apply {
@@ -78,34 +80,48 @@ fun handleFirestoreError(exception: Throwable, operationType: OperationType, pat
     return jsonString
 }
 
-class FirebaseRepository(private val db: FirebaseFirestore) {
+class FirebaseRepository(private val db: FirebaseFirestore?) {
 
     constructor(context: Context) : this(
-        FirebaseFirestore.getInstance(
-            context.applicationContext.getString(R.string.firestore_database_id)
-        )
+        try {
+            if (FirebaseApp.getApps(context.applicationContext).isNotEmpty()) {
+                FirebaseFirestore.getInstance(
+                    context.applicationContext.getString(R.string.firestore_database_id)
+                )
+            } else {
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
     )
 
-    val auth: FirebaseAuth = Firebase.auth
+    val auth: FirebaseAuth? = try {
+        if (db != null) Firebase.auth else null
+    } catch (_: Exception) {
+        null
+    }
 
-    private val _currentUserFlow = MutableStateFlow<FirebaseUser?>(auth.currentUser)
+    private val _currentUserFlow = MutableStateFlow<FirebaseUser?>(auth?.currentUser)
     val currentUserFlow: StateFlow<FirebaseUser?> = _currentUserFlow.asStateFlow()
 
     init {
-        auth.addAuthStateListener { firebaseAuth ->
+        auth?.addAuthStateListener { firebaseAuth ->
             _currentUserFlow.value = firebaseAuth.currentUser
         }
     }
 
     fun requireUserId(): String {
-        return auth.currentUser?.uid
+        return auth?.currentUser?.uid
             ?: throw IllegalStateException("User must be signed in with Google before accessing Firestore.")
     }
 
     suspend fun signInWithGoogleCredential(idToken: String): Result<FirebaseUser> = withContext(Dispatchers.IO) {
+        val activeAuth = auth
+            ?: return@withContext Result.failure(IllegalStateException("Firebase Auth is not initialized"))
         try {
             val credential = GoogleAuthProvider.getCredential(idToken, null)
-            val authResult = auth.signInWithCredential(credential).await()
+            val authResult = activeAuth.signInWithCredential(credential).await()
             val user = authResult.user ?: throw IllegalStateException("Google Sign-In returned null user")
             _currentUserFlow.value = user
             Result.success(user)
@@ -116,7 +132,7 @@ class FirebaseRepository(private val db: FirebaseFirestore) {
     }
 
     fun signOut() {
-        auth.signOut()
+        auth?.signOut()
         _currentUserFlow.value = null
     }
 
@@ -124,8 +140,10 @@ class FirebaseRepository(private val db: FirebaseFirestore) {
     // Customer User Profile
     // -------------------------------------------------------------
     suspend fun syncUserProfile(customer: Customer): Result<Unit> = withContext(Dispatchers.IO) {
-        val uid = auth.currentUser?.uid ?: customer.id
-        val docRef = db.collection("users").document(uid)
+        val activeDb = db
+            ?: return@withContext Result.failure(IllegalStateException("Firestore is not initialized"))
+        val uid = auth?.currentUser?.uid ?: customer.id
+        val docRef = activeDb.collection("users").document(uid)
         val payload = mapOf(
             "userId" to uid,
             "displayName" to customer.fullName,
@@ -146,8 +164,10 @@ class FirebaseRepository(private val db: FirebaseFirestore) {
     // Customer Orders Sync & Realtime Stream
     // -------------------------------------------------------------
     suspend fun syncOrder(order: Order): Result<Unit> = withContext(Dispatchers.IO) {
-        val uid = auth.currentUser?.uid ?: order.customerId
-        val docRef = db.collection("users").document(uid).collection("orders").document(order.orderId)
+        val activeDb = db
+            ?: return@withContext Result.failure(IllegalStateException("Firestore is not initialized"))
+        val uid = auth?.currentUser?.uid ?: order.customerId
+        val docRef = activeDb.collection("users").document(uid).collection("orders").document(order.orderId)
         val payload = mapOf(
             "orderId" to order.orderId,
             "userId" to uid,
@@ -175,7 +195,8 @@ class FirebaseRepository(private val db: FirebaseFirestore) {
     }
 
     fun observeUserOrders(uid: String): Flow<List<Order>> {
-        val colRef = db.collection("users").document(uid).collection("orders")
+        val activeDb = db ?: return emptyFlow()
+        val colRef = activeDb.collection("users").document(uid).collection("orders")
         return colRef.snapshots().map { snapshot ->
             snapshot.documents.mapNotNull { doc ->
                 val orderId = doc.getString("orderId") ?: doc.id
@@ -210,7 +231,7 @@ class FirebaseRepository(private val db: FirebaseFirestore) {
                 .filterIsInstance<FirebaseFirestoreException>()
                 .firstOrNull()
             if (firestoreError == null && error is CancellationException) throw error
-            if (auth.currentUser?.uid == uid) {
+            if (auth?.currentUser?.uid == uid) {
                 handleFirestoreError(firestoreError ?: error, OperationType.LIST, colRef.path)
             }
             throw error
@@ -221,8 +242,10 @@ class FirebaseRepository(private val db: FirebaseFirestore) {
     // Wishlist Sync & Stream
     // -------------------------------------------------------------
     suspend fun setWishlistProduct(productId: String, isWishlisted: Boolean, customerId: String = ""): Result<Unit> = withContext(Dispatchers.IO) {
-        val uid = auth.currentUser?.uid ?: customerId.ifBlank { "guest_user" }
-        val docRef = db.collection("users").document(uid).collection("wishlist").document(productId)
+        val activeDb = db
+            ?: return@withContext Result.failure(IllegalStateException("Firestore is not initialized"))
+        val uid = auth?.currentUser?.uid ?: customerId.ifBlank { "guest_user" }
+        val docRef = activeDb.collection("users").document(uid).collection("wishlist").document(productId)
         try {
             if (isWishlisted) {
                 val payload = mapOf(
@@ -242,7 +265,8 @@ class FirebaseRepository(private val db: FirebaseFirestore) {
     }
 
     fun observeUserWishlist(uid: String): Flow<Set<String>> {
-        val colRef = db.collection("users").document(uid).collection("wishlist")
+        val activeDb = db ?: return emptyFlow()
+        val colRef = activeDb.collection("users").document(uid).collection("wishlist")
         return colRef.snapshots().map { snapshot ->
             snapshot.documents.mapNotNull { it.getString("productId") ?: it.id }.toSet()
         }.catch { error ->
@@ -250,7 +274,7 @@ class FirebaseRepository(private val db: FirebaseFirestore) {
                 .filterIsInstance<FirebaseFirestoreException>()
                 .firstOrNull()
             if (firestoreError == null && error is CancellationException) throw error
-            if (auth.currentUser?.uid == uid) {
+            if (auth?.currentUser?.uid == uid) {
                 handleFirestoreError(firestoreError ?: error, OperationType.LIST, colRef.path)
             }
             throw error
