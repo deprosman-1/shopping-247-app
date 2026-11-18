@@ -552,7 +552,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             extraBankAccountName = adminPrefs.getString("store_extra_bank_holder", "") ?: "",
             apkDownloadUrl = com.example.util.WebPortalExporter.normalizeWebUrl(
                 adminPrefs.getString("apk_download_url", "") ?: ""
-            ).also { cleanSavedUrl ->
+            ).let { url ->
+                if (com.example.util.WebPortalExporter.isLegacyDeprecatedHost(url)) "" else url
+            }.also { cleanSavedUrl ->
                 val rawSavedUrl = adminPrefs.getString("apk_download_url", "") ?: ""
                 if (rawSavedUrl.isNotBlank() && cleanSavedUrl.isBlank()) {
                     adminPrefs.edit().putString("apk_download_url", "").apply()
@@ -1172,8 +1174,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_storeProfile.value.updateReleaseNotes.isNotBlank()) {
             _releaseNotes.value = _storeProfile.value.updateReleaseNotes
         }
+        com.example.util.WebPortalExporter.purgeLegacyApkUrlPref(application)
         _updateDownloadUrl.value = _storeProfile.value.apkDownloadUrl
         if (_storeProfile.value.apkDownloadUrl.isNotBlank() &&
+            !com.example.util.WebPortalExporter.isLegacyDeprecatedHost(_storeProfile.value.apkDownloadUrl) &&
             com.example.util.WebPortalExporter.getSavedCustomPortalUrl(application).isBlank()
         ) {
             com.example.util.WebPortalExporter.saveCustomPortalUrl(application, _storeProfile.value.apkDownloadUrl)
@@ -1398,17 +1402,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ?: profile.latestAppVersionName.ifBlank { installedName }
             val effectiveNotes = remoteManifest?.releaseNotes?.takeIf { it.isNotBlank() }
                 ?: profile.updateReleaseNotes
-            val effectiveDownloadUrl = remoteManifest?.downloadUrl?.takeIf { it.isNotBlank() }
-                ?: profile.apkDownloadUrl.takeIf { it.isNotBlank() }
-                ?: portalUrl
+            val effectiveDownloadUrl = listOfNotNull(
+                remoteManifest?.downloadUrl,
+                profile.apkDownloadUrl,
+                portalUrl
+            ).map { com.example.util.WebPortalExporter.normalizeWebUrl(it) }
+                .firstOrNull {
+                    it.isNotBlank() &&
+                        !com.example.util.WebPortalExporter.isAiStudioPreviewHost(it) &&
+                        !com.example.util.WebPortalExporter.isLegacyDeprecatedHost(it)
+                }.orEmpty()
 
-            if (effectiveDownloadUrl.isNotBlank() &&
-                !com.example.util.WebPortalExporter.isAiStudioPreviewHost(effectiveDownloadUrl)
-            ) {
+            if (effectiveDownloadUrl.isNotBlank()) {
                 if (com.example.util.WebPortalExporter.getSavedCustomPortalUrl(getApplication()).isBlank()) {
                     com.example.util.WebPortalExporter.saveCustomPortalUrl(getApplication(), effectiveDownloadUrl)
                 }
-                if (profile.apkDownloadUrl.isBlank()) {
+                if (profile.apkDownloadUrl.isBlank() ||
+                    com.example.util.WebPortalExporter.isLegacyDeprecatedHost(profile.apkDownloadUrl)
+                ) {
                     updateStoreProfile(profile.copy(apkDownloadUrl = effectiveDownloadUrl))
                 }
             }

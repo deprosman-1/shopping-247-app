@@ -119,19 +119,27 @@ fun ShareAppDialog(
     }
 
     val fallbackSavedUrl = remember(storeProfile.apkDownloadUrl) {
+        com.example.util.WebPortalExporter.purgeLegacyApkUrlPref(context)
         val savedPortal = com.example.util.WebPortalExporter.getSavedCustomPortalUrl(context)
-        if (savedPortal.isNotBlank()) {
+        if (savedPortal.isNotBlank() && !com.example.util.WebPortalExporter.isLegacyDeprecatedHost(savedPortal)) {
             savedPortal
         } else {
             com.example.util.WebPortalExporter.normalizeWebUrl(storeProfile.apkDownloadUrl)
-                .takeIf { it.isNotBlank() && !com.example.util.WebPortalExporter.isAiStudioPreviewHost(it) }
+                .takeIf {
+                    it.isNotBlank() &&
+                        !com.example.util.WebPortalExporter.isAiStudioPreviewHost(it) &&
+                        !com.example.util.WebPortalExporter.isLegacyDeprecatedHost(it)
+                }
                 ?: ""
         }
     }
 
     var customUrl by remember {
+        val prefFallback = (sharePrefs.getString("custom_share_url", "") ?: "")
+            .takeIf { !com.example.util.WebPortalExporter.isLegacyDeprecatedHost(it) }
+            ?: ""
         mutableStateOf(
-            fallbackSavedUrl.ifBlank { sharePrefs.getString("custom_share_url", "") ?: "" }
+            fallbackSavedUrl.ifBlank { prefFallback }
         )
     }
 
@@ -396,7 +404,51 @@ fun ShareAppDialog(
                                     .testTag("custom_share_url_input")
                             )
                             val savedNorm = com.example.util.WebPortalExporter.normalizeWebUrl(customUrl)
-                            if (savedNorm.isNotBlank() && !com.example.util.WebPortalExporter.isAiStudioPreviewHost(savedNorm)) {
+                            val suggestedPagesUrl = remember(savedNorm) {
+                                com.example.util.WebPortalExporter.suggestGitHubPagesUrlIfRepoDashboard(savedNorm)
+                            }
+                            if (suggestedPagesUrl != null) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = AccentGold.copy(alpha = 0.14f),
+                                    border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.6f)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp)) {
+                                        Text(
+                                            text = "⚠️ That opens GitHub's code dashboard, not your store!",
+                                            fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = AccentGold
+                                        )
+                                        Text(
+                                            text = "Upload index.html, turn on GitHub Pages (Settings → Pages), then use:\n$suggestedPagesUrl",
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        OutlinedButton(
+                                            onClick = {
+                                                customUrl = suggestedPagesUrl
+                                                if (viewModel != null) {
+                                                    viewModel.savePermanentShareUrl(suggestedPagesUrl)
+                                                } else {
+                                                    com.example.util.WebPortalExporter.saveCustomPortalUrl(context, suggestedPagesUrl)
+                                                }
+                                                Toast.makeText(
+                                                    context,
+                                                    "✅ Switched to GitHub Pages link: $suggestedPagesUrl",
+                                                    Toast.LENGTH_LONG
+                                                ).show()
+                                            },
+                                            modifier = Modifier.fillMaxWidth().height(48.dp)
+                                        ) {
+                                            Text("Use GitHub Pages Link Instead", fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            } else if (savedNorm.isNotBlank() && !com.example.util.WebPortalExporter.isAiStudioPreviewHost(savedNorm)) {
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
                                     text = "✅ Link saved permanently — ready for QR, WhatsApp & Updates",

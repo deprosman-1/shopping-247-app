@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#064E3B" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="24/7 SHOPPING" />
-  <title>24/7 SHOPPING — Official Store Portal & App Link</title>
+  <title>DEPROS 24/7 SMART SHOPPING MALL — Official Store Portal & App Link</title>
   <link rel="manifest" id="pwaManifestLink" href="" />
   <style>
     :root {
@@ -188,17 +188,17 @@
     <div class="hero">
       <div class="pill">✅ DEPROS 24/7 SMART SHOPPING MALL • OFFICIAL LIVE STORE PORTAL</div>
       <h1>DEPROS 24/7 SMART SHOPPING MALL</h1>
-      <div class="sub">Open Installed App, Connect Store Sync, or Browse Live Storefront Catalog</div>
+      <div class="sub">Open Installed App, Download Android APK, or Browse Live Storefront Catalog</div>
 
       <div class="actions">
-        <a id="openAppBtn" href="#" class="btn btn-cyan">⚡ Open DEPROS 24/7 SMART SHOPPING MALL App & Connect</a>
+        <a id="openAppBtn" href="#" class="btn btn-cyan">⚡ Open 24/7 SHOPPING App & Connect</a>
         <button id="copySyncBtn" class="btn btn-green" onclick="copySyncLink()">📋 Copy Store Sync Link</button>
-        <a id="downloadApkBtn" href="#" class="btn btn-gold" style="display:none;">⬇️ Download Android APK</a>
+        <a id="downloadApkBtn" href="#" class="btn btn-gold">⬇️ Download Android APK</a>
         <button id="installWebBtn" class="btn btn-dark" onclick="installWebApp()">💻 Install as Web App</button>
       </div>
 
       <div class="status-note" id="syncStatusNote">
-        📱 <strong>Already have the DEPROS 24/7 SMART SHOPPING MALL APK installed?</strong> Tap <strong>"Open DEPROS 24/7 SMART SHOPPING MALL App & Connect"</strong> above. If your phone browser asks for confirmation or doesn't auto-switch, tap <strong>"Copy Store Sync Link"</strong>, open the <strong>DEPROS 24/7 SMART SHOPPING MALL</strong> app → <strong>Account</strong> → <strong>Link Now</strong> → <strong>Paste</strong>.
+        📱 <strong>Already have the DEPROS 24/7 SMART SHOPPING MALL APK installed?</strong> Tap <strong>"Open 24/7 SHOPPING App & Connect"</strong> above. If your phone browser asks for confirmation or doesn't auto-switch, tap <strong>"Copy Store Sync Link"</strong>, open the app → <strong>Account</strong> → <strong>Link Now</strong> → <strong>Paste</strong>.
       </div>
     </div>
 
@@ -214,24 +214,18 @@
   </div>
 
   <script>
-    const EMBEDDED_SB_URL = "https:\/\/jcgdjczxhaiwvszvevbg.supabase.co";
+    const EMBEDDED_SB_URL = "https://jcgdjczxhaiwvszvevbg.supabase.co";
     const EMBEDDED_SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjZ2RqY3p4aGFpd3ZzenZldmJnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ0OTE0MDEsImV4cCI6MjExMDA2NzQwMX0.P0npszSiVsxZcEGti0GLDNOzeLO990VwJa-p1V6cWuY";
     const ANDROID_PACKAGE = "com.aistudio.deprosboutique.kqwmxp";
-    const APK_DOWNLOAD_URL = "https:\/\/github.com\/deprosman-1\/shopping-247-app.git";
+    const APK_DOWNLOAD_URL = "https://github.com/deprosman-1/shopping-247-app/releases/download/v1.0-latest/247-shopping.apk";
 
     const params = new URLSearchParams(window.location.search);
     const sbUrl = (params.get("sb_url") || EMBEDDED_SB_URL || "").trim().replace(/\/+$/, "");
     const sbKey = (params.get("sb_key") || EMBEDDED_SB_KEY || "").trim();
 
     const apkBtn = document.getElementById("downloadApkBtn");
-    const cleanApkUrl = (typeof APK_DOWNLOAD_URL === "string" ? APK_DOWNLOAD_URL.trim() : "");
-    if (cleanApkUrl && /^https?:\/\/[^\s<>]+$/i.test(cleanApkUrl) && !cleanApkUrl.includes("<")) {
-      apkBtn.href = cleanApkUrl;
-      apkBtn.style.display = "flex";
-    } else {
-      apkBtn.removeAttribute("href");
-      apkBtn.style.display = "none";
-    }
+    apkBtn.href = APK_DOWNLOAD_URL;
+    apkBtn.style.display = "flex";
 
     const customSchemeLink = (sbUrl && sbKey)
       ? ("depros://connect?sb_url=" + encodeURIComponent(sbUrl) + "&sb_key=" + encodeURIComponent(sbKey))

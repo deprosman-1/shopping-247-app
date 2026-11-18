@@ -1506,7 +1506,9 @@ class SupabaseSyncService(
                             val notes = obj.optString("releaseNotes", "").trim()
                             val dlUrl = com.example.util.WebPortalExporter.normalizeWebUrl(
                                 obj.optString("updateUrl", "")
-                            )
+                            ).let { parsed ->
+                                if (com.example.util.WebPortalExporter.isLegacyDeprecatedHost(parsed)) "" else parsed
+                            }
                             return@withContext Result.success(
                                 AppUpdateManifest(
                                     versionCode = vCode,

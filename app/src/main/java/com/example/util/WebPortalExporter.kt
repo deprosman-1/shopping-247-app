@@ -51,28 +51,67 @@ object WebPortalExporter {
             lower.contains("ais-dev-gjs6srxqc2prdx42l343un")
     }
 
+    fun isLegacyDeprecatedHost(url: String): Boolean {
+        val lower = url.lowercase()
+        return lower.contains("netlify.app") ||
+            lower.contains("netlify.com") ||
+            lower.contains("tiiny.site") ||
+            lower.contains("tiiny.host")
+    }
+
+    fun suggestGitHubPagesUrlIfRepoDashboard(url: String): String? {
+        val cleaned = url.trim()
+        val match = Regex("""^https?://(?:www\.)?github\.com/([^/\s]+)/([^/\s?#]+)(?:/.*)?$""", RegexOption.IGNORE_CASE)
+            .find(cleaned) ?: return null
+        val owner = match.groupValues[1]
+        val repo = match.groupValues[2].removeSuffix(".git")
+        val lowerUrl = cleaned.lowercase()
+        if (owner.equals("new", ignoreCase = true) ||
+            owner.equals("settings", ignoreCase = true) ||
+            lowerUrl.contains("/releases/download/") ||
+            lowerUrl.endsWith(".apk")
+        ) {
+            return null
+        }
+        return "https://${owner.lowercase()}.github.io/${repo}/"
+    }
+
     fun getSavedCustomPortalUrl(context: Context): String {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val raw = prefs.getString(KEY_CUSTOM_PORTAL_URL, "") ?: ""
         val normalized = normalizeWebUrl(raw)
+        if (normalized.isNotBlank() && isLegacyDeprecatedHost(normalized)) {
+            prefs.edit().remove(KEY_CUSTOM_PORTAL_URL).apply()
+            return ""
+        }
         return if (normalized.isNotBlank() && !isAiStudioPreviewHost(normalized)) normalized else ""
     }
 
     fun saveCustomPortalUrl(context: Context, rawUrl: String) {
         val normalized = normalizeWebUrl(rawUrl)
+        val cleanToSave = if (isLegacyDeprecatedHost(normalized)) "" else normalized
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val editor = prefs.edit().putString(KEY_CUSTOM_PORTAL_URL, normalized)
-        if (normalized.isNotBlank()) {
+        val editor = prefs.edit().putString(KEY_CUSTOM_PORTAL_URL, cleanToSave)
+        if (cleanToSave.isNotBlank()) {
             editor.putInt(KEY_SHARE_MODE, 2)
         }
         editor.apply()
     }
 
     fun purgeLegacyApkUrlPref(context: Context) {
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .remove("custom_apk_download_url")
-            .apply()
+        val sharePrefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val shareEditor = sharePrefs.edit().remove("custom_apk_download_url")
+        val savedCustom = sharePrefs.getString(KEY_CUSTOM_PORTAL_URL, "") ?: ""
+        if (isLegacyDeprecatedHost(savedCustom)) {
+            shareEditor.remove(KEY_CUSTOM_PORTAL_URL)
+        }
+        shareEditor.apply()
+
+        val adminPrefs = context.getSharedPreferences("depros_admin_settings", Context.MODE_PRIVATE)
+        val savedApk = adminPrefs.getString("apk_download_url", "") ?: ""
+        if (isLegacyDeprecatedHost(savedApk)) {
+            adminPrefs.edit().remove("apk_download_url").apply()
+        }
     }
 
     fun openExternalUrl(context: Context, url: String) {
