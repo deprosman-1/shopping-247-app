@@ -234,6 +234,14 @@ fun ProductDetailScreen(
                     IconButton(
                         onClick = {
                             val storeTitle = storeProfile.storeName.ifBlank { "24/7 SHOPPING" }
+                            val portalBase = com.example.util.WebPortalExporter.getSavedCustomPortalUrl(context)
+                                .ifBlank {
+                                    com.example.util.WebPortalExporter.normalizePortalUrl(storeProfile.apkDownloadUrl)
+                                        .takeUnless { com.example.util.WebPortalExporter.isDirectApkReleaseUrl(it) }
+                                        .orEmpty()
+                                }
+                                .ifBlank { DEPROS_DOWNLOAD_URL }
+                            val shareTargetUrl = viewModel.buildCustomerSyncLink(portalBase) ?: "${portalBase.trimEnd('/')}/?open_app=1"
                             val shareProductMsg = buildString {
                                 append("🛍️ Check out ${product.title} at $storeTitle!\n")
                                 append("Price: ${nairaFormat.format(calculatedUnitPrice)}\n")
@@ -243,7 +251,7 @@ fun ProductDetailScreen(
                                 if (storeProfile.storeAddress.isNotBlank()) {
                                     append("📍 Location: ${storeProfile.storeAddress}\n")
                                 }
-                                append("\n📱 Download our Official App:\n$DEPROS_DOWNLOAD_URL")
+                                append("\n📲 Open $storeTitle App & Store:\n$shareTargetUrl")
                             }
 
                             val shareIntent = Intent(Intent.ACTION_SEND).apply {
@@ -425,6 +433,7 @@ fun ProductDetailScreen(
                     ) {
                         HorizontalPager(
                             state = pagerState,
+                            beyondViewportPageCount = 1,
                             modifier = Modifier.fillMaxSize()
                         ) { page ->
                             val pageUrl = galleryImages[page]

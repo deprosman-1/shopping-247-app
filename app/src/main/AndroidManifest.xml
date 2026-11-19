@@ -88,6 +88,48 @@
                     android:host="ais-dev-gjs6srxqc2prdx42l343un-645163211794.europe-west2.run.app" />
             </intent-filter>
 
+            <!-- Deep Link Intent Filter for GitHub Pages Live Store Portal -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="deprosman-1.github.io"
+                    android:pathPrefix="/shopping-247-app" />
+            </intent-filter>
+
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="http"
+                    android:host="deprosman-1.github.io"
+                    android:pathPrefix="/shopping-247-app" />
+            </intent-filter>
+
+            <!-- Catch legacy repo root shares (exact path only so /releases/download/*.apk still downloads normally) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="github.com"
+                    android:path="/deprosman-1/shopping-247-app" />
+            </intent-filter>
+
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="github.com"
+                    android:path="/deprosman-1/shopping-247-app/" />
+            </intent-filter>
+
             <!-- Custom URI Schemes to Open App directly from WhatsApp (depros:// and deprosboutique://) -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />

@@ -1506,11 +1506,9 @@ class SupabaseSyncService(
                             val vCode = obj.optInt("versionCode", 1)
                             val vName = obj.optString("versionName", "1.0").trim().ifBlank { "1.0" }
                             val notes = obj.optString("releaseNotes", "").trim()
-                            val dlUrl = com.example.util.WebPortalExporter.normalizeWebUrl(
+                            val dlUrl = com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(
                                 obj.optString("updateUrl", "")
-                            ).let { parsed ->
-                                if (com.example.util.WebPortalExporter.isLegacyDeprecatedHost(parsed)) "" else parsed
-                            }
+                            )
                             return@withContext Result.success(
                                 AppUpdateManifest(
                                     versionCode = vCode,

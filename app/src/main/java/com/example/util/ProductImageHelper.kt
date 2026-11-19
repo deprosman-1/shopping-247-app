@@ -106,7 +106,8 @@ object ProductImageHelper {
 
     /**
      * Builds a pinned ImageRequest that loads ONLY the product's actual assigned imageUrl
-     * with strong memory/disk cache keys, fast GPU downsampling for cards, and crossfade disabled.
+     * with strong memory/disk cache keys, instant thumbnail-to-detail RAM handoff via
+     * placeholderMemoryCacheKey, fast GPU downsampling, and crossfade disabled.
      */
     fun buildImageRequest(
         context: Context,
@@ -116,17 +117,20 @@ object ProductImageHelper {
         highRes: Boolean = false
     ): ImageRequest {
         val cleanUrl = imageUrl?.trim().orEmpty()
+        val fallbackRes = getFallbackDrawableRes(category, title)
         if (cleanUrl.isBlank()) {
             return ImageRequest.Builder(context)
-                .data(null)
+                .data(fallbackRes)
                 .crossfade(false)
                 .build()
         }
 
-        val resolvedUrl = if (!highRes && cleanUrl.contains("images.unsplash.com", ignoreCase = true)) {
-            cleanUrl
-                .replace("w=1200", "w=480")
-                .replace("q=95", "q=82")
+        val resolvedUrl = if (cleanUrl.contains("images.unsplash.com", ignoreCase = true)) {
+            if (!highRes) {
+                cleanUrl.replace("w=1200", "w=480").replace("q=95", "q=82")
+            } else {
+                cleanUrl.replace("w=1200", "w=800").replace("q=95", "q=85")
+            }
         } else {
             cleanUrl
         }
@@ -136,29 +140,33 @@ object ProductImageHelper {
         } else {
             resolvedUrl
         }
-        val baseKey = if (resolvedUrl.length > 160) resolvedUrl.hashCode().toString() else resolvedUrl
-        val cacheKey = if (highRes) "${baseKey}#orig" else "${baseKey}#thumb480"
+        val canonicalKey = if (cleanUrl.length > 160) cleanUrl.hashCode().toString() else cleanUrl
+        val thumbKey = "${canonicalKey}#thumb480"
+        val cacheKey = if (highRes) "${canonicalKey}#detail1080" else thumbKey
 
         return ImageRequest.Builder(context)
             .data(resolvedData)
             .memoryCacheKey(cacheKey)
             .diskCacheKey(cacheKey)
-            .memoryCachePolicy(CachePolicy.ENABLED)
-            .diskCachePolicy(CachePolicy.ENABLED)
-            .networkCachePolicy(CachePolicy.ENABLED)
-            .crossfade(false)
-            .allowRgb565(false)
             .apply {
                 if (highRes) {
-                    size(coil.size.Size.ORIGINAL)
-                    precision(coil.size.Precision.EXACT)
-                    allowHardware(false)
+                    // Instantly render cached catalog bitmap on frame 0 so single-click never goes blank
+                    placeholderMemoryCacheKey(thumbKey)
+                    size(1080, 1080)
+                    precision(coil.size.Precision.INEXACT)
+                    allowHardware(true)
                 } else {
                     size(480, 480)
                     precision(coil.size.Precision.INEXACT)
                     allowHardware(true)
                 }
             }
+            .error(fallbackRes)
+            .memoryCachePolicy(CachePolicy.ENABLED)
+            .diskCachePolicy(CachePolicy.ENABLED)
+            .networkCachePolicy(CachePolicy.ENABLED)
+            .crossfade(false)
+            .allowRgb565(false)
             .build()
     }
 
@@ -185,7 +193,7 @@ object ProductImageHelper {
     fun preloadProductImages(
         context: Context,
         products: List<com.example.data.model.Product>,
-        limit: Int = 24
+        limit: Int = 60
     ) {
         try {
             val loader = coil.Coil.imageLoader(context)
@@ -199,6 +207,23 @@ object ProductImageHelper {
                     if (clean.isNotBlank() && clean != primary) {
                         loader.enqueue(buildImageRequest(context, clean, prod.category, prod.title, highRes = false))
                     }
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    fun preloadSingleProductGallery(
+        context: Context,
+        product: com.example.data.model.Product
+    ) {
+        try {
+            val loader = coil.Coil.imageLoader(context)
+            product.allImageUrls.forEach { url ->
+                val clean = url.trim()
+                if (clean.isNotBlank()) {
+                    loader.enqueue(buildImageRequest(context, clean, product.category, product.title, highRes = false))
+                    loader.enqueue(buildImageRequest(context, clean, product.category, product.title, highRes = true))
                 }
             }
         } catch (_: Exception) {

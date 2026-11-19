@@ -18,6 +18,9 @@ object WebPortalExporter {
     private const val KEY_CUSTOM_PORTAL_URL = "custom_share_url"
     private const val APP_PACKAGE = "com.aistudio.deprosboutique.kqwmxp"
 
+    const val DEFAULT_LIVE_PORTAL_URL = "https://deprosman-1.github.io/shopping-247-app/"
+    const val DEFAULT_GITHUB_APK_RELEASE_URL = "https://github.com/deprosman-1/shopping-247-app/releases/download/v1.0-latest/247-shopping.apk"
+
     fun normalizeWebUrl(raw: String): String {
         val cleaned = raw.trim().replace("\u200B", "")
         if (cleaned.isBlank() ||
@@ -59,15 +62,20 @@ object WebPortalExporter {
             lower.contains("tiiny.host")
     }
 
+    fun isDirectApkReleaseUrl(url: String): Boolean {
+        val lower = url.trim().lowercase()
+        return lower.endsWith(".apk") || lower.contains("/releases/download/")
+    }
+
     fun suggestGitHubPagesUrlIfRepoDashboard(url: String): String? {
         val cleaned = url.trim()
-        val match = Regex("""^https?://(?:www\.)?github\.com/([^/\s]+)/([^/\s?#]+)(?:/.*)?$""", RegexOption.IGNORE_CASE)
+        val match = Regex("""^https?://(?:www\.)?github\.com/([^/\s?#]+)/([^/\s?#]+)(?:[/?#].*)?$""", RegexOption.IGNORE_CASE)
             .find(cleaned) ?: return null
         val owner = match.groupValues[1]
         val repo = match.groupValues[2].removeSuffix(".git")
         val lowerUrl = cleaned.lowercase()
-        if (owner.equals("new", ignoreCase = true) ||
-            owner.equals("settings", ignoreCase = true) ||
+        val reservedOwners = setOf("new", "settings", "login", "signup", "features", "marketplace", "explore", "topics", "orgs", "apps")
+        if (owner.lowercase() in reservedOwners ||
             lowerUrl.contains("/releases/download/") ||
             lowerUrl.endsWith(".apk")
         ) {
@@ -76,20 +84,75 @@ object WebPortalExporter {
         return "https://${owner.lowercase()}.github.io/${repo}/"
     }
 
+    private fun stripSyncQueryParams(url: String): String {
+        val qIdx = url.indexOf('?')
+        if (qIdx < 0) return url
+        val base = url.substring(0, qIdx)
+        val query = url.substring(qIdx + 1)
+        val kept = query.split("&").filter { param ->
+            val key = param.substringBefore("=").lowercase()
+            key.isNotBlank() && key !in setOf("sb_url", "sb_key", "open_app", "web")
+        }
+        return if (kept.isEmpty()) base else "$base?${kept.joinToString("&")}"
+    }
+
+    /**
+     * Normalizes a storefront/share web portal URL:
+     * - Repairs scheme & typos
+     * - Strips accidental appended sync query params (`sb_url`, `sb_key`, `open_app`, `web`)
+     * - Blocks deprecated hosts, AI Studio preview hosts, and bare github.com/new
+     * - Auto-converts any GitHub repository dashboard URL (`https://github.com/USER/REPO`) into
+     *   its live GitHub Pages storefront URL (`https://user.github.io/REPO/`) so WhatsApp shares
+     *   never open a GitHub code dashboard.
+     */
+    fun normalizePortalUrl(raw: String): String {
+        val normalized = normalizeWebUrl(raw)
+        if (normalized.isBlank()) return ""
+        val withoutSyncParams = stripSyncQueryParams(normalized)
+        if (isAiStudioPreviewHost(withoutSyncParams) || isLegacyDeprecatedHost(withoutSyncParams)) {
+            return ""
+        }
+        if (withoutSyncParams.equals("https://github.com", ignoreCase = true) ||
+            withoutSyncParams.equals("https://github.com/", ignoreCase = true) ||
+            withoutSyncParams.equals("https://github.com/new", ignoreCase = true)
+        ) {
+            return ""
+        }
+        val githubPages = suggestGitHubPagesUrlIfRepoDashboard(withoutSyncParams)
+        if (githubPages != null) {
+            return githubPages
+        }
+        return withoutSyncParams
+    }
+
+    /**
+     * Normalizes an APK update/download URL: preserves direct `.apk` / `/releases/download/` URLs,
+     * while auto-converting accidental GitHub repository dashboard URLs into GitHub Pages URLs
+     * and stripping legacy/preview hosts.
+     */
+    fun normalizeApkOrPortalUrl(raw: String): String {
+        val normalized = normalizeWebUrl(raw)
+        if (normalized.isBlank()) return ""
+        if (isDirectApkReleaseUrl(normalized)) return normalized
+        return normalizePortalUrl(normalized)
+    }
+
     fun getSavedCustomPortalUrl(context: Context): String {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val raw = prefs.getString(KEY_CUSTOM_PORTAL_URL, "") ?: ""
-        val normalized = normalizeWebUrl(raw)
-        if (normalized.isNotBlank() && isLegacyDeprecatedHost(normalized)) {
-            prefs.edit().remove(KEY_CUSTOM_PORTAL_URL).apply()
-            return ""
+        if (raw.isBlank()) return ""
+        val clean = normalizePortalUrl(raw)
+        val sanitized = if (isDirectApkReleaseUrl(clean)) "" else clean
+        if (sanitized != raw.trim()) {
+            prefs.edit().putString(KEY_CUSTOM_PORTAL_URL, sanitized).apply()
         }
-        return if (normalized.isNotBlank() && !isAiStudioPreviewHost(normalized)) normalized else ""
+        return sanitized
     }
 
     fun saveCustomPortalUrl(context: Context, rawUrl: String) {
-        val normalized = normalizeWebUrl(rawUrl)
-        val cleanToSave = if (isLegacyDeprecatedHost(normalized)) "" else normalized
+        val cleanToSave = normalizePortalUrl(rawUrl).let {
+            if (isDirectApkReleaseUrl(it)) "" else it
+        }
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val editor = prefs.edit().putString(KEY_CUSTOM_PORTAL_URL, cleanToSave)
         if (cleanToSave.isNotBlank()) {
@@ -102,15 +165,27 @@ object WebPortalExporter {
         val sharePrefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val shareEditor = sharePrefs.edit().remove("custom_apk_download_url")
         val savedCustom = sharePrefs.getString(KEY_CUSTOM_PORTAL_URL, "") ?: ""
-        if (isLegacyDeprecatedHost(savedCustom)) {
-            shareEditor.remove(KEY_CUSTOM_PORTAL_URL)
+        if (savedCustom.isNotBlank()) {
+            val cleanedCustom = normalizePortalUrl(savedCustom).let {
+                if (isDirectApkReleaseUrl(it)) "" else it
+            }
+            if (cleanedCustom != savedCustom) {
+                if (cleanedCustom.isBlank()) {
+                    shareEditor.remove(KEY_CUSTOM_PORTAL_URL)
+                } else {
+                    shareEditor.putString(KEY_CUSTOM_PORTAL_URL, cleanedCustom)
+                }
+            }
         }
         shareEditor.apply()
 
         val adminPrefs = context.getSharedPreferences("depros_admin_settings", Context.MODE_PRIVATE)
         val savedApk = adminPrefs.getString("apk_download_url", "") ?: ""
-        if (isLegacyDeprecatedHost(savedApk)) {
-            adminPrefs.edit().remove("apk_download_url").apply()
+        if (savedApk.isNotBlank()) {
+            val cleanedApk = normalizeApkOrPortalUrl(savedApk)
+            if (cleanedApk != savedApk) {
+                adminPrefs.edit().putString("apk_download_url", cleanedApk).apply()
+            }
         }
     }
 
@@ -402,13 +477,32 @@ object WebPortalExporter {
       ? ("depros://connect?sb_url=" + encodeURIComponent(sbUrl) + "&sb_key=" + encodeURIComponent(sbKey))
       : "depros://open";
 
+    let webFallbackUrl = "";
+    try {
+      const fb = new URL(window.location.href);
+      fb.searchParams.delete("open_app");
+      fb.searchParams.set("web", "1");
+      webFallbackUrl = fb.toString();
+    } catch (_) {}
+    const fbSuffix = webFallbackUrl ? (";S.browser_fallback_url=" + encodeURIComponent(webFallbackUrl)) : "";
+
     const androidIntentLink = (sbUrl && sbKey)
-      ? ("intent://connect?sb_url=" + encodeURIComponent(sbUrl) + "&sb_key=" + encodeURIComponent(sbKey) + "#Intent;scheme=depros;package=" + ANDROID_PACKAGE + ";end")
-      : ("intent://open#Intent;scheme=depros;package=" + ANDROID_PACKAGE + ";end");
+      ? ("intent://connect?sb_url=" + encodeURIComponent(sbUrl) + "&sb_key=" + encodeURIComponent(sbKey) + "#Intent;scheme=depros;package=" + ANDROID_PACKAGE + fbSuffix + ";end")
+      : ("intent://open#Intent;scheme=depros;package=" + ANDROID_PACKAGE + fbSuffix + ";end");
 
     const openBtn = document.getElementById("openAppBtn");
     const isAndroid = /Android/i.test(navigator.userAgent);
     openBtn.href = isAndroid ? androidIntentLink : customSchemeLink;
+
+    const stayOnWeb = params.get("web") === "1";
+    const isHttpsOrigin = window.location.protocol === "https:" || window.location.protocol === "http:";
+    if (isAndroid && isHttpsOrigin && !window.AndroidBridge && !stayOnWeb && (params.get("open_app") === "1" || params.has("sb_url"))) {
+      setTimeout(function() {
+        try {
+          window.location.href = androidIntentLink;
+        } catch (_) {}
+      }, 120);
+    }
 
     if (!sbUrl || !sbKey) {
       document.getElementById("copySyncBtn").style.display = "none";

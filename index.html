@@ -235,13 +235,32 @@
       ? ("depros://connect?sb_url=" + encodeURIComponent(sbUrl) + "&sb_key=" + encodeURIComponent(sbKey))
       : "depros://open";
 
+    let webFallbackUrl = "";
+    try {
+      const fb = new URL(window.location.href);
+      fb.searchParams.delete("open_app");
+      fb.searchParams.set("web", "1");
+      webFallbackUrl = fb.toString();
+    } catch (_) {}
+    const fbSuffix = webFallbackUrl ? (";S.browser_fallback_url=" + encodeURIComponent(webFallbackUrl)) : "";
+
     const androidIntentLink = (sbUrl && sbKey)
-      ? ("intent://connect?sb_url=" + encodeURIComponent(sbUrl) + "&sb_key=" + encodeURIComponent(sbKey) + "#Intent;scheme=depros;package=" + ANDROID_PACKAGE + ";end")
-      : ("intent://open#Intent;scheme=depros;package=" + ANDROID_PACKAGE + ";end");
+      ? ("intent://connect?sb_url=" + encodeURIComponent(sbUrl) + "&sb_key=" + encodeURIComponent(sbKey) + "#Intent;scheme=depros;package=" + ANDROID_PACKAGE + fbSuffix + ";end")
+      : ("intent://open#Intent;scheme=depros;package=" + ANDROID_PACKAGE + fbSuffix + ";end");
 
     const openBtn = document.getElementById("openAppBtn");
     const isAndroid = /Android/i.test(navigator.userAgent);
     openBtn.href = isAndroid ? androidIntentLink : customSchemeLink;
+
+    const stayOnWeb = params.get("web") === "1";
+    const isHttpsOrigin = window.location.protocol === "https:" || window.location.protocol === "http:";
+    if (isAndroid && isHttpsOrigin && !stayOnWeb && (params.get("open_app") === "1" || params.has("sb_url"))) {
+      setTimeout(function() {
+        try {
+          window.location.href = androidIntentLink;
+        } catch (_) {}
+      }, 120);
+    }
 
     if (!sbUrl || !sbKey) {
       document.getElementById("copySyncBtn").style.display = "none";

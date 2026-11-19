@@ -307,7 +307,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 "New code & design updates for 24/7 SHOPPING."
             }
             val cleanUrl = apkDownloadUrl.trim().let {
-                if (it.isBlank()) "" else com.example.util.WebPortalExporter.normalizeWebUrl(it)
+                if (it.isBlank()) "" else com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(it)
             }
             val updatedProfile = _storeProfile.value.copy(
                 apkDownloadUrl = cleanUrl,
@@ -565,14 +565,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             extraBankName = adminPrefs.getString("store_extra_bank_name", "") ?: "",
             extraBankAccountNumber = adminPrefs.getString("store_extra_bank_number", "") ?: "",
             extraBankAccountName = adminPrefs.getString("store_extra_bank_holder", "") ?: "",
-            apkDownloadUrl = com.example.util.WebPortalExporter.normalizeWebUrl(
+            apkDownloadUrl = com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(
                 adminPrefs.getString("apk_download_url", "") ?: ""
-            ).let { url ->
-                if (com.example.util.WebPortalExporter.isLegacyDeprecatedHost(url)) "" else url
-            }.also { cleanSavedUrl ->
+            ).also { cleanSavedUrl ->
                 val rawSavedUrl = adminPrefs.getString("apk_download_url", "") ?: ""
-                if (rawSavedUrl.isNotBlank() && cleanSavedUrl.isBlank()) {
-                    adminPrefs.edit().putString("apk_download_url", "").apply()
+                if (rawSavedUrl != cleanSavedUrl) {
+                    adminPrefs.edit().putString("apk_download_url", cleanSavedUrl).apply()
                 }
             },
             latestAppVersionCode = adminPrefs.getInt("latest_app_version_code", 1),
@@ -600,7 +598,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             extraBankName = config.extraBankName.trim(),
             extraBankAccountNumber = config.extraBankAccountNumber.trim(),
             extraBankAccountName = config.extraBankAccountName.trim(),
-            apkDownloadUrl = com.example.util.WebPortalExporter.normalizeWebUrl(config.apkDownloadUrl),
+            apkDownloadUrl = com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(config.apkDownloadUrl),
             latestAppVersionCode = config.latestAppVersionCode.coerceAtLeast(1),
             latestAppVersionName = config.latestAppVersionName.trim().ifBlank { "1.0" },
             updateReleaseNotes = config.updateReleaseNotes.trim()
@@ -632,6 +630,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _releaseNotes.value = clean.updateReleaseNotes
         _updateDownloadUrl.value = clean.apkDownloadUrl
         if (clean.apkDownloadUrl.isNotBlank() &&
+            !com.example.util.WebPortalExporter.isDirectApkReleaseUrl(clean.apkDownloadUrl) &&
             com.example.util.WebPortalExporter.getSavedCustomPortalUrl(getApplication()).isBlank()
         ) {
             com.example.util.WebPortalExporter.saveCustomPortalUrl(getApplication(), clean.apkDownloadUrl)
@@ -639,18 +638,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun savePermanentShareUrl(rawUrl: String): String {
-        val cleanUrl = com.example.util.WebPortalExporter.normalizeWebUrl(rawUrl)
         val ctx = getApplication<Application>()
-        if (cleanUrl.isBlank()) {
+        val trimmed = rawUrl.trim()
+        if (trimmed.isBlank()) {
             com.example.util.WebPortalExporter.saveCustomPortalUrl(ctx, "")
             return ""
         }
-        com.example.util.WebPortalExporter.saveCustomPortalUrl(ctx, cleanUrl)
+        val cleanPortalUrl = com.example.util.WebPortalExporter.normalizePortalUrl(trimmed)
+        val cleanApkOrPortal = com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(trimmed)
+        val isApkRelease = com.example.util.WebPortalExporter.isDirectApkReleaseUrl(cleanApkOrPortal)
+        if (!isApkRelease && cleanPortalUrl.isNotBlank()) {
+            com.example.util.WebPortalExporter.saveCustomPortalUrl(ctx, cleanPortalUrl)
+        }
         val currentProfile = _storeProfile.value
-        val looksLikeApkLink = cleanUrl.endsWith(".apk", ignoreCase = true) ||
-            cleanUrl.contains("/releases/download/", ignoreCase = true)
-        if (currentProfile.apkDownloadUrl.isBlank() || looksLikeApkLink) {
-            val updated = currentProfile.copy(apkDownloadUrl = cleanUrl)
+        val currentCleanApk = com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(currentProfile.apkDownloadUrl)
+        val effectiveReturnUrl = if (isApkRelease) cleanApkOrPortal else cleanPortalUrl
+        if (effectiveReturnUrl.isNotBlank() && (currentCleanApk.isBlank() || isApkRelease)) {
+            val updated = currentProfile.copy(apkDownloadUrl = effectiveReturnUrl)
             updateStoreProfile(updated)
             viewModelScope.launch {
                 val manifest = AppUpdateManifest(
@@ -659,12 +663,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     releaseNotes = updated.updateReleaseNotes.ifBlank {
                         "New code & design updates for 24/7 SHOPPING."
                     },
-                    downloadUrl = cleanUrl
+                    downloadUrl = effectiveReturnUrl
                 )
                 repository.supabaseSync.publishAppUpdateManifest(manifest)
             }
         }
-        return cleanUrl
+        return effectiveReturnUrl
     }
 
     // Automatically persisted customer delivery information so it stays permanent on the Order Confirmation page
@@ -1192,7 +1196,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         com.example.util.WebPortalExporter.purgeLegacyApkUrlPref(application)
         _updateDownloadUrl.value = _storeProfile.value.apkDownloadUrl
         if (_storeProfile.value.apkDownloadUrl.isNotBlank() &&
-            !com.example.util.WebPortalExporter.isLegacyDeprecatedHost(_storeProfile.value.apkDownloadUrl) &&
+            !com.example.util.WebPortalExporter.isDirectApkReleaseUrl(_storeProfile.value.apkDownloadUrl) &&
             com.example.util.WebPortalExporter.getSavedCustomPortalUrl(application).isBlank()
         ) {
             com.example.util.WebPortalExporter.saveCustomPortalUrl(application, _storeProfile.value.apkDownloadUrl)
@@ -1442,7 +1446,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 remoteManifest?.downloadUrl,
                 profile.apkDownloadUrl,
                 portalUrl
-            ).map { com.example.util.WebPortalExporter.normalizeWebUrl(it) }
+            ).map { com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(it) }
                 .firstOrNull {
                     it.isNotBlank() &&
                         !com.example.util.WebPortalExporter.isAiStudioPreviewHost(it) &&
@@ -1450,12 +1454,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }.orEmpty()
 
             if (effectiveDownloadUrl.isNotBlank()) {
-                if (com.example.util.WebPortalExporter.getSavedCustomPortalUrl(getApplication()).isBlank()) {
+                if (!com.example.util.WebPortalExporter.isDirectApkReleaseUrl(effectiveDownloadUrl) &&
+                    com.example.util.WebPortalExporter.getSavedCustomPortalUrl(getApplication()).isBlank()
+                ) {
                     com.example.util.WebPortalExporter.saveCustomPortalUrl(getApplication(), effectiveDownloadUrl)
                 }
-                if (profile.apkDownloadUrl.isBlank() ||
-                    com.example.util.WebPortalExporter.isLegacyDeprecatedHost(profile.apkDownloadUrl)
-                ) {
+                val cleanCurrentApk = com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(profile.apkDownloadUrl)
+                if (cleanCurrentApk.isBlank() || cleanCurrentApk != profile.apkDownloadUrl) {
                     updateStoreProfile(profile.copy(apkDownloadUrl = effectiveDownloadUrl))
                 }
             }
@@ -1591,6 +1596,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // Single-click Product View
     fun openProductDetails(product: Product) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            com.example.util.ProductImageHelper.preloadSingleProductGallery(getApplication(), product)
+        }
         _selectedProduct.value = product
         _detailBrand.value = product.availableBrands.firstOrNull() ?: product.brand
         _detailSize.value = product.availableSizes.firstOrNull() ?: "Standard"
@@ -2249,7 +2257,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (repository.supabaseSync.isPlaceholderConfig(cfg.url, cfg.anonKey)) return null
         val encUrl = java.net.URLEncoder.encode(cfg.url, "UTF-8")
         val encKey = java.net.URLEncoder.encode(cfg.anonKey, "UTF-8")
-        val normalizedBase = baseShareUrl?.let { com.example.util.WebPortalExporter.normalizeWebUrl(it) }.orEmpty()
+        val normalizedBase = baseShareUrl?.let { com.example.util.WebPortalExporter.normalizePortalUrl(it) }.orEmpty()
         return if (normalizedBase.isBlank()) {
             "depros://connect?sb_url=$encUrl&sb_key=$encKey"
         } else {
@@ -2259,7 +2267,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 normalizedBase
             }
             val sep = if (baseWithRootSlash.contains("?")) "&" else "?"
-            "${baseWithRootSlash}${sep}sb_url=$encUrl&sb_key=$encKey"
+            "${baseWithRootSlash}${sep}open_app=1&sb_url=$encUrl&sb_key=$encKey"
         }
     }
 

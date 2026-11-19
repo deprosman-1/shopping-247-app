@@ -5413,13 +5413,21 @@ private fun SupabaseCloudTab(
                 var customPortalUrl by remember {
                     mutableStateOf(
                         com.example.util.WebPortalExporter.getSavedCustomPortalUrl(context)
-                            .ifBlank { adminStoreProfile.apkDownloadUrl }
+                            .ifBlank {
+                                com.example.util.WebPortalExporter.normalizePortalUrl(adminStoreProfile.apkDownloadUrl)
+                                    .takeUnless { com.example.util.WebPortalExporter.isDirectApkReleaseUrl(it) }
+                                    .orEmpty()
+                            }
+                            .ifBlank { com.example.ui.components.DEPROS_DOWNLOAD_URL }
                     )
                 }
                 LaunchedEffect(adminStoreProfile.apkDownloadUrl) {
                     val savedPortal = com.example.util.WebPortalExporter.getSavedCustomPortalUrl(context)
-                    if (customPortalUrl.isBlank() && adminStoreProfile.apkDownloadUrl.isNotBlank()) {
-                        customPortalUrl = savedPortal.ifBlank { adminStoreProfile.apkDownloadUrl }
+                    val cleanFallback = com.example.util.WebPortalExporter.normalizePortalUrl(adminStoreProfile.apkDownloadUrl)
+                        .takeUnless { com.example.util.WebPortalExporter.isDirectApkReleaseUrl(it) }
+                        .orEmpty()
+                    if (customPortalUrl.isBlank()) {
+                        customPortalUrl = savedPortal.ifBlank { cleanFallback }.ifBlank { com.example.ui.components.DEPROS_DOWNLOAD_URL }
                     }
                 }
                 var showWebPortalPreview by remember { mutableStateOf(false) }
@@ -5430,8 +5438,9 @@ private fun SupabaseCloudTab(
                 val hasValidCloud = cleanU.isNotBlank() && cleanK.isNotBlank() &&
                     !viewModel.repository.supabaseSync.isPlaceholderConfig(cleanU, cleanK)
 
-                val savedLiveUrl = com.example.util.WebPortalExporter.normalizeWebUrl(customPortalUrl)
-                    .takeIf { it.isNotBlank() && !com.example.util.WebPortalExporter.isAiStudioPreviewHost(it) }
+                val savedLiveUrl = com.example.util.WebPortalExporter.normalizePortalUrl(customPortalUrl)
+                    .takeIf { it.isNotBlank() && !com.example.util.WebPortalExporter.isDirectApkReleaseUrl(it) }
+                    ?: com.example.ui.components.DEPROS_DOWNLOAD_URL
 
                 val directAppLink = remember(cleanU, cleanK, hasValidCloud) {
                     if (hasValidCloud) {
@@ -5441,13 +5450,13 @@ private fun SupabaseCloudTab(
                 }
 
                 val liveWebCustomerLink = remember(savedLiveUrl, cleanU, cleanK, hasValidCloud) {
-                    if (hasValidCloud && !savedLiveUrl.isNullOrBlank()) {
+                    if (hasValidCloud && savedLiveUrl.isNotBlank()) {
                         viewModel.buildCustomerSyncLink(savedLiveUrl)
                     } else null
                 }
 
-                val qrTarget = liveWebCustomerLink ?: directAppLink ?: com.example.ui.components.DEPROS_DOWNLOAD_URL
-                val activeShareTarget = liveWebCustomerLink ?: directAppLink ?: qrTarget
+                val qrTarget = liveWebCustomerLink ?: savedLiveUrl
+                val activeShareTarget = liveWebCustomerLink ?: savedLiveUrl
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -5663,7 +5672,10 @@ private fun SupabaseCloudTab(
                                     storeName = storeProfile.storeName,
                                     storePhone = storeProfile.phoneNumber,
                                     storeAddress = storeProfile.storeAddress,
-                                    storeEmail = storeProfile.supportEmail
+                                    storeEmail = storeProfile.supportEmail,
+                                    apkDownloadUrl = adminStoreProfile.apkDownloadUrl.ifBlank {
+                                        com.example.util.WebPortalExporter.DEFAULT_GITHUB_APK_RELEASE_URL
+                                    }
                                 )
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = Color.Black),
@@ -5811,7 +5823,8 @@ private fun SupabaseCloudTab(
                             OutlinedButton(
                                 enabled = customPortalUrl.trim().isNotBlank(),
                                 onClick = {
-                                    val normalized = com.example.util.WebPortalExporter.normalizeWebUrl(customPortalUrl)
+                                    val normalized = com.example.util.WebPortalExporter.normalizePortalUrl(customPortalUrl)
+                                        .ifBlank { com.example.ui.components.DEPROS_DOWNLOAD_URL }
                                     val testTarget = if (hasValidCloud) {
                                         viewModel.buildCustomerSyncLink(normalized) ?: normalized
                                     } else normalized
@@ -5834,6 +5847,7 @@ private fun SupabaseCloudTab(
                         storePhone = storeProfile.phoneNumber,
                         storeAddress = storeProfile.storeAddress,
                         storeEmail = storeProfile.supportEmail,
+                        apkDownloadUrl = adminStoreProfile.apkDownloadUrl,
                         onDismiss = { showWebPortalPreview = false }
                     )
                 }
@@ -8508,9 +8522,8 @@ private fun AdminSecuritySettingsTab(viewModel: MainViewModel) {
 
     var apkDownloadUrlInput by remember(storeProfile.apkDownloadUrl) {
         mutableStateOf(
-            storeProfile.apkDownloadUrl.ifBlank {
-                com.example.util.WebPortalExporter.getSavedCustomPortalUrl(context)
-            }
+            com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(storeProfile.apkDownloadUrl)
+                .ifBlank { com.example.util.WebPortalExporter.DEFAULT_GITHUB_APK_RELEASE_URL }
         )
     }
     var latestVersionCodeInput by remember(storeProfile.latestAppVersionCode) { mutableStateOf(storeProfile.latestAppVersionCode.toString()) }
@@ -8903,10 +8916,12 @@ private fun AdminSecuritySettingsTab(viewModel: MainViewModel) {
                         onClick = {
                             isPublishingUpdate = true
                             val targetCode = latestVersionCodeInput.toIntOrNull()?.coerceAtLeast(1) ?: 1
-                            val cleanApkUrl = com.example.util.WebPortalExporter.normalizeWebUrl(apkDownloadUrlInput)
+                            val cleanApkUrl = com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(apkDownloadUrlInput)
                             if (apkDownloadUrlInput.trim().isNotEmpty() && cleanApkUrl.isEmpty()) {
                                 apkDownloadUrlInput = ""
                                 Toast.makeText(context, "⚠️ Invalid HTML/link removed from APK URL field.", Toast.LENGTH_SHORT).show()
+                            } else if (cleanApkUrl != apkDownloadUrlInput.trim() && cleanApkUrl.isNotEmpty()) {
+                                apkDownloadUrlInput = cleanApkUrl
                             }
                             viewModel.publishAppUpdateNotice(
                                 versionCode = targetCode,

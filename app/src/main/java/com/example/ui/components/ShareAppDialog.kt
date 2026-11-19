@@ -85,9 +85,9 @@ import com.example.ui.theme.SuccessGreen
 import java.io.File
 import java.io.FileOutputStream
 
-// Public Shared App URL works across external Android devices and computers without requiring dev session login
-const val DEPROS_DOWNLOAD_URL = "https://ais-pre-gjs6srxqc2prdx42l343un-645163211794.europe-west2.run.app/"
-const val DEPROS_DEV_URL = "https://ais-dev-gjs6srxqc2prdx42l343un-645163211794.europe-west2.run.app/"
+// Live Public GitHub Pages Store Portal (opens installed 24/7 SHOPPING app automatically, or shows live catalog + APK download)
+const val DEPROS_DOWNLOAD_URL = com.example.util.WebPortalExporter.DEFAULT_LIVE_PORTAL_URL
+const val DEPROS_DEV_URL = com.example.util.WebPortalExporter.DEFAULT_LIVE_PORTAL_URL
 
 @Composable
 fun ShareAppDialog(
@@ -121,36 +121,35 @@ fun ShareAppDialog(
     val fallbackSavedUrl = remember(storeProfile.apkDownloadUrl) {
         com.example.util.WebPortalExporter.purgeLegacyApkUrlPref(context)
         val savedPortal = com.example.util.WebPortalExporter.getSavedCustomPortalUrl(context)
-        if (savedPortal.isNotBlank() && !com.example.util.WebPortalExporter.isLegacyDeprecatedHost(savedPortal)) {
+        if (savedPortal.isNotBlank()) {
             savedPortal
         } else {
-            com.example.util.WebPortalExporter.normalizeWebUrl(storeProfile.apkDownloadUrl)
-                .takeIf {
-                    it.isNotBlank() &&
-                        !com.example.util.WebPortalExporter.isAiStudioPreviewHost(it) &&
-                        !com.example.util.WebPortalExporter.isLegacyDeprecatedHost(it)
-                }
-                ?: ""
+            com.example.util.WebPortalExporter.normalizePortalUrl(storeProfile.apkDownloadUrl)
+                .takeIf { it.isNotBlank() && !com.example.util.WebPortalExporter.isDirectApkReleaseUrl(it) }
+                ?: DEPROS_DOWNLOAD_URL
         }
     }
 
     var customUrl by remember {
-        val prefFallback = (sharePrefs.getString("custom_share_url", "") ?: "")
-            .takeIf { !com.example.util.WebPortalExporter.isLegacyDeprecatedHost(it) }
-            ?: ""
+        val prefFallback = com.example.util.WebPortalExporter.normalizePortalUrl(
+            sharePrefs.getString("custom_share_url", "") ?: ""
+        ).takeIf { !com.example.util.WebPortalExporter.isDirectApkReleaseUrl(it) }.orEmpty()
         mutableStateOf(
-            fallbackSavedUrl.ifBlank { prefFallback }
+            if (prefFallback.isNotBlank()) prefFallback else fallbackSavedUrl
         )
     }
 
     LaunchedEffect(storeProfile.apkDownloadUrl) {
-        val cleanApk = com.example.util.WebPortalExporter.normalizeWebUrl(storeProfile.apkDownloadUrl)
-        if (customUrl.isBlank() && cleanApk.isNotBlank() && !com.example.util.WebPortalExporter.isAiStudioPreviewHost(cleanApk)) {
-            customUrl = cleanApk
+        val cleanPortal = com.example.util.WebPortalExporter.normalizePortalUrl(storeProfile.apkDownloadUrl)
+        if (customUrl.isBlank() &&
+            cleanPortal.isNotBlank() &&
+            !com.example.util.WebPortalExporter.isDirectApkReleaseUrl(cleanPortal)
+        ) {
+            customUrl = cleanPortal
             if (viewModel != null) {
-                viewModel.savePermanentShareUrl(cleanApk)
+                viewModel.savePermanentShareUrl(cleanPortal)
             } else {
-                com.example.util.WebPortalExporter.saveCustomPortalUrl(context, cleanApk)
+                com.example.util.WebPortalExporter.saveCustomPortalUrl(context, cleanPortal)
             }
         }
     }
@@ -159,8 +158,6 @@ fun ShareAppDialog(
         val savedMode = sharePrefs.getInt("share_link_mode", -1)
         val initialMode = when {
             savedMode in 0..2 -> savedMode
-            fallbackSavedUrl.isNotBlank() -> 2
-            hasCloudCreds -> 1
             else -> 2
         }
         mutableIntStateOf(initialMode)
@@ -182,22 +179,28 @@ fun ShareAppDialog(
             1 -> directConnectUrl
             0 -> DEPROS_DOWNLOAD_URL
             else -> {
-                val normalized = com.example.util.WebPortalExporter.normalizeWebUrl(customUrl)
-                normalized.ifBlank { directConnectUrl }
+                val normalized = com.example.util.WebPortalExporter.normalizePortalUrl(customUrl)
+                normalized.ifBlank { DEPROS_DOWNLOAD_URL }
             }
         }
     }
 
     val activeShareUrl = remember(rawShareUrl, includeCloudCreds, hasCloudCreds, savedSbUrl, savedSbKey, linkMode) {
-        val isDirectApkLink = rawShareUrl.endsWith(".apk", ignoreCase = true) ||
-            rawShareUrl.contains("/releases/download/", ignoreCase = true)
+        val isDirectApkLink = com.example.util.WebPortalExporter.isDirectApkReleaseUrl(rawShareUrl)
         if (linkMode == 1 || !rawShareUrl.startsWith("http", ignoreCase = true) || isDirectApkLink) {
             rawShareUrl
-        } else if (includeCloudCreds && hasCloudCreds) {
-            val sep = if (rawShareUrl.contains("?")) "&" else "?"
-            "${rawShareUrl}${sep}sb_url=${Uri.encode(savedSbUrl)}&sb_key=${Uri.encode(savedSbKey)}"
         } else {
-            rawShareUrl
+            val baseWithSlash = if (!rawShareUrl.contains("?") && rawShareUrl.count { it == '/' } == 2) {
+                "$rawShareUrl/"
+            } else {
+                rawShareUrl
+            }
+            val sep = if (baseWithSlash.contains("?")) "&" else "?"
+            if (includeCloudCreds && hasCloudCreds) {
+                "${baseWithSlash}${sep}open_app=1&sb_url=${Uri.encode(savedSbUrl)}&sb_key=${Uri.encode(savedSbKey)}"
+            } else {
+                "${baseWithSlash}${sep}open_app=1"
+            }
         }
     }
 
@@ -211,15 +214,15 @@ fun ShareAppDialog(
             if (storeProfile.storeAddress.isNotBlank()) append("📍 Address: ${storeProfile.storeAddress}\n")
             append("\n")
             if (isLiveWeb) {
-                append("🌐 Official Store Web Portal & App Link:\n$activeShareUrl\n\n")
+                append("📲 Open $storeName App or Web Storefront:\n$activeShareUrl\n\n")
             }
             if (directConnectUrl.contains("sb_url=")) {
-                append("📲 Direct App Connect Link (for installed APK):\n$directConnectUrl\n\n")
+                append("🔗 Direct App Sync Link (for installed APK):\n$directConnectUrl\n\n")
             }
             append("📱 ALREADY HAVE $storeName INSTALLED?\n")
-            append("Tap the link above OR copy this entire message and paste it into: $storeName → Account → Link Now!\n\n")
-            append("📦 NEED TO INSTALL?\n")
-            append("Ask seller for the Clean APK file, or open the Store Web Portal above in Chrome.")
+            append("Tap the link above to open the app automatically — or copy this message and paste it into: $storeName → Account → Link Now!\n\n")
+            append("📦 NEW CUSTOMER?\n")
+            append("Tap the link above to browse live or download the official Android APK.")
         }
     }
 

@@ -79,17 +79,32 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        val coilOkHttp = okhttp3.OkHttpClient.Builder()
+            .dispatcher(
+                okhttp3.Dispatcher().apply {
+                    maxRequests = 64
+                    maxRequestsPerHost = 16
+                }
+            )
+            .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .build()
+
         coil.Coil.setImageLoader(
             coil.ImageLoader.Builder(applicationContext)
+                .okHttpClient(coilOkHttp)
+                .respectCacheHeaders(false)
+                .bitmapFactoryMaxParallelism(4)
                 .memoryCache {
                     coil.memory.MemoryCache.Builder(applicationContext)
-                        .maxSizePercent(0.25)
+                        .maxSizePercent(0.30)
                         .build()
                 }
                 .diskCache {
                     coil.disk.DiskCache.Builder()
                         .directory(applicationContext.cacheDir.resolve("coil_img_cache"))
-                        .maxSizeBytes(120L * 1024L * 1024L)
+                        .maxSizeBytes(160L * 1024L * 1024L)
                         .build()
                 }
                 .allowRgb565(false)

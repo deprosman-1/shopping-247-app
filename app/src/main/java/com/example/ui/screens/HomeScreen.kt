@@ -178,7 +178,9 @@ fun HomeScreen(
     val offlineQueue by viewModel.offlineQueue.collectAsState()
 
     LaunchedEffect(products) {
-        ProductImageHelper.preloadProductImages(context, products)
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            ProductImageHelper.preloadProductImages(context, products)
+        }
     }
 
     var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -192,6 +194,12 @@ fun HomeScreen(
     val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
     val listState = rememberLazyListState()
     val wishlistSet = remember(wishlistIds) { wishlistIds.toSet() }
+    val stableOpenProductDetails = remember(viewModel) {
+        { product: Product -> viewModel.openProductDetails(product) }
+    }
+    val stableToggleWishlist = remember(viewModel) {
+        { productId: String -> viewModel.toggleWishlist(productId) }
+    }
     val stableAddToCart = remember(viewModel, context) {
         { product: Product ->
             viewModel.addToCart(
@@ -874,10 +882,10 @@ fun HomeScreen(
                                                 ProductStandardCard(
                                                     product = product,
                                                     promoDiscountPercent = effectiveDiscount,
-                                                    onClick = { viewModel.openProductDetails(product) },
+                                                    onClick = { stableOpenProductDetails(product) },
                                                     onAddToCart = stableAddToCart,
                                                     isWishlisted = wishlistSet.contains(product.id),
-                                                    onToggleWishlist = { viewModel.toggleWishlist(product.id) },
+                                                    onToggleWishlist = { stableToggleWishlist(product.id) },
                                                     isRestockWatched = backInStockIds.contains(product.id),
                                                     onToggleRestockWatch = {
                                                         val watching = viewModel.toggleBackInStockWatch(product)
@@ -1110,10 +1118,10 @@ fun HomeScreen(
                                             ProductStandardCard(
                                                 product = product,
                                                 promoDiscountPercent = effectiveDiscount,
-                                                onClick = { viewModel.openProductDetails(product) },
+                                                onClick = { stableOpenProductDetails(product) },
                                                 onAddToCart = stableAddToCart,
                                                 isWishlisted = wishlistSet.contains(product.id),
-                                                onToggleWishlist = { viewModel.toggleWishlist(product.id) },
+                                                onToggleWishlist = { stableToggleWishlist(product.id) },
                                                 isRestockWatched = backInStockIds.contains(product.id),
                                                 onToggleRestockWatch = {
                                                     val watching = viewModel.toggleBackInStockWatch(product)
@@ -1199,10 +1207,10 @@ fun HomeScreen(
                             ProductStandardCard(
                                 product = product,
                                 promoDiscountPercent = effectiveDiscount,
-                                onClick = { viewModel.openProductDetails(product) },
+                                onClick = { stableOpenProductDetails(product) },
                                 onAddToCart = stableAddToCart,
                                 isWishlisted = wishlistSet.contains(product.id),
-                                onToggleWishlist = { viewModel.toggleWishlist(product.id) },
+                                onToggleWishlist = { stableToggleWishlist(product.id) },
                                 isRestockWatched = backInStockIds.contains(product.id),
                                 onToggleRestockWatch = {
                                     val watching = viewModel.toggleBackInStockWatch(product)
