@@ -70,10 +70,13 @@ jobs:
               -dname "CN=DEPROS 24/7 SMART SHOPPING MALL,O=DEPROS 24/7,L=Lagos,C=NG"
           fi
           keytool -list -keystore my-upload-key.jks -storepass "$STORE_PASS"
-          {
-            [ -n "$SECRET_SUPABASE_URL" ] && printf "SUPABASE_URL=%s\n" "$SECRET_SUPABASE_URL"
-            [ -n "$SECRET_SUPABASE_ANON_KEY" ] && printf "SUPABASE_ANON_KEY=%s\n" "$SECRET_SUPABASE_ANON_KEY"
-          } > .env
+          : > .env
+          if [ -n "$SECRET_SUPABASE_URL" ]; then
+            printf "SUPABASE_URL=%s\n" "$(printf '%s' "$SECRET_SUPABASE_URL" | tr -d '\r\n')" >> .env
+          fi
+          if [ -n "$SECRET_SUPABASE_ANON_KEY" ]; then
+            printf "SUPABASE_ANON_KEY=%s\n" "$(printf '%s' "$SECRET_SUPABASE_ANON_KEY" | tr -d '\r\n')" >> .env
+          fi
 
       - name: Set up Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4
