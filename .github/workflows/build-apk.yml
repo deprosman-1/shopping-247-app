@@ -38,31 +38,36 @@ jobs:
             yes | "$SDKMANAGER" --sdk_root="$SDK_DIR" --licenses > /dev/null 2>&1 || true
           fi
 
-      - name: Restore cached debug keystore
+      - name: Restore cached release keystore
         uses: actions/cache@v4
         with:
-          path: debug.keystore
-          key: 247-shopping-debug-keystore-v1
+          path: my-upload-key.jks
+          key: 247-shopping-release-keystore-v1
 
-      - name: Prepare debug keystore & env
+      - name: Prepare release keystore & env
+        env:
+          SECRET_STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          SECRET_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          if [ ! -s debug.keystore ] && [ -s debug.keystore.base64 ]; then
-            tr -d '\r\n ' < debug.keystore.base64 | base64 -d > debug.keystore || rm -f debug.keystore
-          fi
-          if [ ! -s debug.keystore ] || ! keytool -list -keystore debug.keystore -storepass android -alias androiddebugkey >/dev/null 2>&1; then
-            rm -f debug.keystore
-            echo "Generating valid debug.keystore with keytool..."
+          STORE_PASS="${SECRET_STORE_PASSWORD:-DeprosMall247Release}"
+          KEY_PASS="${SECRET_KEY_PASSWORD:-$STORE_PASS}"
+          echo "KEYSTORE_PATH=$GITHUB_WORKSPACE/my-upload-key.jks" >> "$GITHUB_ENV"
+          echo "STORE_PASSWORD=$STORE_PASS" >> "$GITHUB_ENV"
+          echo "KEY_PASSWORD=$KEY_PASS" >> "$GITHUB_ENV"
+          if [ ! -s my-upload-key.jks ] || ! keytool -list -keystore my-upload-key.jks -storepass "$STORE_PASS" -alias upload >/dev/null 2>&1; then
+            rm -f my-upload-key.jks
+            echo "Generating release keystore my-upload-key.jks with keytool..."
             keytool -genkeypair -v \
-              -keystore debug.keystore \
-              -storepass android \
-              -alias androiddebugkey \
-              -keypass android \
+              -keystore my-upload-key.jks \
+              -storepass "$STORE_PASS" \
+              -alias upload \
+              -keypass "$KEY_PASS" \
               -keyalg RSA \
               -keysize 2048 \
               -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
+              -dname "CN=DEPROS 24/7 SMART SHOPPING MALL,O=DEPROS 24/7,L=Lagos,C=NG"
           fi
-          keytool -list -keystore debug.keystore -storepass android
+          keytool -list -keystore my-upload-key.jks -storepass "$STORE_PASS"
           if [ ! -f .env ]; then
             touch .env
           fi
@@ -72,13 +77,13 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
-      - name: Build Debug APK
-        run: gradle :app:assembleDebug --no-daemon --stacktrace -Dorg.gradle.workers.max=2 -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
+      - name: Build Release APK
+        run: gradle :app:assembleRelease --no-daemon --stacktrace -Dorg.gradle.workers.max=2 -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
 
       - name: Package APK for download
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/247-shopping.apk
+          cp app/build/outputs/apk/release/app-release.apk dist/247-shopping.apk
           ls -lh dist/247-shopping.apk
 
       - name: Upload APK to Actions Artifacts
