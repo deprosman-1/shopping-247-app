@@ -58,7 +58,9 @@ import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
@@ -209,8 +211,9 @@ fun AdminControlRoomScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var selectedTab by remember { mutableIntStateOf(0) }
-    // 0 = Products Form, 1 = Customer Identity, 2 = Payment Receipts, 3 = Supabase Cloud
+    val initialAdminTab by viewModel.adminSelectedTab.collectAsState()
+    var selectedTab by remember(initialAdminTab) { mutableIntStateOf(initialAdminTab) }
+    // 0 = Products Form, 1 = Customer Identity, 2 = Payment Receipts, 4 = Supabase Cloud
 
     val isAdminUnlocked by viewModel.isAdminUnlocked.collectAsState()
 
@@ -359,68 +362,68 @@ fun AdminControlRoomScreen(
             ) {
                 Tab(
                     selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
+                    onClick = { selectedTab = 0; viewModel.selectAdminTab(0) },
                     text = { Text("Product Form (${products.size})") },
                     icon = { Icon(Icons.Default.Inventory, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
                 Tab(
                     selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
+                    onClick = { selectedTab = 1; viewModel.selectAdminTab(1) },
                     text = { Text("Customer Order Files (${customers.size})") },
                     icon = { Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
                 Tab(
                     selected = selectedTab == 2,
-                    onClick = { selectedTab = 2 },
+                    onClick = { selectedTab = 2; viewModel.selectAdminTab(2) },
                     text = { Text("Payment Receipts (${orders.size})") },
                     icon = { Icon(Icons.Default.ReceiptLong, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
                 Tab(
                     selected = selectedTab == 3,
-                    onClick = { selectedTab = 3 },
+                    onClick = { selectedTab = 3; viewModel.selectAdminTab(3) },
                     text = { Text("Sales Analytics") },
                     icon = { Icon(Icons.Default.BarChart, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
                 Tab(
                     selected = selectedTab == 4,
-                    onClick = { selectedTab = 4 },
+                    onClick = { selectedTab = 4; viewModel.selectAdminTab(4) },
                     text = { Text("Supabase Cloud") },
                     icon = { Icon(Icons.Default.Cloud, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
                 Tab(
                     selected = selectedTab == 5,
-                    onClick = { selectedTab = 5 },
+                    onClick = { selectedTab = 5; viewModel.selectAdminTab(5) },
                     text = { Text("Delivery Options") },
                     icon = { Icon(Icons.Default.LocalShipping, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
                 Tab(
                     selected = selectedTab == 6,
-                    onClick = { selectedTab = 6 },
+                    onClick = { selectedTab = 6; viewModel.selectAdminTab(6) },
                     text = { Text("Promo Activation") },
                     icon = { Icon(Icons.Default.Sell, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
                 Tab(
                     selected = selectedTab == 7,
-                    onClick = { selectedTab = 7 },
+                    onClick = { selectedTab = 7; viewModel.selectAdminTab(7) },
                     text = { Text("Pre-Orders (${preOrderRequests.size})") },
                     icon = { Icon(Icons.Default.NewReleases, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
                 Tab(
                     selected = selectedTab == 8,
-                    onClick = { selectedTab = 8 },
+                    onClick = { selectedTab = 8; viewModel.selectAdminTab(8) },
                     text = { Text("Store & Security") },
                     icon = { Icon(Icons.Default.Security, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
                 Tab(
                     selected = selectedTab == 9,
-                    onClick = { selectedTab = 9 },
+                    onClick = { selectedTab = 9; viewModel.selectAdminTab(9) },
                     text = { Text("Partners (${partnerOrganizations.size})") },
                     icon = { Icon(Icons.Default.Handshake, contentDescription = null, modifier = Modifier.size(18.dp)) },
                     modifier = Modifier.testTag("admin_partners_hub_tab")
                 )
                 Tab(
                     selected = selectedTab == 10,
-                    onClick = { selectedTab = 10 },
+                    onClick = { selectedTab = 10; viewModel.selectAdminTab(10) },
                     text = { Text("Returns & Support (${returnRequests.size + supportTickets.size})") },
                     icon = { Icon(Icons.Default.SupportAgent, contentDescription = null, modifier = Modifier.size(18.dp)) },
                     modifier = Modifier.testTag("admin_returns_support_tab")
@@ -4976,7 +4979,12 @@ private fun SupabaseCloudTab(
 ) {
     val context = LocalContext.current
     val storeProfile by viewModel.storeProfile.collectAsState()
-    val currentConfig = viewModel.repository.supabaseSync.getConfig()
+    val liveSupabaseConfig by viewModel.supabaseConfigState.collectAsState()
+    val currentConfig = if (liveSupabaseConfig.url.isNotBlank() || liveSupabaseConfig.anonKey.isNotBlank()) {
+        liveSupabaseConfig
+    } else {
+        viewModel.repository.supabaseSync.getConfig()
+    }
     val isBusy by viewModel.isSupabaseBusy.collectAsState()
     val isConnected by viewModel.isSupabaseConnected.collectAsState()
 
@@ -4990,6 +4998,12 @@ private fun SupabaseCloudTab(
     }
     var supabaseAnonKey by remember {
         mutableStateOf(if (hasValidSaved) currentConfig.anonKey else "")
+    }
+    LaunchedEffect(liveSupabaseConfig.url, liveSupabaseConfig.anonKey) {
+        if (!viewModel.repository.supabaseSync.isPlaceholderConfig(liveSupabaseConfig.url, liveSupabaseConfig.anonKey)) {
+            supabaseUrl = liveSupabaseConfig.url
+            supabaseAnonKey = liveSupabaseConfig.anonKey
+        }
     }
     var testResult by remember {
         mutableStateOf(
@@ -5037,8 +5051,35 @@ private fun SupabaseCloudTab(
         Toast.makeText(context, toastMsg, Toast.LENGTH_LONG).show()
     }
 
+    val normalizeOrExtractCredentials: () -> Pair<String, String> = {
+        val rawUrl = supabaseUrl.trim()
+        val rawKey = supabaseAnonKey.trim()
+        if (rawUrl.contains("sb_url=") || rawUrl.contains("sb_key=")) {
+            try {
+                val uri = Uri.parse(
+                    if (rawUrl.startsWith("http", ignoreCase = true) || rawUrl.startsWith("depros", ignoreCase = true)) {
+                        rawUrl
+                    } else {
+                        "depros://connect?$rawUrl"
+                    }
+                )
+                val extU = uri.getQueryParameter("sb_url")?.trim().orEmpty()
+                val extK = uri.getQueryParameter("sb_key")?.trim().orEmpty()
+                if (extU.isNotBlank() && extK.isNotBlank()) {
+                    viewModel.updateSupabaseConfig(extU, extK)
+                } else {
+                    viewModel.updateSupabaseConfig(rawUrl, rawKey)
+                }
+            } catch (_: Exception) {
+                viewModel.updateSupabaseConfig(rawUrl, rawKey)
+            }
+        } else {
+            viewModel.updateSupabaseConfig(rawUrl, rawKey)
+        }
+    }
+
     val onLinkUpClick: () -> Unit = {
-        val (cleanU, cleanK) = viewModel.updateSupabaseConfig(supabaseUrl, supabaseAnonKey)
+        val (cleanU, cleanK) = normalizeOrExtractCredentials()
         supabaseUrl = cleanU
         supabaseAnonKey = cleanK
         testResult = "🔄 Testing Supabase host, API key & products table..."
@@ -5115,11 +5156,30 @@ private fun SupabaseCloudTab(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
+                val pasteFromClipboard: ((String) -> Unit) -> Unit = { onText ->
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    val clipText = clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()?.trim().orEmpty()
+                    if (clipText.isNotBlank()) {
+                        onText(clipText)
+                        Toast.makeText(context, "Pasted from clipboard!", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "Clipboard is empty", Toast.LENGTH_SHORT).show()
+                    }
+                }
+
                 OutlinedTextField(
                     value = supabaseUrl,
                     onValueChange = { supabaseUrl = it },
                     label = { Text("Supabase Project URL") },
                     placeholder = { Text("https://your-project-ref.supabase.co") },
+                    trailingIcon = {
+                        IconButton(
+                            onClick = { pasteFromClipboard { supabaseUrl = it } },
+                            modifier = Modifier.testTag("supabase_paste_url_button")
+                        ) {
+                            Icon(Icons.Default.ContentPaste, contentDescription = "Paste Supabase URL", tint = CyberCyan)
+                        }
+                    },
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth().testTag("supabase_url_input")
@@ -5144,6 +5204,14 @@ private fun SupabaseCloudTab(
                     onValueChange = { supabaseAnonKey = it },
                     label = { Text("Supabase Publishable / Public Anon Key") },
                     placeholder = { Text("sb_publishable_... or eyJ...") },
+                    trailingIcon = {
+                        IconButton(
+                            onClick = { pasteFromClipboard { supabaseAnonKey = it } },
+                            modifier = Modifier.testTag("supabase_paste_key_button")
+                        ) {
+                            Icon(Icons.Default.ContentPaste, contentDescription = "Paste Anon Key", tint = CyberCyan)
+                        }
+                    },
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth().testTag("supabase_key_input")
@@ -5153,7 +5221,7 @@ private fun SupabaseCloudTab(
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     OutlinedButton(
                         enabled = !isBusy,
@@ -5164,15 +5232,40 @@ private fun SupabaseCloudTab(
                             testResult = "Cleared. Paste your real Supabase Project URL & Publishable Key."
                             Toast.makeText(context, "Cleared Supabase credentials", Toast.LENGTH_SHORT).show()
                         },
-                        modifier = Modifier.weight(0.85f).testTag("supabase_clear_button")
+                        modifier = Modifier
+                            .weight(0.7f)
+                            .height(48.dp)
+                            .testTag("supabase_clear_button")
                     ) {
                         Text("Clear", fontSize = 11.sp)
+                    }
+
+                    OutlinedButton(
+                        enabled = !isBusy && (supabaseUrl.isNotBlank() && (supabaseAnonKey.isNotBlank() || supabaseUrl.contains("sb_key="))),
+                        onClick = {
+                            val (cleanU, cleanK) = normalizeOrExtractCredentials()
+                            supabaseUrl = cleanU
+                            supabaseAnonKey = cleanK
+                            testResult = "✅ Saved URL & Anon Key locally. Tap 'Link Up Real-Time' to verify and sync."
+                            Toast.makeText(context, "Supabase URL & Anon Key saved!", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier
+                            .weight(0.95f)
+                            .height(48.dp)
+                            .testTag("supabase_save_key_button")
+                    ) {
+                        Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Save Key", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
 
                     Button(
                         enabled = !isBusy,
                         onClick = onLinkUpClick,
-                        modifier = Modifier.weight(1.35f).testTag("supabase_link_button")
+                        modifier = Modifier
+                            .weight(1.35f)
+                            .height(48.dp)
+                            .testTag("supabase_link_button")
                     ) {
                         if (isBusy) {
                             CircularProgressIndicator(
@@ -6724,7 +6817,7 @@ private fun AdminSecurityLockScreen(viewModel: MainViewModel) {
                 )
 
                 Text(
-                    text = "Enter your admin security password to access product forms, receipts, promo activation, and settings.",
+                    text = "Enter your admin security password or biometrics to access Supabase Cloud (URL & Anon Key), product forms, receipts, promo activation, and settings.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center

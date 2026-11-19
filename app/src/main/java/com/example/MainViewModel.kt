@@ -235,6 +235,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isSupabaseConnected = MutableStateFlow(false)
     val isSupabaseConnected: StateFlow<Boolean> = _isSupabaseConnected.asStateFlow()
 
+    private val _supabaseConfigState = MutableStateFlow(SupabaseConfig())
+    val supabaseConfigState: StateFlow<SupabaseConfig> = _supabaseConfigState.asStateFlow()
+
     // App Update Notice State & Methods
     private val _updateAvailable = MutableStateFlow(false)
     val updateAvailable: StateFlow<Boolean> = _updateAvailable.asStateFlow()
@@ -490,9 +493,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isAdminUnlocked = MutableStateFlow(false)
     val isAdminUnlocked: StateFlow<Boolean> = _isAdminUnlocked.asStateFlow()
 
+    private val _adminSelectedTab = MutableStateFlow(0)
+    val adminSelectedTab: StateFlow<Int> = _adminSelectedTab.asStateFlow()
+
     // False on every app launch so unauthenticated users never see the Admin Control button
     private val _isAdminDeviceAuthorized = MutableStateFlow(false)
     val isAdminDeviceAuthorized: StateFlow<Boolean> = _isAdminDeviceAuthorized.asStateFlow()
+
+    fun selectAdminTab(tabIndex: Int) {
+        _adminSelectedTab.value = tabIndex.coerceIn(0, 10)
+    }
+
+    fun openAdminControlRoom(initialTab: Int = 0) {
+        _adminSelectedTab.value = initialTab.coerceIn(0, 10)
+        navigateTo(AppScreen.ADMIN_CONTROL_ROOM)
+    }
 
     fun setAdminPassword(newPass: String) {
         if (newPass.isNotBlank()) {
@@ -1202,23 +1217,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Restore persisted Supabase URL & Publishable/Anon Key if valid (ignore old placeholder creds)
-        val savedUrl = adminPrefs.getString("supabase_url", null)
-        val savedKey = adminPrefs.getString("supabase_anon_key", null)
-        if (!savedUrl.isNullOrBlank() && !savedKey.isNullOrBlank() &&
-            !repository.supabaseSync.isPlaceholderConfig(savedUrl, savedKey)
+        // Restore persisted Supabase URL & Publishable/Anon Key if valid, or pre-load from BuildConfig Secrets
+        val prefUrl = adminPrefs.getString("supabase_url", null).orEmpty()
+        val prefKey = adminPrefs.getString("supabase_anon_key", null).orEmpty()
+        val buildCfgUrl = runCatching { BuildConfig.SUPABASE_URL }.getOrDefault("").trim()
+        val buildCfgKey = runCatching { BuildConfig.SUPABASE_ANON_KEY }.getOrDefault("").trim()
+
+        val (resolvedUrl, resolvedKey) = when {
+            prefUrl.isNotBlank() && prefKey.isNotBlank() &&
+                !repository.supabaseSync.isPlaceholderConfig(prefUrl, prefKey) -> prefUrl to prefKey
+            buildCfgUrl.isNotBlank() && buildCfgKey.isNotBlank() &&
+                !repository.supabaseSync.isPlaceholderConfig(buildCfgUrl, buildCfgKey) -> {
+                val cleanBu = repository.supabaseSync.cleanUrl(buildCfgUrl)
+                val cleanBk = repository.supabaseSync.sanitizeKey(buildCfgKey)
+                adminPrefs.edit()
+                    .putString("supabase_url", cleanBu)
+                    .putString("supabase_anon_key", cleanBk)
+                    .apply()
+                cleanBu to cleanBk
+            }
+            else -> "" to ""
+        }
+
+        if (resolvedUrl.isNotBlank() && resolvedKey.isNotBlank() &&
+            !repository.supabaseSync.isPlaceholderConfig(resolvedUrl, resolvedKey)
         ) {
             repository.supabaseSync.updateConfig(
-                SupabaseConfig(url = savedUrl, anonKey = savedKey, isConnected = false)
+                SupabaseConfig(url = resolvedUrl, anonKey = resolvedKey, isConnected = false)
             )
+            _supabaseConfigState.value = repository.supabaseSync.getConfig()
             _cloudStatusMessage.value = "Saved Supabase URL loaded. Connecting live..."
             viewModelScope.launch {
                 val testRes = repository.supabaseSync.testConnection()
                 if (testRes.isSuccess) {
                     _isSupabaseConnected.value = true
-                    repository.supabaseSync.updateConfig(
-                        repository.supabaseSync.getConfig().copy(isConnected = true)
-                    )
+                    val connectedCfg = repository.supabaseSync.getConfig().copy(isConnected = true)
+                    repository.supabaseSync.updateConfig(connectedCfg)
+                    _supabaseConfigState.value = repository.supabaseSync.getConfig()
                     val syncRes = repository.fetchAndSyncAllFromCloudDetailed()
                     hasCompletedInitialCloudPull = true
                     if (syncRes.isSuccess) {
@@ -1238,6 +1273,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             // Clear any legacy placeholder values from SharedPreferences so UI starts clean
             adminPrefs.edit().remove("supabase_url").remove("supabase_anon_key").apply()
+            _supabaseConfigState.value = SupabaseConfig()
         }
 
         // Restore ONLY the customer explicitly signed in on THIS device (never auto-seed or hijack demo accounts)
@@ -2295,6 +2331,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .apply()
         val newCfg = SupabaseConfig(url = cleanU, anonKey = cleanK, isConnected = false)
         repository.supabaseSync.updateConfig(newCfg)
+        _supabaseConfigState.value = repository.supabaseSync.getConfig()
         _isSupabaseConnected.value = false
         _cloudStatusMessage.value = if (cleanU.isNotBlank()) "Credentials saved ($cleanU). Verifying..." else "Supabase credentials cleared."
         return cleanU to cleanK
@@ -2303,6 +2340,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun clearSupabaseConfig() {
         adminPrefs.edit().remove("supabase_url").remove("supabase_anon_key").apply()
         repository.supabaseSync.updateConfig(SupabaseConfig())
+        _supabaseConfigState.value = SupabaseConfig()
         _isSupabaseConnected.value = false
         _cloudStatusMessage.value = "Credentials cleared. Enter your Supabase Project URL & Publishable/Anon Key."
     }

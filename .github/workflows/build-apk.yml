@@ -48,6 +48,8 @@ jobs:
         env:
           SECRET_STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           SECRET_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          SECRET_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SECRET_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
           STORE_PASS="${SECRET_STORE_PASSWORD:-DeprosMall247Release}"
           KEY_PASS="${SECRET_KEY_PASSWORD:-$STORE_PASS}"
@@ -68,9 +70,10 @@ jobs:
               -dname "CN=DEPROS 24/7 SMART SHOPPING MALL,O=DEPROS 24/7,L=Lagos,C=NG"
           fi
           keytool -list -keystore my-upload-key.jks -storepass "$STORE_PASS"
-          if [ ! -f .env ]; then
-            touch .env
-          fi
+          {
+            [ -n "$SECRET_SUPABASE_URL" ] && printf "SUPABASE_URL=%s\n" "$SECRET_SUPABASE_URL"
+            [ -n "$SECRET_SUPABASE_ANON_KEY" ] && printf "SUPABASE_ANON_KEY=%s\n" "$SECRET_SUPABASE_ANON_KEY"
+          } > .env
 
       - name: Set up Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4

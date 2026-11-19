@@ -31,11 +31,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AddLocationAlt
 import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Handshake
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LocalShipping
@@ -246,6 +248,20 @@ fun AuthScreen(
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedButton(
+                                onClick = { viewModel.openAdminControlRoom(4) },
+                                border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.8f)),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGold),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .testTag("auth_banner_admin_supabase_button")
+                            ) {
+                                Icon(Icons.Default.AdminPanelSettings, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Store Owner? Enter Supabase URL & Anon Key", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
                             if (showLinkPasteBox) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 OutlinedTextField(
@@ -1010,6 +1026,90 @@ fun AuthScreen(
                         Column {
                             Text("Help Center, Privacy Policy & Terms", fontWeight = FontWeight.Black, fontSize = 13.sp, color = CyberCyan)
                             Text("FAQs, Support Tickets, Delivery Policy & Data Privacy", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Admin Entry Point (Password & Biometric Protected)
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.3.dp, AccentGold.copy(alpha = 0.65f)),
+                    colors = CardDefaults.cardColors(containerColor = AccentGold.copy(alpha = 0.09f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("auth_admin_entry_card")
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(AccentGold.copy(alpha = 0.22f))
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AdminPanelSettings,
+                                    contentDescription = "Admin Control Entry",
+                                    tint = AccentGold,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Admin Entry & Supabase Cloud",
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 13.5.sp,
+                                    color = AccentGold
+                                )
+                                Text(
+                                    text = "Protected store owner portal to enter Supabase URL, upload your Anon Key & manage inventory",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = { viewModel.openAdminControlRoom(4) },
+                                colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = Color.Black),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .weight(1.1f)
+                                    .height(48.dp)
+                                    .testTag("auth_admin_supabase_entry_button")
+                            ) {
+                                Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Supabase & Key", fontWeight = FontWeight.Black, fontSize = 12.sp)
+                            }
+
+                            OutlinedButton(
+                                onClick = { viewModel.openAdminControlRoom(0) },
+                                border = BorderStroke(1.2.dp, AccentGold.copy(alpha = 0.7f)),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGold),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("auth_admin_control_entry_button")
+                            ) {
+                                Icon(Icons.Default.AdminPanelSettings, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Admin Panel", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
                         }
                     }
                 }

@@ -113,6 +113,8 @@ class SupabaseSyncService(
         val k = key.trim().lowercase()
         return u.contains("gjs6srxqc2prdx42l343un.supabase.co") ||
             u.contains("your-project") ||
+            u.contains("your_supabase") ||
+            k.contains("your_supabase") ||
             k.contains("depros_supabase_public_anon_key") ||
             k.contains("dummy") ||
             u.isBlank() ||
