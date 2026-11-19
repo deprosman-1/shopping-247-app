@@ -48,8 +48,8 @@ jobs:
         env:
           SECRET_STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           SECRET_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          SECRET_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SECRET_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SECRET_SUPABASE_URL: ${{ secrets.SUPABASE_URL || secrets.SUPABASE_URL_KEY || vars.SUPABASE_URL }}
+          SECRET_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY || vars.SUPABASE_ANON_KEY }}
         run: |
           STORE_PASS="${SECRET_STORE_PASSWORD:-DeprosMall247Release}"
           KEY_PASS="${SECRET_KEY_PASSWORD:-$STORE_PASS}"
@@ -80,9 +80,9 @@ jobs:
             printf "SUPABASE_ANON_KEY=%s\n" "$CLEAN_SB_KEY" >> .env
           fi
           if [ -n "$CLEAN_SB_URL" ] && [ -n "$CLEAN_SB_KEY" ]; then
-            echo "Supabase secrets detected — customer APKs will auto-connect to Store Cloud."
+            echo "::notice::Supabase secrets detected — customer APKs will auto-connect to Store Cloud."
           else
-            echo "WARNING: SUPABASE_URL or SUPABASE_ANON_KEY GitHub Repository Secret is missing — customers will be prompted for a Store Sync Link."
+            echo "::warning::SUPABASE_URL or SUPABASE_ANON_KEY GitHub Repository Secret is missing! Built APK will show 'Saved Locally' until linked."
           fi
 
       - name: Set up Gradle 9.3.1
@@ -107,13 +107,13 @@ jobs:
           if-no-files-found: error
 
       - name: Publish APK to GitHub Releases
-        continue-on-error: true
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: v1.0-latest
           name: 24/7 SHOPPING — Latest Android APK
+          make_latest: true
           body: |
             Automatically compiled Android APK for **24/7 SHOPPING**.
 

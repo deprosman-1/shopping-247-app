@@ -1,0 +1,7 @@
+{
+  "versionCode": 2,
+  "versionName": "1.1",
+  "minSupportedVersion": 1,
+  "releaseNotes": "Auto-connect to Store Cloud, instant catalog image rendering, and WhatsApp app-handoff links.",
+  "updateUrl": "https://github.com/deprosman-1/shopping-247-app/releases/download/v1.0-latest/247-shopping.apk"
+}
