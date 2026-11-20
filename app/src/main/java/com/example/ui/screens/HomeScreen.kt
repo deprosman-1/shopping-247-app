@@ -63,6 +63,7 @@ import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.LocalMall
 import androidx.compose.material.icons.filled.Loyalty
 import androidx.compose.material.icons.filled.OpenWith
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.BarChart
@@ -738,6 +739,18 @@ fun HomeScreen(
                         Text("Help & Legal", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CyberCyan)
                     },
                     modifier = Modifier.testTag("home_help_support_chip")
+                )
+
+                // Live Audio & Video Call with Admin Chip
+                AssistChip(
+                    onClick = { viewModel.openLiveCallScreen() },
+                    leadingIcon = {
+                        Icon(Icons.Default.Videocam, contentDescription = "Live Audio and Video Call", tint = SuccessGreen, modifier = Modifier.size(16.dp))
+                    },
+                    label = {
+                        Text("Live Audio/Video", fontSize = 11.sp, fontWeight = FontWeight.Black, color = SuccessGreen)
+                    },
+                    modifier = Modifier.testTag("home_live_call_chip")
                 )
             }
 

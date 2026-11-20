@@ -214,6 +214,23 @@ object ShopNotificationHelper {
         )
     }
 
+    fun notifyIncomingLiveCall(
+        context: Context,
+        callerName: String,
+        isVideoCall: Boolean
+    ) {
+        if (!hasNotificationPermission(context)) return
+        ensureChannels(context)
+        val kind = if (isVideoCall) "Live Video Call" else "Live Audio Call"
+        postNotification(
+            context = context,
+            channelId = CHANNEL_ORDERS,
+            notificationId = 24805,
+            title = "Incoming $kind • $callerName",
+            body = "$callerName is calling Admin live on 24/7 SHOPPING. Tap to answer in Audio or Video mode."
+        )
+    }
+
     private fun postNotification(
         context: Context,
         channelId: String,

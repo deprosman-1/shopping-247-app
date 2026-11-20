@@ -65,11 +65,15 @@ import com.example.ui.screens.CartScreen
 import com.example.ui.screens.CheckoutScreen
 import com.example.ui.screens.HelpSupportScreen
 import com.example.ui.screens.HomeScreen
+import com.example.ui.screens.LiveCallScreen
 import com.example.ui.screens.OrdersReceiptsScreen
 import com.example.ui.screens.PartnerPortalScreen
 import com.example.ui.screens.ProductDetailScreen
 import com.example.ui.screens.WishlistScreen
+import com.example.data.remote.LiveCallMode
+import com.example.data.remote.LiveCallPhase
 import com.example.ui.theme.AccentGold
+import com.example.ui.theme.SuccessGreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.util.CatalogBackgroundSyncJobService
 
@@ -164,6 +168,7 @@ fun DeprosApp(
     val currentCustomer by viewModel.currentCustomer.collectAsState()
     val isAdminUnlocked by viewModel.isAdminUnlocked.collectAsState()
     val showAdminControl = isAdminUnlocked || (currentCustomer?.isAdmin == true)
+    val liveCallState by viewModel.liveCallState.collectAsState()
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -218,6 +223,7 @@ fun DeprosApp(
                 currentScreen != AppScreen.CHECKOUT &&
                 currentScreen != AppScreen.PARTNER_PORTAL &&
                 currentScreen != AppScreen.HELP_SUPPORT &&
+                currentScreen != AppScreen.LIVE_CALL &&
                 !isFullScreen
             ) {
                 NavigationBar(
@@ -367,6 +373,67 @@ fun DeprosApp(
                 AppScreen.ADMIN_CONTROL_ROOM -> AdminControlRoomScreen(viewModel = viewModel)
                 AppScreen.PARTNER_PORTAL -> PartnerPortalScreen(viewModel = viewModel)
                 AppScreen.HELP_SUPPORT -> HelpSupportScreen(viewModel = viewModel)
+                AppScreen.LIVE_CALL -> LiveCallScreen(viewModel = viewModel)
+            }
+
+            // Floating Incoming Customer Live Call Alert for Admin across all screens
+            val pendingRing = liveCallState.incomingRequests.firstOrNull()
+            if (showAdminControl &&
+                pendingRing != null &&
+                liveCallState.phase == LiveCallPhase.IDLE &&
+                currentScreen != AppScreen.LIVE_CALL
+            ) {
+                Surface(
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+                    color = Color(0xFF052E16),
+                    border = androidx.compose.foundation.BorderStroke(1.5.dp, AccentGold),
+                    shadowElevation = 10.dp,
+                    modifier = Modifier
+                        .align(androidx.compose.ui.Alignment.TopCenter)
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                        .testTag("global_incoming_call_banner")
+                ) {
+                    androidx.compose.foundation.layout.Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "Incoming ${pendingRing.mode.label} • ${pendingRing.callerName}",
+                            color = AccentGold,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 14.sp
+                        )
+                        Text(
+                            text = "Topic: ${pendingRing.topic}",
+                            color = Color.White,
+                            fontSize = 12.sp
+                        )
+                        androidx.compose.foundation.layout.Row(
+                            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
+                        ) {
+                            androidx.compose.material3.Button(
+                                onClick = { viewModel.answerIncomingLiveCall(pendingRing, LiveCallMode.AUDIO) },
+                                colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = SuccessGreen),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Answer Audio", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                            }
+                            androidx.compose.material3.Button(
+                                onClick = { viewModel.answerIncomingLiveCall(pendingRing, LiveCallMode.VIDEO) },
+                                colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = Color(0xFF052E16)),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Answer Video", fontSize = 11.5.sp, fontWeight = FontWeight.Black)
+                            }
+                            androidx.compose.material3.OutlinedButton(
+                                onClick = { viewModel.declineIncomingLiveCall(pendingRing) },
+                                colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFCA5A5))
+                            ) {
+                                Text("Decline", fontSize = 11.5.sp)
+                            }
+                        }
+                    }
+                }
             }
 
             // Global Official Receipt Dialog Popup

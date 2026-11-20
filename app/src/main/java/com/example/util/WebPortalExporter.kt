@@ -491,12 +491,38 @@ object WebPortalExporter {
       : ("intent://open#Intent;scheme=depros;package=" + ANDROID_PACKAGE + fbSuffix + ";end");
 
     const openBtn = document.getElementById("openAppBtn");
-    const isAndroid = /Android/i.test(navigator.userAgent);
-    openBtn.href = isAndroid ? androidIntentLink : customSchemeLink;
+    const ua = navigator.userAgent || "";
+    const isAndroid = /Android/i.test(ua);
+    const isAltBrowser = /OPR|Opera|Opera Mini|UCBrowser|PHX|SamsungBrowser|MiuiBrowser|VivoBrowser|HeyTapBrowser|YaBrowser|Firefox|FxiOS|EdgA|wv\b/i.test(ua);
+    const isChromeAndroid = isAndroid && /\bChrome\/\d+/i.test(ua) && !isAltBrowser;
+    openBtn.href = isChromeAndroid ? androidIntentLink : customSchemeLink;
+
+    openBtn.addEventListener("click", function(e) {
+      if (isAndroid && !isChromeAndroid) {
+        e.preventDefault();
+        let leftPage = false;
+        const onHide = function() {
+          if (document.hidden) leftPage = true;
+        };
+        document.addEventListener("visibilitychange", onHide, { once: true });
+        try {
+          window.location.href = customSchemeLink;
+        } catch (_) {}
+        setTimeout(function() {
+          document.removeEventListener("visibilitychange", onHide);
+          if (!leftPage && !document.hidden) {
+            const note = document.getElementById("syncStatusNote");
+            if (note) {
+              note.innerHTML = "⚠️ <strong>App not installed yet (or browser blocked auto-open)?</strong><br/>&bull; New customer? Tap <strong>⬇️ Download Android APK</strong> above to install first.<br/>&bull; Already installed? Tap <strong>⋮ Menu &rarr; Open in Chrome</strong> (Opera Mini/in-app browsers block direct app switching), or tap <strong>📋 Copy Store Sync Link</strong> and paste inside <strong>Account &rarr; Link Now</strong>.";
+            }
+          }
+        }, 1200);
+      }
+    });
 
     const stayOnWeb = params.get("web") === "1";
     const isHttpsOrigin = window.location.protocol === "https:" || window.location.protocol === "http:";
-    if (isAndroid && isHttpsOrigin && !window.AndroidBridge && !stayOnWeb && (params.get("open_app") === "1" || params.has("sb_url"))) {
+    if (isChromeAndroid && isHttpsOrigin && !window.AndroidBridge && !stayOnWeb && (params.get("open_app") === "1" || params.has("sb_url"))) {
       setTimeout(function() {
         try {
           window.location.href = androidIntentLink;

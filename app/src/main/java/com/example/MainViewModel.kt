@@ -39,6 +39,12 @@ import com.example.data.model.StoreProfileConfig
 import com.example.data.model.SupabaseConfig
 import com.example.data.model.SupportTicket
 import com.example.data.model.SupportTicketStatus
+import com.example.data.remote.LiveCallMessage
+import com.example.data.remote.LiveCallMode
+import com.example.data.remote.LiveCallPhase
+import com.example.data.remote.LiveCallRequest
+import com.example.data.remote.LiveCallSignalingClient
+import com.example.data.remote.LiveCallUiState
 import com.example.data.repository.EcommerceRepository
 import com.example.util.CatalogBackgroundSyncJobService
 import com.example.util.DeliveryZoneHelper
@@ -68,7 +74,8 @@ enum class AppScreen {
     WISHLIST,
     ADMIN_CONTROL_ROOM,
     PARTNER_PORTAL,
-    HELP_SUPPORT
+    HELP_SUPPORT,
+    LIVE_CALL
 }
 
 data class AdminPromoConfig(
@@ -501,11 +508,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val isAdminDeviceAuthorized: StateFlow<Boolean> = _isAdminDeviceAuthorized.asStateFlow()
 
     fun selectAdminTab(tabIndex: Int) {
-        _adminSelectedTab.value = tabIndex.coerceIn(0, 10)
+        _adminSelectedTab.value = tabIndex.coerceIn(0, 11)
     }
 
     fun openAdminControlRoom(initialTab: Int = 0) {
-        _adminSelectedTab.value = initialTab.coerceIn(0, 10)
+        _adminSelectedTab.value = initialTab.coerceIn(0, 11)
         navigateTo(AppScreen.ADMIN_CONTROL_ROOM)
     }
 
@@ -1272,6 +1279,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         _cloudStatusMessage.value = testRes.getOrThrow()
                     }
                     checkForAppUpdates(showPopupIfFound = true, onResult = null)
+                    startLiveCallSignalingIfConfigured()
                 }
             }
         } else {
@@ -2085,6 +2093,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         super.onCleared()
+        liveCallTimerJob?.cancel()
+        liveLobbyPollJob?.cancel()
+        liveCallClient.disconnect()
         offlineConnectivityManager.release()
         voiceManager.shutdown()
     }
@@ -2342,6 +2353,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _supabaseConfigState.value = repository.supabaseSync.getConfig()
         _isSupabaseConnected.value = false
         _cloudStatusMessage.value = if (cleanU.isNotBlank()) "Credentials saved ($cleanU). Verifying..." else "Supabase credentials cleared."
+        if (cleanU.isNotBlank() && cleanK.isNotBlank()) {
+            startLiveCallSignalingIfConfigured()
+        }
         return cleanU to cleanK
     }
 
@@ -3690,5 +3704,500 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val syncedCount = (pendingCount - remaining).coerceAtLeast(0)
             onComplete(syncedCount)
         }
+    }
+
+    // =========================================================================
+    // #11 LIVE AUDIO & VIDEO INTERACTIVE CALL HUB (SWITCHABLE AUDIO <-> VIDEO)
+    // =========================================================================
+    private val deviceCallSenderId: String = adminPrefs.getString("device_call_sender_id", null)
+        ?: ("dev_" + UUID.randomUUID().toString().take(8)).also { id ->
+            adminPrefs.edit().putString("device_call_sender_id", id).apply()
+        }
+
+    private val liveCallClient = LiveCallSignalingClient(
+        scope = viewModelScope,
+        cleanUrlFn = { raw -> repository.supabaseSync.cleanUrl(raw) }
+    )
+
+    private val _liveCallState = MutableStateFlow(LiveCallUiState())
+    val liveCallState: StateFlow<LiveCallUiState> = _liveCallState.asStateFlow()
+
+    private val _inboundWebRtcSignal = MutableStateFlow<String?>(null)
+    val inboundWebRtcSignal: StateFlow<String?> = _inboundWebRtcSignal.asStateFlow()
+
+    private var liveCallObserverStarted = false
+    private var liveCallTimerJob: kotlinx.coroutines.Job? = null
+    private var liveLobbyPollJob: kotlinx.coroutines.Job? = null
+    private var lastAlertedRoomId: String = ""
+
+    private fun startLiveCallSignalingIfConfigured() {
+        val cfg = repository.supabaseSync.getConfig()
+        if (cfg.url.isBlank() || cfg.anonKey.isBlank() || repository.supabaseSync.isPlaceholderConfig(cfg.url, cfg.anonKey)) {
+            return
+        }
+        liveCallClient.connect(cfg.url, cfg.anonKey, deviceCallSenderId)
+        if (!liveCallObserverStarted) {
+            liveCallObserverStarted = true
+            viewModelScope.launch {
+                liveCallClient.isConnected.collect { connected ->
+                    _liveCallState.value = _liveCallState.value.copy(isRealtimeConnected = connected)
+                }
+            }
+            viewModelScope.launch {
+                liveCallClient.events.collect { ev ->
+                    handleIncomingLiveCallSignal(ev)
+                }
+            }
+            liveLobbyPollJob?.cancel()
+            liveLobbyPollJob = viewModelScope.launch {
+                while (isActive) {
+                    val curCfg = repository.supabaseSync.getConfig()
+                    if (curCfg.url.isNotBlank() && curCfg.anonKey.isNotBlank() &&
+                        !repository.supabaseSync.isPlaceholderConfig(curCfg.url, curCfg.anonKey)
+                    ) {
+                        val isAdminDevice = _isAdminUnlocked.value || (_currentCustomer.value?.isAdmin == true)
+                        val snap = liveCallClient.fetchLobbySnapshot(curCfg.url, curCfg.anonKey)
+                        if (snap != null) {
+                            val activeReqs = snap.requests
+                            _liveCallState.value = _liveCallState.value.copy(
+                                adminOnline = snap.adminOnline || isAdminDevice,
+                                incomingRequests = activeReqs
+                            )
+                            if (isAdminDevice && activeReqs.isNotEmpty() && _liveCallState.value.phase == LiveCallPhase.IDLE) {
+                                val top = activeReqs.first()
+                                if (top.roomId != lastAlertedRoomId) {
+                                    lastAlertedRoomId = top.roomId
+                                    ShopNotificationHelper.notifyIncomingLiveCall(
+                                        context = getApplication(),
+                                        callerName = top.callerName,
+                                        isVideoCall = top.mode == LiveCallMode.VIDEO
+                                    )
+                                    voiceManager.speakText("Incoming ${top.mode.label} from ${top.callerName}")
+                                }
+                            }
+                        }
+                        if (isAdminDevice && _liveCallState.value.adminOnline) {
+                            liveCallClient.publishLobbySnapshot(
+                                supabaseUrl = curCfg.url,
+                                anonKey = curCfg.anonKey,
+                                adminOnline = true,
+                                requests = _liveCallState.value.incomingRequests
+                            )
+                        }
+                    }
+                    delay(5_000L)
+                }
+            }
+        }
+    }
+
+    private fun handleIncomingLiveCallSignal(ev: com.example.data.remote.LiveCallSignalEvent) {
+        val state = _liveCallState.value
+        val isAdminDevice = _isAdminUnlocked.value || (_currentCustomer.value?.isAdmin == true)
+        when (ev.type) {
+            "RING" -> {
+                val callerName = ev.payload.optString("callerName", "Customer")
+                val callerEmail = ev.payload.optString("callerEmail", "")
+                val callerPhone = ev.payload.optString("callerPhone", "")
+                val topic = ev.payload.optString("topic", "Live Support")
+                val modeStr = ev.payload.optString("mode", "AUDIO")
+                val mode = if (modeStr.equals("VIDEO", true)) LiveCallMode.VIDEO else LiveCallMode.AUDIO
+                val req = LiveCallRequest(
+                    roomId = ev.roomId,
+                    callerName = callerName,
+                    callerEmail = callerEmail,
+                    callerPhone = callerPhone,
+                    mode = mode,
+                    topic = topic,
+                    createdAt = System.currentTimeMillis()
+                )
+                val updatedList = (listOf(req) + state.incomingRequests.filterNot { it.roomId == ev.roomId }).take(10)
+                _liveCallState.value = state.copy(incomingRequests = updatedList)
+                if (isAdminDevice && ev.roomId != lastAlertedRoomId) {
+                    lastAlertedRoomId = ev.roomId
+                    ShopNotificationHelper.notifyIncomingLiveCall(
+                        context = getApplication(),
+                        callerName = callerName,
+                        isVideoCall = mode == LiveCallMode.VIDEO
+                    )
+                    voiceManager.speakText("Incoming ${mode.label} from $callerName")
+                }
+            }
+            "ACCEPT" -> {
+                if (ev.roomId == state.roomId && (state.phase == LiveCallPhase.RINGING_OUTGOING || state.phase == LiveCallPhase.CONNECTING)) {
+                    val responder = ev.payload.optString("responderName", "Store Admin")
+                    val modeStr = ev.payload.optString("mode", state.mode.name)
+                    val mode = if (modeStr.equals("VIDEO", true)) LiveCallMode.VIDEO else LiveCallMode.AUDIO
+                    _liveCallState.value = state.copy(
+                        phase = LiveCallPhase.CONNECTING,
+                        mode = mode,
+                        peerName = responder,
+                        statusBanner = "$responder answered — linking live ${mode.label.lowercase()}..."
+                    )
+                }
+            }
+            "DECLINE" -> {
+                val updated = state.incomingRequests.filterNot { it.roomId == ev.roomId }
+                if (ev.roomId == state.roomId) {
+                    liveCallTimerJob?.cancel()
+                    _liveCallState.value = state.copy(
+                        phase = LiveCallPhase.ENDED,
+                        incomingRequests = updated,
+                        statusBanner = ev.payload.optString("reason", "Admin is currently busy — please try again or send WhatsApp.")
+                    )
+                } else {
+                    _liveCallState.value = state.copy(incomingRequests = updated)
+                }
+            }
+            "MODE_SWITCH" -> {
+                if (ev.roomId == state.roomId) {
+                    val modeStr = ev.payload.optString("mode", "AUDIO")
+                    val switched = if (modeStr.equals("VIDEO", true)) LiveCallMode.VIDEO else LiveCallMode.AUDIO
+                    val actor = ev.payload.optString("actorName", state.peerName)
+                    _liveCallState.value = state.copy(
+                        mode = switched,
+                        statusBanner = "$actor switched call to ${switched.label}"
+                    )
+                }
+            }
+            "CHAT" -> {
+                if (ev.roomId == state.roomId || state.roomId.isBlank()) {
+                    val msg = LiveCallMessage(
+                        id = UUID.randomUUID().toString().take(8),
+                        senderName = ev.payload.optString("senderName", "Customer"),
+                        isFromAdmin = ev.payload.optBoolean("isFromAdmin", false),
+                        text = ev.payload.optString("text", ""),
+                        attachedTag = ev.payload.optString("attachedTag", ""),
+                        timestamp = System.currentTimeMillis()
+                    )
+                    if (msg.text.isNotBlank()) {
+                        _liveCallState.value = state.copy(
+                            chatMessages = (state.chatMessages + msg).takeLast(60)
+                        )
+                    }
+                }
+            }
+            "WEBRTC" -> {
+                if (ev.roomId == state.roomId) {
+                    val rawSignal = ev.payload.optString("signal", "")
+                    if (rawSignal.isNotBlank()) {
+                        _inboundWebRtcSignal.value = rawSignal
+                    }
+                }
+            }
+            "HANGUP" -> {
+                val updated = state.incomingRequests.filterNot { it.roomId == ev.roomId }
+                if (ev.roomId == state.roomId) {
+                    liveCallTimerJob?.cancel()
+                    _liveCallState.value = state.copy(
+                        phase = LiveCallPhase.ENDED,
+                        incomingRequests = updated,
+                        elapsedSeconds = 0,
+                        localAudioLevel = 0,
+                        remoteAudioLevel = 0,
+                        statusBanner = "Call ended."
+                    )
+                } else {
+                    _liveCallState.value = state.copy(incomingRequests = updated)
+                }
+            }
+        }
+    }
+
+    fun openLiveCallScreen() {
+        startLiveCallSignalingIfConfigured()
+        val isAdminDevice = _isAdminUnlocked.value || (_currentCustomer.value?.isAdmin == true)
+        _liveCallState.value = _liveCallState.value.copy(
+            isAdminRole = isAdminDevice,
+            adminOnline = if (isAdminDevice) true else _liveCallState.value.adminOnline
+        )
+        navigateTo(AppScreen.LIVE_CALL)
+    }
+
+    fun selectLiveCallPreMode(mode: LiveCallMode) {
+        _liveCallState.value = _liveCallState.value.copy(mode = mode)
+    }
+
+    fun startCustomerLiveCall(mode: LiveCallMode, topic: String) {
+        startLiveCallSignalingIfConfigured()
+        val customer = _currentCustomer.value
+        val callerName = customer?.fullName?.takeIf { it.isNotBlank() }
+            ?: _savedDeliveryInfo.value.fullName.takeIf { it.isNotBlank() }
+            ?: "24/7 Customer"
+        val callerEmail = customer?.email.orEmpty()
+        val callerPhone = customer?.phoneNumber?.takeIf { it.isNotBlank() }
+            ?: _savedDeliveryInfo.value.phoneNumber
+        val roomId = "call_" + UUID.randomUUID().toString().take(8)
+        val cleanTopic = topic.ifBlank { "Live Store Inquiry" }
+
+        val req = LiveCallRequest(
+            roomId = roomId,
+            callerName = callerName,
+            callerEmail = callerEmail,
+            callerPhone = callerPhone,
+            mode = mode,
+            topic = cleanTopic,
+            createdAt = System.currentTimeMillis()
+        )
+        val updatedReqs = (listOf(req) + _liveCallState.value.incomingRequests.filterNot { it.roomId == roomId }).take(10)
+
+        _liveCallState.value = _liveCallState.value.copy(
+            phase = LiveCallPhase.RINGING_OUTGOING,
+            mode = mode,
+            roomId = roomId,
+            peerName = "${_storeProfile.value.storeName} Admin",
+            topic = cleanTopic,
+            isAdminRole = false,
+            isCallerInitiator = true,
+            isMicMuted = false,
+            elapsedSeconds = 0,
+            incomingRequests = updatedReqs,
+            chatMessages = emptyList(),
+            statusBanner = "Ringing Admin Desk in ${mode.label} mode..."
+        )
+
+        val payload = JSONObject().apply {
+            put("callerName", callerName)
+            put("callerEmail", callerEmail)
+            put("callerPhone", callerPhone)
+            put("mode", mode.name)
+            put("topic", cleanTopic)
+        }
+        liveCallClient.sendSignal("RING", roomId, payload)
+
+        val cfg = repository.supabaseSync.getConfig()
+        viewModelScope.launch {
+            liveCallClient.publishLobbySnapshot(cfg.url, cfg.anonKey, _liveCallState.value.adminOnline, updatedReqs)
+        }
+    }
+
+    fun answerIncomingLiveCall(request: LiveCallRequest, answerMode: LiveCallMode = request.mode) {
+        startLiveCallSignalingIfConfigured()
+        val adminName = _storeProfile.value.storeName.ifBlank { "24/7 SHOPPING" } + " Admin"
+        val remaining = _liveCallState.value.incomingRequests.filterNot { it.roomId == request.roomId }
+        _liveCallState.value = _liveCallState.value.copy(
+            phase = LiveCallPhase.CONNECTING,
+            mode = answerMode,
+            roomId = request.roomId,
+            peerName = request.callerName,
+            topic = request.topic,
+            isAdminRole = true,
+            isCallerInitiator = false,
+            isMicMuted = false,
+            elapsedSeconds = 0,
+            adminOnline = true,
+            incomingRequests = remaining,
+            chatMessages = emptyList(),
+            statusBanner = "Connecting live ${answerMode.label.lowercase()} with ${request.callerName}..."
+        )
+        navigateTo(AppScreen.LIVE_CALL)
+        liveCallClient.sendSignal(
+            "ACCEPT",
+            request.roomId,
+            JSONObject().apply {
+                put("responderName", adminName)
+                put("mode", answerMode.name)
+            }
+        )
+        val cfg = repository.supabaseSync.getConfig()
+        viewModelScope.launch {
+            liveCallClient.publishLobbySnapshot(cfg.url, cfg.anonKey, true, remaining)
+        }
+    }
+
+    fun declineIncomingLiveCall(request: LiveCallRequest) {
+        val remaining = _liveCallState.value.incomingRequests.filterNot { it.roomId == request.roomId }
+        _liveCallState.value = _liveCallState.value.copy(incomingRequests = remaining)
+        liveCallClient.sendSignal(
+            "DECLINE",
+            request.roomId,
+            JSONObject().apply { put("reason", "Admin declined or is assisting another customer.") }
+        )
+        val cfg = repository.supabaseSync.getConfig()
+        viewModelScope.launch {
+            liveCallClient.publishLobbySnapshot(cfg.url, cfg.anonKey, _liveCallState.value.adminOnline, remaining)
+        }
+    }
+
+    fun switchLiveCallMode(newMode: LiveCallMode) {
+        val state = _liveCallState.value
+        if (state.mode == newMode) return
+        val actor = if (state.isAdminRole) "Admin" else (_currentCustomer.value?.fullName ?: "Customer")
+        _liveCallState.value = state.copy(
+            mode = newMode,
+            statusBanner = if (state.phase == LiveCallPhase.CONNECTED || state.phase == LiveCallPhase.CONNECTING) {
+                "Switched live to ${newMode.label}"
+            } else {
+                ""
+            }
+        )
+        if (state.roomId.isNotBlank() && state.phase != LiveCallPhase.IDLE && state.phase != LiveCallPhase.ENDED) {
+            liveCallClient.sendSignal(
+                "MODE_SWITCH",
+                state.roomId,
+                JSONObject().apply {
+                    put("mode", newMode.name)
+                    put("actorName", actor)
+                }
+            )
+        }
+    }
+
+    fun toggleLiveCallMicMute() {
+        val cur = _liveCallState.value
+        _liveCallState.value = cur.copy(isMicMuted = !cur.isMicMuted)
+    }
+
+    fun toggleLiveCallSpeaker() {
+        val cur = _liveCallState.value
+        _liveCallState.value = cur.copy(isSpeakerOn = !cur.isSpeakerOn)
+    }
+
+    fun flipLiveCallCamera() {
+        val cur = _liveCallState.value
+        _liveCallState.value = cur.copy(isUsingFrontCamera = !cur.isUsingFrontCamera)
+    }
+
+    fun setAdminCallAvailability(online: Boolean) {
+        startLiveCallSignalingIfConfigured()
+        _liveCallState.value = _liveCallState.value.copy(adminOnline = online)
+        val cfg = repository.supabaseSync.getConfig()
+        viewModelScope.launch {
+            liveCallClient.publishLobbySnapshot(cfg.url, cfg.anonKey, online, _liveCallState.value.incomingRequests)
+        }
+    }
+
+    fun sendLiveCallChatMessage(text: String, attachedTag: String = "") {
+        val clean = text.trim()
+        if (clean.isBlank() && attachedTag.isBlank()) return
+        val state = _liveCallState.value
+        val sender = if (state.isAdminRole) {
+            "Admin Desk"
+        } else {
+            _currentCustomer.value?.fullName?.ifBlank { "Customer" } ?: "Customer"
+        }
+        val msg = LiveCallMessage(
+            id = UUID.randomUUID().toString().take(8),
+            senderName = sender,
+            isFromAdmin = state.isAdminRole,
+            text = clean.ifBlank { "Shared $attachedTag" },
+            attachedTag = attachedTag,
+            timestamp = System.currentTimeMillis()
+        )
+        _liveCallState.value = state.copy(chatMessages = (state.chatMessages + msg).takeLast(60))
+        if (state.roomId.isNotBlank()) {
+            liveCallClient.sendSignal(
+                "CHAT",
+                state.roomId,
+                JSONObject().apply {
+                    put("senderName", sender)
+                    put("isFromAdmin", state.isAdminRole)
+                    put("text", msg.text)
+                    put("attachedTag", attachedTag)
+                }
+            )
+        }
+    }
+
+    fun sendWebRtcOutboundSignal(signalJson: String) {
+        val roomId = _liveCallState.value.roomId
+        if (roomId.isBlank()) return
+        liveCallClient.sendSignal(
+            "WEBRTC",
+            roomId,
+            JSONObject().apply { put("signal", signalJson) }
+        )
+    }
+
+    fun onWebRtcConnectionState(rawState: String) {
+        val cur = _liveCallState.value
+        when (rawState.lowercase()) {
+            "connected" -> {
+                if (cur.phase != LiveCallPhase.CONNECTED) {
+                    _liveCallState.value = cur.copy(
+                        phase = LiveCallPhase.CONNECTED,
+                        statusBanner = "Live ${cur.mode.label} connected"
+                    )
+                    startLiveCallTimer()
+                }
+            }
+            "reconnecting", "disconnected" -> {
+                if (cur.phase == LiveCallPhase.CONNECTED) {
+                    _liveCallState.value = cur.copy(
+                        phase = LiveCallPhase.RECONNECTING,
+                        statusBanner = "Network unstable — reconnecting live stream..."
+                    )
+                }
+            }
+            "failed" -> {
+                _liveCallState.value = cur.copy(
+                    phase = LiveCallPhase.RECONNECTING,
+                    statusBanner = "Re-negotiating peer route..."
+                )
+            }
+        }
+    }
+
+    private fun startLiveCallTimer() {
+        liveCallTimerJob?.cancel()
+        liveCallTimerJob = viewModelScope.launch {
+            while (isActive) {
+                delay(1000L)
+                val cur = _liveCallState.value
+                if (cur.phase == LiveCallPhase.CONNECTED || cur.phase == LiveCallPhase.RECONNECTING) {
+                    _liveCallState.value = cur.copy(elapsedSeconds = cur.elapsedSeconds + 1)
+                } else {
+                    break
+                }
+            }
+        }
+    }
+
+    fun onWebRtcAudioLevels(local: Int, remote: Int) {
+        val cur = _liveCallState.value
+        _liveCallState.value = cur.copy(localAudioLevel = local, remoteAudioLevel = remote)
+    }
+
+    fun onWebRtcMediaError(msg: String) {
+        _liveCallState.value = _liveCallState.value.copy(statusBanner = msg)
+    }
+
+    fun consumeInboundWebRtcSignal() {
+        _inboundWebRtcSignal.value = null
+    }
+
+    fun resetLiveCallToIdle() {
+        liveCallTimerJob?.cancel()
+        val cur = _liveCallState.value
+        _liveCallState.value = cur.copy(
+            phase = LiveCallPhase.IDLE,
+            roomId = "",
+            elapsedSeconds = 0,
+            localAudioLevel = 0,
+            remoteAudioLevel = 0,
+            statusBanner = ""
+        )
+    }
+
+    fun endLiveCall() {
+        liveCallTimerJob?.cancel()
+        val cur = _liveCallState.value
+        if (cur.roomId.isNotBlank()) {
+            liveCallClient.sendSignal("HANGUP", cur.roomId)
+            val remaining = cur.incomingRequests.filterNot { it.roomId == cur.roomId }
+            val cfg = repository.supabaseSync.getConfig()
+            viewModelScope.launch {
+                liveCallClient.publishLobbySnapshot(cfg.url, cfg.anonKey, cur.adminOnline, remaining)
+            }
+        }
+        _liveCallState.value = cur.copy(
+            phase = LiveCallPhase.IDLE,
+            roomId = "",
+            elapsedSeconds = 0,
+            localAudioLevel = 0,
+            remoteAudioLevel = 0,
+            incomingRequests = cur.incomingRequests.filterNot { it.roomId == cur.roomId },
+            statusBanner = ""
+        )
     }
 }

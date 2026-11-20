@@ -83,7 +83,10 @@ import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cancel
@@ -428,6 +431,17 @@ fun AdminControlRoomScreen(
                     icon = { Icon(Icons.Default.SupportAgent, contentDescription = null, modifier = Modifier.size(18.dp)) },
                     modifier = Modifier.testTag("admin_returns_support_tab")
                 )
+                val liveCallState by viewModel.liveCallState.collectAsState()
+                Tab(
+                    selected = selectedTab == 11,
+                    onClick = { selectedTab = 11; viewModel.selectAdminTab(11) },
+                    text = {
+                        val badge = if (liveCallState.incomingRequests.isNotEmpty()) " (${liveCallState.incomingRequests.size})" else ""
+                        Text("Live Audio/Video$badge")
+                    },
+                    icon = { Icon(Icons.Default.Videocam, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                    modifier = Modifier.testTag("admin_live_call_tab")
+                )
             }
 
             DualAxisScrollContainer(
@@ -449,6 +463,7 @@ fun AdminControlRoomScreen(
                     8 -> AdminSecuritySettingsTab(viewModel)
                     9 -> AdminPartnerHubTab(viewModel = viewModel)
                     10 -> ReturnsAndSupportAdminTab(viewModel = viewModel)
+                    11 -> LiveCallsAdminTab(viewModel = viewModel)
                 }
             }
         }
@@ -9477,4 +9492,145 @@ private fun ReturnsAndSupportAdminTab(viewModel: MainViewModel) {
         }
     }
 }
+
+@Composable
+private fun LiveCallsAdminTab(viewModel: MainViewModel) {
+    val callState by viewModel.liveCallState.collectAsState()
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Card(
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF064E3B)),
+            border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.55f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Live Audio & Video Customer Desk",
+                            color = AccentGold,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 16.sp
+                        )
+                        Text(
+                            text = if (callState.adminOnline) "ONLINE • Customers see live availability" else "Toggle ON to broadcast Admin availability to customers",
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontSize = 12.sp
+                        )
+                    }
+                    androidx.compose.material3.Switch(
+                        checked = callState.adminOnline,
+                        onCheckedChange = { viewModel.setAdminCallAvailability(it) }
+                    )
+                }
+                Button(
+                    onClick = { viewModel.openLiveCallScreen() },
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = Color(0xFF052E16)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("admin_open_live_studio_button")
+                ) {
+                    Icon(Icons.Default.Videocam, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Open Live Audio/Video Studio", fontWeight = FontWeight.Black, fontSize = 13.sp)
+                }
+            }
+        }
+
+        Text(
+            text = "Incoming Customer Calls (${callState.incomingRequests.size})",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Black,
+            color = CyberCyan
+        )
+
+        if (callState.incomingRequests.isEmpty()) {
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "No customer is currently ringing. When a customer taps Live Audio/Video Call, they will appear right here and trigger an instant call alert.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(16.dp)
+                )
+            }
+        } else {
+            callState.incomingRequests.forEach { req ->
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, CyberCyan.copy(alpha = 0.5f)),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "${req.callerName} • Requested ${req.mode.label}",
+                            fontWeight = FontWeight.Black,
+                            fontSize = 14.sp
+                        )
+                        Text(
+                            text = "Topic: ${req.topic}${if (req.callerPhone.isNotBlank()) " • ${req.callerPhone}" else ""}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = { viewModel.answerIncomingLiveCall(req, com.example.data.remote.LiveCallMode.AUDIO) },
+                                colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
+                                modifier = Modifier.weight(1f).height(48.dp)
+                            ) {
+                                Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Answer Audio", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Button(
+                                onClick = { viewModel.answerIncomingLiveCall(req, com.example.data.remote.LiveCallMode.VIDEO) },
+                                colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = Color(0xFF052E16)),
+                                modifier = Modifier.weight(1f).height(48.dp)
+                            ) {
+                                Icon(Icons.Default.Videocam, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Answer Video", fontSize = 11.5.sp, fontWeight = FontWeight.Black)
+                            }
+                            IconButton(
+                                onClick = { viewModel.declineIncomingLiveCall(req) },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFF991B1B))
+                            ) {
+                                Icon(Icons.Default.CallEnd, contentDescription = "Decline", tint = Color.White)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 

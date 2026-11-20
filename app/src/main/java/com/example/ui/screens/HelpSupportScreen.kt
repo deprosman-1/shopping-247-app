@@ -30,6 +30,8 @@ import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -62,7 +64,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.MainViewModel
 import com.example.data.model.SupportTicketStatus
+import com.example.data.remote.LiveCallMode
 import com.example.ui.theme.AccentGold
+import com.example.ui.theme.SuccessGreen
 import com.example.util.WhatsAppHelper
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -204,6 +208,41 @@ fun HelpSupportScreen(
                                 Icon(Icons.Default.Chat, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
                                 Text("WhatsApp", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    viewModel.selectLiveCallPreMode(LiveCallMode.AUDIO)
+                                    viewModel.openLiveCallScreen()
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = Color.White),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("help_live_audio_button")
+                            ) {
+                                Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Live Audio Talk", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Button(
+                                onClick = {
+                                    viewModel.selectLiveCallPreMode(LiveCallMode.VIDEO)
+                                    viewModel.openLiveCallScreen()
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color(0xFF052E16)),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("help_live_video_button")
+                            ) {
+                                Icon(Icons.Default.Videocam, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Live Video Call", fontSize = 12.sp, fontWeight = FontWeight.Black)
                             }
                         }
                     }
