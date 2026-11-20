@@ -37,7 +37,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Handshake
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LocalShipping
@@ -209,86 +208,6 @@ fun AuthScreen(
                     .verticalScroll(rememberScrollState())
                     .padding(20.dp)
             ) {
-                val isCloudLinked by viewModel.isSupabaseConnected.collectAsState()
-                val isCloudBusy by viewModel.isSupabaseBusy.collectAsState()
-                val hasCloudCfg = remember(isCloudLinked, currentCustomer) {
-                    !viewModel.repository.supabaseSync.isPlaceholderConfig()
-                }
-                var showLinkPasteBox by remember { mutableStateOf(false) }
-                var pastedSyncLink by remember { mutableStateOf("") }
-
-                if (!hasCloudCfg) {
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFFF59E0B).copy(alpha = 0.14f),
-                        border = BorderStroke(1.5.dp, Color(0xFFF59E0B).copy(alpha = 0.65f)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 14.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "⚠️ Phone Not Linked to Store Cloud Yet",
-                                    fontWeight = FontWeight.Black,
-                                    fontSize = 12.sp,
-                                    color = Color(0xFFB45309)
-                                )
-                                AssistChip(
-                                    onClick = { showLinkPasteBox = !showLinkPasteBox },
-                                    label = { Text(if (showLinkPasteBox) "Hide" else "Link Now", fontSize = 10.sp, fontWeight = FontWeight.Bold) }
-                                )
-                            }
-                            Text(
-                                text = "Link this phone to the Store Cloud so your Sign-Up & Orders appear immediately in the Seller's Admin Control Room (earlier local sign-ups & orders upload automatically once linked).",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            OutlinedButton(
-                                onClick = { viewModel.openAdminControlRoom(4) },
-                                border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.8f)),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGold),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(48.dp)
-                                    .testTag("auth_banner_admin_supabase_button")
-                            ) {
-                                Icon(Icons.Default.AdminPanelSettings, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Store Owner? Enter Supabase URL & Anon Key", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            }
-                            if (showLinkPasteBox) {
-                                Spacer(modifier = Modifier.height(8.dp))
-                                OutlinedTextField(
-                                    value = pastedSyncLink,
-                                    onValueChange = { pastedSyncLink = it },
-                                    label = { Text("Paste Store Link or Full WhatsApp Invite") },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Button(
-                                    enabled = !isCloudBusy && pastedSyncLink.isNotBlank(),
-                                    onClick = {
-                                        viewModel.applyStoreSyncLinkOrCredentials(pastedSyncLink) { ok, msg ->
-                                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                                            if (ok) showLinkPasteBox = false
-                                        }
-                                    },
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(if (isCloudBusy) "Linking & Uploading..." else "Connect & Sync Account Now", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                    }
-                }
-
                 // IF ALREADY LOGGED IN vs NOT LOGGED IN
                 if (currentCustomer != null) {
                     val customer = currentCustomer!!
@@ -767,30 +686,6 @@ fun AuthScreen(
                     }
                 }
 
-                if (hasCloudCfg) {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = SuccessGreen.copy(alpha = 0.1f),
-                        border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.45f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(
-                                text = "🟢 Store Cloud Sync Active",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
-                                color = SuccessGreen
-                            )
-                            Text(
-                                text = "Your sign-up details and orders automatically sync live to 24/7 Shopping Store Admin.",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-
                 Spacer(modifier = Modifier.height(14.dp))
                 Card(
                     onClick = { viewModel.navigateTo(AppScreen.PARTNER_PORTAL) },
@@ -1026,90 +921,6 @@ fun AuthScreen(
                         Column {
                             Text("Help Center, Privacy Policy & Terms", fontWeight = FontWeight.Black, fontSize = 13.sp, color = CyberCyan)
                             Text("FAQs, Support Tickets, Delivery Policy & Data Privacy", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Admin Entry Point (Password & Biometric Protected)
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.3.dp, AccentGold.copy(alpha = 0.65f)),
-                    colors = CardDefaults.cardColors(containerColor = AccentGold.copy(alpha = 0.09f)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("auth_admin_entry_card")
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(AccentGold.copy(alpha = 0.22f))
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.AdminPanelSettings,
-                                    contentDescription = "Admin Control Entry",
-                                    tint = AccentGold,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Admin Entry & Supabase Cloud",
-                                    fontWeight = FontWeight.Black,
-                                    fontSize = 13.5.sp,
-                                    color = AccentGold
-                                )
-                                Text(
-                                    text = "Protected store owner portal to enter Supabase URL, upload your Anon Key & manage inventory",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = { viewModel.openAdminControlRoom(4) },
-                                colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = Color.Black),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier
-                                    .weight(1.1f)
-                                    .height(48.dp)
-                                    .testTag("auth_admin_supabase_entry_button")
-                            ) {
-                                Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Supabase & Key", fontWeight = FontWeight.Black, fontSize = 12.sp)
-                            }
-
-                            OutlinedButton(
-                                onClick = { viewModel.openAdminControlRoom(0) },
-                                border = BorderStroke(1.2.dp, AccentGold.copy(alpha = 0.7f)),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGold),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(48.dp)
-                                    .testTag("auth_admin_control_entry_button")
-                            ) {
-                                Icon(Icons.Default.AdminPanelSettings, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Admin Panel", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            }
                         }
                     }
                 }

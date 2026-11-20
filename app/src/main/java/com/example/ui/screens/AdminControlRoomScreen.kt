@@ -43,6 +43,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -460,7 +461,13 @@ fun AdminControlRoomScreen(
                     5 -> DeliveryOptionsTab(viewModel)
                     6 -> PromoActivationTab(viewModel)
                     7 -> AdminPreOrdersTab(viewModel)
-                    8 -> AdminSecuritySettingsTab(viewModel)
+                    8 -> AdminSecuritySettingsTab(
+                        viewModel = viewModel,
+                        onNavigateToTab = { tab ->
+                            selectedTab = tab
+                            viewModel.selectAdminTab(tab)
+                        }
+                    )
                     9 -> AdminPartnerHubTab(viewModel = viewModel)
                     10 -> ReturnsAndSupportAdminTab(viewModel = viewModel)
                     11 -> LiveCallsAdminTab(viewModel = viewModel)
@@ -6799,6 +6806,12 @@ private fun DeliveryOptionsTab(viewModel: MainViewModel) {
 @Composable
 private fun AdminSecurityLockScreen(viewModel: MainViewModel) {
     val context = LocalContext.current
+    val initialTab by viewModel.adminSelectedTab.collectAsState()
+    val isCloudLinked by viewModel.isSupabaseConnected.collectAsState()
+    val hasCloudCfg = remember(isCloudLinked) {
+        !viewModel.repository.supabaseSync.isPlaceholderConfig()
+    }
+    var selectedEntryTab by remember(initialTab) { mutableIntStateOf(if (initialTab == 4) 4 else 0) }
     var passwordInput by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
 
@@ -6815,7 +6828,8 @@ private fun AdminSecurityLockScreen(viewModel: MainViewModel) {
             border = BorderStroke(1.5.dp, AccentGold.copy(alpha = 0.5f)),
             modifier = Modifier
                 .fillMaxWidth()
-                .widthIn(max = 420.dp)
+                .widthIn(max = 430.dp)
+                .verticalScroll(rememberScrollState())
         ) {
             Column(
                 modifier = Modifier.padding(24.dp),
@@ -6836,23 +6850,83 @@ private fun AdminSecurityLockScreen(viewModel: MainViewModel) {
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (hasCloudCfg) SuccessGreen.copy(alpha = 0.16f) else Color(0xFFF59E0B).copy(alpha = 0.16f),
+                    border = BorderStroke(1.dp, if (hasCloudCfg) SuccessGreen.copy(alpha = 0.5f) else Color(0xFFF59E0B).copy(alpha = 0.5f))
+                ) {
+                    Text(
+                        text = if (hasCloudCfg) "RESTRICTED AREA • SUPABASE CLOUD ACTIVE" else "RESTRICTED AREA • CLOUD SETUP AVAILABLE INSIDE",
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Black,
+                        color = if (hasCloudCfg) SuccessGreen else AccentGold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "Admin Security Control Room",
+                    text = "Admin Entry & Supabase Cloud",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Black,
+                    color = AccentGold,
                     textAlign = TextAlign.Center
                 )
 
+                Spacer(modifier = Modifier.height(4.dp))
+
                 Text(
-                    text = "Enter your admin security password or biometrics to access Supabase Cloud (URL & Anon Key), product forms, receipts, promo activation, and settings.",
+                    text = "Protected store owner area to enter Supabase URL, upload your Anon Key, and manage product forms, receipts & settings.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
                 )
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Destination selector inside the restricted Admin entrance
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = selectedEntryTab == 0,
+                        onClick = { selectedEntryTab = 0 },
+                        leadingIcon = {
+                            Icon(Icons.Default.AdminPanelSettings, contentDescription = null, modifier = Modifier.size(16.dp))
+                        },
+                        label = {
+                            Text("Admin Panel", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = AccentGold,
+                            selectedLabelColor = Color.Black,
+                            selectedLeadingIconColor = Color.Black
+                        ),
+                        modifier = Modifier.weight(1f).testTag("admin_lock_select_panel_chip")
+                    )
+                    FilterChip(
+                        selected = selectedEntryTab == 4,
+                        onClick = { selectedEntryTab = 4 },
+                        leadingIcon = {
+                            Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(16.dp))
+                        },
+                        label = {
+                            Text("Supabase & Key", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = CyberCyan,
+                            selectedLabelColor = Color.Black,
+                            selectedLeadingIconColor = Color.Black
+                        ),
+                        modifier = Modifier.weight(1f).testTag("admin_lock_select_supabase_chip")
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
 
                 OutlinedTextField(
                     value = passwordInput,
@@ -6876,7 +6950,7 @@ private fun AdminSecurityLockScreen(viewModel: MainViewModel) {
                         .testTag("admin_password_input")
                 )
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(18.dp))
 
                 val canUseBiometrics = remember(context) { BiometricLockHelper.isBiometricAvailable(context) }
 
@@ -6884,21 +6958,37 @@ private fun AdminSecurityLockScreen(viewModel: MainViewModel) {
                     onClick = {
                         val success = viewModel.verifyAdminPassword(passwordInput)
                         if (success) {
-                            Toast.makeText(context, "Admin Unlocked Successfully!", Toast.LENGTH_SHORT).show()
+                            viewModel.selectAdminTab(selectedEntryTab)
+                            Toast.makeText(
+                                context,
+                                if (selectedEntryTab == 4) "Unlocked! Opening Supabase Cloud..." else "Admin Unlocked Successfully!",
+                                Toast.LENGTH_SHORT
+                            ).show()
                         } else {
                             Toast.makeText(context, "Invalid Admin Password! Default password is 'admin123'", Toast.LENGTH_LONG).show()
                         }
                     },
                     shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentGold),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (selectedEntryTab == 4) CyberCyan else AccentGold
+                    ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(50.dp)
                         .testTag("unlock_admin_button")
                 ) {
-                    Icon(Icons.Default.Lock, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
+                    Icon(
+                        imageVector = if (selectedEntryTab == 4) Icons.Default.Cloud else Icons.Default.Lock,
+                        contentDescription = null,
+                        tint = Color.Black,
+                        modifier = Modifier.size(18.dp)
+                    )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Unlock Admin Control Room", fontWeight = FontWeight.Bold, color = Color.Black)
+                    Text(
+                        text = if (selectedEntryTab == 4) "Unlock & Open Supabase Cloud" else "Unlock Admin Control Room",
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Black
+                    )
                 }
 
                 if (canUseBiometrics) {
@@ -6908,6 +6998,7 @@ private fun AdminSecurityLockScreen(viewModel: MainViewModel) {
                             BiometricLockHelper.authenticateAdmin(
                                 context = context,
                                 onSuccess = {
+                                    viewModel.selectAdminTab(selectedEntryTab)
                                     viewModel.unlockAdminWithBiometric()
                                     Toast.makeText(context, "Admin unlocked with Biometrics!", Toast.LENGTH_SHORT).show()
                                 },
@@ -6929,7 +7020,15 @@ private fun AdminSecurityLockScreen(viewModel: MainViewModel) {
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = "Tip: Long-press the 24/7 SHOPPING logo badge on the Home front view anytime to open this restricted portal.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
 
                 TextButton(onClick = { viewModel.navigateBack() }) {
                     Text("Return to Store", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -8513,10 +8612,20 @@ private fun AdminPreOrderItemCard(
 // TAB 8: STORE PROFILE & ADMIN SECURITY SETTINGS
 // ==========================================
 @Composable
-private fun AdminSecuritySettingsTab(viewModel: MainViewModel) {
+private fun AdminSecuritySettingsTab(
+    viewModel: MainViewModel,
+    onNavigateToTab: (Int) -> Unit = {}
+) {
     val context = LocalContext.current
     val currentAdminPassword by viewModel.adminPassword.collectAsState()
     val storeProfile by viewModel.storeProfile.collectAsState()
+    val isCloudLinked by viewModel.isSupabaseConnected.collectAsState()
+    val isCloudBusy by viewModel.isSupabaseBusy.collectAsState()
+    val hasCloudCfg = remember(isCloudLinked) {
+        !viewModel.repository.supabaseSync.isPlaceholderConfig()
+    }
+    var showRestrictedLinkBox by remember { mutableStateOf(false) }
+    var pastedRestrictedSyncLink by remember { mutableStateOf("") }
 
     var storeNameInput by remember(storeProfile.storeName) { mutableStateOf(storeProfile.storeName) }
     var taglineInput by remember(storeProfile.tagline) { mutableStateOf(storeProfile.tagline) }
@@ -9004,6 +9113,146 @@ private fun AdminSecuritySettingsTab(viewModel: MainViewModel) {
                             text = if (isPublishingUpdate) "Publishing Update..." else "Publish APK Update to All Customers",
                             fontWeight = FontWeight.Black
                         )
+                    }
+                }
+            }
+        }
+
+        // Relocated from Customer Account page: Admin Entry & Supabase Cloud Control
+        item {
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                border = BorderStroke(1.5.dp, AccentGold.copy(alpha = 0.65f)),
+                colors = CardDefaults.cardColors(containerColor = AccentGold.copy(alpha = 0.09f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("admin_restricted_supabase_entry_card")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(AccentGold.copy(alpha = 0.22f))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AdminPanelSettings,
+                                contentDescription = "Admin Entry and Supabase Cloud",
+                                tint = AccentGold,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Admin Entry & Supabase Cloud",
+                                fontWeight = FontWeight.Black,
+                                fontSize = 14.sp,
+                                color = AccentGold
+                            )
+                            Text(
+                                text = "Protected store owner controls to enter Supabase URL, upload Anon Key, link another device & manage inventory.",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (hasCloudCfg) SuccessGreen.copy(alpha = 0.12f) else Color(0xFFF59E0B).copy(alpha = 0.14f),
+                        border = BorderStroke(1.dp, if (hasCloudCfg) SuccessGreen.copy(alpha = 0.45f) else Color(0xFFF59E0B).copy(alpha = 0.55f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (hasCloudCfg) "🟢 Store Cloud Sync Active" else "⚠️ Phone Not Linked to Store Cloud Yet",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = if (hasCloudCfg) SuccessGreen else AccentGold
+                                )
+                                Text(
+                                    text = if (hasCloudCfg) "Sign-ups, catalog & orders sync live to Supabase Cloud." else "Configure Supabase URL & Anon Key or paste Store Sync Link below.",
+                                    fontSize = 10.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            AssistChip(
+                                onClick = { showRestrictedLinkBox = !showRestrictedLinkBox },
+                                label = { Text(if (showRestrictedLinkBox) "Hide" else "Link Device", fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+                            )
+                        }
+                    }
+
+                    if (showRestrictedLinkBox) {
+                        OutlinedTextField(
+                            value = pastedRestrictedSyncLink,
+                            onValueChange = { pastedRestrictedSyncLink = it },
+                            label = { Text("Paste Store Link or Full WhatsApp Invite") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Button(
+                            enabled = !isCloudBusy && pastedRestrictedSyncLink.isNotBlank(),
+                            onClick = {
+                                viewModel.applyStoreSyncLinkOrCredentials(pastedRestrictedSyncLink) { ok, msg ->
+                                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                    if (ok) showRestrictedLinkBox = false
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(if (isCloudBusy) "Linking & Uploading..." else "Connect & Sync Store Cloud Now", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { onNavigateToTab(4) },
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = Color.Black),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1.1f)
+                                .height(48.dp)
+                                .testTag("admin_restricted_supabase_entry_button")
+                        ) {
+                            Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Supabase & Key", fontWeight = FontWeight.Black, fontSize = 12.sp)
+                        }
+
+                        OutlinedButton(
+                            onClick = { onNavigateToTab(0) },
+                            border = BorderStroke(1.2.dp, AccentGold.copy(alpha = 0.7f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGold),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("admin_restricted_panel_entry_button")
+                        ) {
+                            Icon(Icons.Default.AdminPanelSettings, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Admin Panel", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
                     }
                 }
             }

@@ -130,7 +130,7 @@ import com.example.data.model.CatalogSortOption
 import com.example.data.model.PriceRangeFilter
 import com.example.data.model.Product
 import com.example.data.model.ProductCategory
-import com.example.ui.components.CategoryFilterBar
+import com.example.ui.components.CategorySelectorButton
 import com.example.ui.components.DualAxisScrollContainer
 import com.example.ui.components.ShopEmblemWatermark
 import com.example.ui.components.ProductStandardCard
@@ -150,9 +150,11 @@ fun HomeScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val allProducts by viewModel.allProducts.collectAsState()
     val products by viewModel.filteredProducts.collectAsState()
     val selectedCategory by viewModel.selectedCategory.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
+    var isSearchExpanded by remember { mutableStateOf(false) }
     val cartCount by viewModel.cartTotalCount.collectAsState()
     val wishlistCount by viewModel.wishlistCount.collectAsState()
     val wishlistIds by viewModel.wishlistIds.collectAsState()
@@ -234,7 +236,7 @@ fun HomeScreen(
                 .fillMaxSize()
                 .testTag("home_screen")
         ) {
-            // App Top Brand Header (Hidden in Full Screen) - Optimized so 24/7 SHOPPING logo never clips on phone screens
+            // App Top Brand Header (Compact & Hidden in Full Screen to maximize catalog space)
             AnimatedVisibility(
                 visible = !isFullScreen,
                 enter = fadeIn() + expandVertically(),
@@ -248,22 +250,22 @@ fun HomeScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        // Prominent 24/7 SHOPPING Logo Badge (Never compressed/clipped; long-press for Admin)
+                        // Prominent 24/7 SHOPPING Logo Badge (Long-press opens restricted Admin area)
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.weight(1f)
                         ) {
                             Surface(
-                                shape = RoundedCornerShape(12.dp),
+                                shape = RoundedCornerShape(10.dp),
                                 color = Color(0xFF052E16),
-                                border = BorderStroke(1.5.dp, AccentGold),
-                                shadowElevation = 3.dp,
+                                border = BorderStroke(1.2.dp, AccentGold),
+                                shadowElevation = 2.dp,
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(12.dp))
+                                    .clip(RoundedCornerShape(10.dp))
                                     .combinedClickable(
                                         onClick = { viewModel.navigateToHome() },
                                         onLongClick = { viewModel.navigateTo(AppScreen.ADMIN_CONTROL_ROOM) }
@@ -272,20 +274,20 @@ fun HomeScreen(
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
                                 ) {
                                     AsyncImage(
                                         model = R.drawable.shopping_logo_icon_1794752250458,
                                         contentDescription = "24/7 SHOPPING Logo",
                                         modifier = Modifier
-                                            .size(34.dp)
-                                            .clip(RoundedCornerShape(7.dp))
+                                            .size(28.dp)
+                                            .clip(RoundedCornerShape(6.dp))
                                     )
-                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Spacer(modifier = Modifier.width(5.dp))
                                     Text(
                                         text = "24/7\nSHOPPING",
-                                        fontSize = 9.5.sp,
-                                        lineHeight = 10.5.sp,
+                                        fontSize = 8.5.sp,
+                                        lineHeight = 9.5.sp,
                                         fontWeight = FontWeight.Black,
                                         color = AccentGold,
                                         softWrap = false
@@ -306,7 +308,7 @@ fun HomeScreen(
                                     text = storeProfile.tagline,
                                     style = MaterialTheme.typography.bodySmall,
                                     fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 10.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -314,11 +316,10 @@ fun HomeScreen(
                             }
                         }
 
-                        // Compact Top Right Actions (3 items = keeps full logo + store name visible on all phones)
+                        // Compact Top Right Actions
                         Row(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Replay Live Voice Welcome Message Button
                             IconButton(
                                 onClick = {
                                     if (currentCustomer != null) {
@@ -328,31 +329,31 @@ fun HomeScreen(
                                     }
                                     Toast.makeText(context, "Playing Live Welcome Voice Message...", Toast.LENGTH_SHORT).show()
                                 },
-                                modifier = Modifier.testTag("voice_welcome_nav_button")
+                                modifier = Modifier.size(40.dp).testTag("voice_welcome_nav_button")
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.VolumeUp,
                                     contentDescription = "Live Welcome Audio",
-                                    tint = AccentGold
+                                    tint = AccentGold,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
 
-                            // QR Code Download & Share App Button
                             IconButton(
                                 onClick = { showQrShareDialog = true },
-                                modifier = Modifier.testTag("qr_share_nav_button")
+                                modifier = Modifier.size(40.dp).testTag("qr_share_nav_button")
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.QrCode2,
                                     contentDescription = "Share App & QR Code",
-                                    tint = AccentGold
+                                    tint = AccentGold,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
 
-                            // Cart Icon with Badge
                             IconButton(
                                 onClick = { viewModel.navigateTo(AppScreen.CART) },
-                                modifier = Modifier.testTag("cart_nav_button")
+                                modifier = Modifier.size(40.dp).testTag("cart_nav_button")
                             ) {
                                 BadgedBox(
                                     badge = {
@@ -369,7 +370,8 @@ fun HomeScreen(
                                     Icon(
                                         imageVector = Icons.Default.ShoppingCart,
                                         contentDescription = "Shopping Cart",
-                                        tint = Color.White
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
                                     )
                                 }
                             }
@@ -378,25 +380,25 @@ fun HomeScreen(
                 }
             }
 
-            // Top Front Live Digital Clock, Date & Quick Store Status Bar (Hidden in Full Screen)
+            // Slim Top Live Digital Clock, Search Trigger & Store Actions Strip (Hidden in Full Screen)
             AnimatedVisibility(
                 visible = !isFullScreen,
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically()
             ) {
                 Surface(
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(12.dp),
                     color = Color(0xFF064E3B),
-                    border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.45f)),
+                    border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.4f)),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .padding(horizontal = 12.dp, vertical = 2.dp)
                         .testTag("home_top_clock_banner")
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -404,69 +406,87 @@ fun HomeScreen(
                             modifier = Modifier.weight(1f)
                         )
 
-                        Column(
-                            horizontalAlignment = Alignment.End,
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
-                            val phoneDisplay = listOf(storeProfile.phoneNumber, storeProfile.secondaryPhoneNumber)
-                                .filter { it.isNotBlank() }
-                                .joinToString(" / ")
-                            if (phoneDisplay.isNotBlank()) {
-                                Text(
-                                    text = "📞 $phoneDisplay",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            // Compact Search Pill (Opens full catalog search + history on demand)
+                            Surface(
+                                onClick = { isSearchExpanded = !isSearchExpanded },
+                                shape = RoundedCornerShape(9.dp),
+                                color = if (isSearchExpanded || searchQuery.isNotEmpty()) AccentGold else Color.White.copy(alpha = 0.12f),
+                                modifier = Modifier
+                                    .height(30.dp)
+                                    .testTag("catalog_search_toggle_button")
                             ) {
-                                AssistChip(
-                                    onClick = {
-                                        viewModel.refreshData { success ->
-                                            Toast.makeText(
-                                                context,
-                                                if (success) "Live Store Catalog Refreshed!" else "Local Catalog Refreshed",
-                                                Toast.LENGTH_SHORT
-                                            ).show()
-                                        }
-                                    },
-                                    label = {
-                                        Text(
-                                            text = if (isRefreshing) "Syncing..." else "REFRESH",
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Black,
-                                            color = CyberCyan
-                                        )
-                                    },
-                                    leadingIcon = {
-                                        Icon(
-                                            imageVector = Icons.Default.Refresh,
-                                            contentDescription = "Refresh Catalog",
-                                            modifier = Modifier.size(14.dp),
-                                            tint = CyberCyan
-                                        )
-                                    },
-                                    modifier = Modifier.height(28.dp).testTag("home_refresh_button")
-                                )
-                                Surface(
-                                    onClick = { viewModel.toggleFullScreen() },
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = Color.White.copy(alpha = 0.08f),
-                                    modifier = Modifier.size(28.dp).testTag("full_screen_toggle")
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 8.dp)
                                 ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                                            contentDescription = "Toggle Full Screen",
-                                            tint = AccentGold,
-                                            modifier = Modifier.size(16.dp)
-                                        )
+                                    Icon(
+                                        imageVector = Icons.Default.Search,
+                                        contentDescription = "Search Catalog",
+                                        tint = if (isSearchExpanded || searchQuery.isNotEmpty()) Color.Black else AccentGold,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = if (searchQuery.isNotEmpty()) "\"${searchQuery.take(8)}\"" else "Search",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = if (isSearchExpanded || searchQuery.isNotEmpty()) Color.Black else Color.White,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+
+                            Surface(
+                                onClick = {
+                                    viewModel.refreshData { success ->
+                                        Toast.makeText(
+                                            context,
+                                            if (success) "Live Store Catalog Refreshed!" else "Local Catalog Refreshed",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
                                     }
+                                },
+                                shape = RoundedCornerShape(9.dp),
+                                color = Color.White.copy(alpha = 0.10f),
+                                modifier = Modifier.height(30.dp).testTag("home_refresh_button")
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Refresh Catalog",
+                                        modifier = Modifier.size(14.dp),
+                                        tint = CyberCyan
+                                    )
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text(
+                                        text = if (isRefreshing) "..." else "Sync",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = CyberCyan
+                                    )
+                                }
+                            }
+
+                            Surface(
+                                onClick = { viewModel.toggleFullScreen() },
+                                shape = RoundedCornerShape(9.dp),
+                                color = Color.White.copy(alpha = 0.10f),
+                                modifier = Modifier.size(30.dp).testTag("full_screen_toggle")
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                                        contentDescription = "Toggle Full Screen",
+                                        tint = AccentGold,
+                                        modifier = Modifier.size(16.dp)
+                                    )
                                 }
                             }
                         }
@@ -491,11 +511,11 @@ fun HomeScreen(
                     border = BorderStroke(1.dp, if (!isOnline) AccentGold else CyberCyan),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 2.dp)
+                        .padding(horizontal = 12.dp, vertical = 2.dp)
                         .testTag("home_offline_status_banner")
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
@@ -524,233 +544,278 @@ fun HomeScreen(
                 }
             }
 
-            // Drop-down Search Bar (Space Saving + Recent Search History)
-            DropdownSearchBar(
-                searchQuery = searchQuery,
-                onSearchQueryChange = { viewModel.setSearchQuery(it) },
-                recentSearches = recentSearches,
-                onRecordSearch = { viewModel.recordRecentSearch(it) },
-                onClearRecentSearches = { viewModel.clearRecentSearches() }
-            )
-
-            // Category Filter Bar (Clothes, Shoes, Bags, Beauty Product, Electronics, Food, Beverages)
-            CategoryFilterBar(
-                selectedCategory = selectedCategory,
-                onSelectCategory = { viewModel.selectCategory(it) }
-            )
-
-            // Sort, Brand, Availability & Price Range Filter Strip
+            // Rearranged Unified Upper Toolbar: Pinned Category Dropdown + Scrollable Action & Filter Strip
+            val categoryCounts = remember(allProducts) {
+                allProducts.groupingBy { it.category }.eachCount()
+            }
             var sortMenuExpanded by remember { mutableStateOf(false) }
+            var priceMenuExpanded by remember { mutableStateOf(false) }
             var brandMenuExpanded by remember { mutableStateOf(false) }
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    .padding(horizontal = 12.dp, vertical = 3.dp)
+                    .testTag("home_upper_controls_row"),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box {
-                    FilterChip(
-                        selected = sortOption != CatalogSortOption.FEATURED,
-                        onClick = { sortMenuExpanded = true },
+                // Pinned Category Selector Button (Never scrolls away, saves full row height)
+                CategorySelectorButton(
+                    selectedCategory = selectedCategory,
+                    categoryCounts = categoryCounts,
+                    totalCount = allProducts.size,
+                    onSelectCategory = { viewModel.selectCategory(it) }
+                )
+
+                Spacer(modifier = Modifier.width(7.dp))
+                Box(
+                    modifier = Modifier
+                        .width(1.dp)
+                        .height(22.dp)
+                        .background(AccentGold.copy(alpha = 0.35f))
+                )
+                Spacer(modifier = Modifier.width(7.dp))
+
+                // Compact Horizontally Scrollable Action & Filter Chips beside Category Button
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Live Audio & Video Call with Admin
+                    AssistChip(
+                        onClick = { viewModel.openLiveCallScreen() },
                         leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Default.Sort,
-                                contentDescription = "Sort Products",
-                                modifier = Modifier.size(16.dp)
-                            )
+                            Icon(Icons.Default.Videocam, contentDescription = "Live Audio and Video Call", tint = SuccessGreen, modifier = Modifier.size(15.dp))
+                        },
+                        label = {
+                            Text("Live Call", fontSize = 11.sp, fontWeight = FontWeight.Black, color = SuccessGreen)
+                        },
+                        modifier = Modifier.height(34.dp).testTag("home_live_call_chip")
+                    )
+
+                    // Single-Tap Layout Mode Toggle (Grid View <-> Category Shelves)
+                    val nextBrowseMode = if (catalogBrowseMode == CatalogBrowseMode.CATEGORY_SHELVES) {
+                        CatalogBrowseMode.CAROUSEL_AND_GRID
+                    } else {
+                        CatalogBrowseMode.CATEGORY_SHELVES
+                    }
+                    val modeIcon = if (catalogBrowseMode == CatalogBrowseMode.CATEGORY_SHELVES) {
+                        Icons.Default.ViewAgenda
+                    } else {
+                        Icons.Default.ViewCarousel
+                    }
+                    FilterChip(
+                        selected = catalogBrowseMode == CatalogBrowseMode.CATEGORY_SHELVES,
+                        onClick = { viewModel.setCatalogBrowseMode(nextBrowseMode) },
+                        leadingIcon = {
+                            Icon(imageVector = modeIcon, contentDescription = catalogBrowseMode.label, modifier = Modifier.size(15.dp))
                         },
                         label = {
                             Text(
-                                text = "Sort: ${sortOption.label}",
+                                text = if (catalogBrowseMode == CatalogBrowseMode.CATEGORY_SHELVES) "Shelves" else "Grid View",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
-                            )
-                        },
-                        trailingIcon = {
-                            Icon(
-                                imageVector = Icons.Default.KeyboardArrowDown,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        },
-                        modifier = Modifier.testTag("catalog_sort_chip")
-                    )
-
-                    DropdownMenu(
-                        expanded = sortMenuExpanded,
-                        onDismissRequest = { sortMenuExpanded = false }
-                    ) {
-                        CatalogSortOption.entries.forEach { option ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = option.label,
-                                        fontWeight = if (option == sortOption) FontWeight.Black else FontWeight.Normal,
-                                        color = if (option == sortOption) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                    )
-                                },
-                                onClick = {
-                                    viewModel.setSortOption(option)
-                                    sortMenuExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                PriceRangeFilter.entries.forEach { range ->
-                    FilterChip(
-                        selected = priceRangeFilter == range,
-                        onClick = { viewModel.setPriceRangeFilter(range) },
-                        label = {
-                            Text(
-                                text = range.label,
-                                fontSize = 11.sp,
-                                fontWeight = if (priceRangeFilter == range) FontWeight.Bold else FontWeight.Medium
-                            )
-                        },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
-                            selectedLabelColor = MaterialTheme.colorScheme.primary
-                        ),
-                        modifier = Modifier.testTag("price_filter_${range.name}")
-                    )
-                }
-
-                // Vertical Layout Mode Chips (Grid View vs Horizontal Category Shelves)
-                listOf(
-                    CatalogBrowseMode.CAROUSEL_AND_GRID,
-                    CatalogBrowseMode.CATEGORY_SHELVES
-                ).forEach { mode ->
-                    val modeIcon = when (mode) {
-                        CatalogBrowseMode.CAROUSEL_AND_GRID -> Icons.Default.ViewCarousel
-                        CatalogBrowseMode.CATEGORY_SHELVES -> Icons.Default.ViewAgenda
-                        CatalogBrowseMode.WIDE_MATRIX_2D -> Icons.Default.GridView
-                    }
-                    FilterChip(
-                        selected = catalogBrowseMode == mode,
-                        onClick = { viewModel.setCatalogBrowseMode(mode) },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = modeIcon,
-                                contentDescription = mode.label,
-                                modifier = Modifier.size(15.dp)
-                            )
-                        },
-                        label = {
-                            Text(
-                                text = mode.label,
-                                fontSize = 11.sp,
-                                fontWeight = if (catalogBrowseMode == mode) FontWeight.Black else FontWeight.Medium
                             )
                         },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = AccentGold.copy(alpha = 0.22f),
                             selectedLabelColor = AccentGold
                         ),
-                        modifier = Modifier.testTag("browse_mode_${mode.name}")
+                        modifier = Modifier.height(34.dp).testTag("browse_mode_${catalogBrowseMode.name}")
                     )
-                }
 
-                // Brand Filter Dropdown Chip
-                if (availableBrandFilters.isNotEmpty()) {
+                    // Sort Dropdown Chip
                     Box {
                         FilterChip(
-                            selected = selectedBrandFilter != null,
-                            onClick = { brandMenuExpanded = true },
+                            selected = sortOption != CatalogSortOption.FEATURED,
+                            onClick = { sortMenuExpanded = true },
+                            leadingIcon = {
+                                Icon(Icons.Default.Sort, contentDescription = "Sort Products", modifier = Modifier.size(15.dp))
+                            },
                             label = {
-                                Text(
-                                    text = selectedBrandFilter ?: "All Brands",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Text("Sort: ${sortOption.label}", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             },
                             trailingIcon = {
-                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(15.dp))
                             },
-                            modifier = Modifier.testTag("catalog_brand_filter_chip")
+                            modifier = Modifier.height(34.dp).testTag("catalog_sort_chip")
                         )
+
                         DropdownMenu(
-                            expanded = brandMenuExpanded,
-                            onDismissRequest = { brandMenuExpanded = false }
+                            expanded = sortMenuExpanded,
+                            onDismissRequest = { sortMenuExpanded = false }
                         ) {
-                            DropdownMenuItem(
-                                text = { Text("All Brands", fontWeight = if (selectedBrandFilter == null) FontWeight.Black else FontWeight.Normal) },
-                                onClick = {
-                                    viewModel.selectBrandFilter(null)
-                                    brandMenuExpanded = false
-                                }
-                            )
-                            availableBrandFilters.forEach { bName ->
+                            CatalogSortOption.entries.forEach { option ->
                                 DropdownMenuItem(
-                                    text = { Text(bName, fontWeight = if (selectedBrandFilter == bName) FontWeight.Black else FontWeight.Normal) },
+                                    text = {
+                                        Text(
+                                            text = option.label,
+                                            fontWeight = if (option == sortOption) FontWeight.Black else FontWeight.Normal,
+                                            color = if (option == sortOption) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    },
                                     onClick = {
-                                        viewModel.selectBrandFilter(bName)
-                                        brandMenuExpanded = false
+                                        viewModel.setSortOption(option)
+                                        sortMenuExpanded = false
                                     }
                                 )
                             }
                         }
                     }
-                }
 
-                // In-Stock Only Filter Chip
-                FilterChip(
-                    selected = inStockOnly,
-                    onClick = { viewModel.setInStockOnly(!inStockOnly) },
-                    leadingIcon = {
-                        Icon(Icons.Default.Inventory, contentDescription = "In stock only", modifier = Modifier.size(14.dp))
-                    },
-                    label = {
-                        Text(
-                            text = if (inStockOnly) "In Stock ✓" else "In Stock Only",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
+                    // Price Range Dropdown Chip (Consolidates 4 price chips cleanly)
+                    Box {
+                        FilterChip(
+                            selected = priceRangeFilter != PriceRangeFilter.ALL,
+                            onClick = { priceMenuExpanded = true },
+                            leadingIcon = {
+                                Icon(Icons.Default.FilterList, contentDescription = "Price Filter", modifier = Modifier.size(15.dp))
+                            },
+                            label = {
+                                Text(
+                                    text = if (priceRangeFilter == PriceRangeFilter.ALL) "Price" else priceRangeFilter.label,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            },
+                            trailingIcon = {
+                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(15.dp))
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+                                selectedLabelColor = MaterialTheme.colorScheme.primary
+                            ),
+                            modifier = Modifier.height(34.dp).testTag("catalog_price_filter_chip")
                         )
-                    },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = SuccessGreen.copy(alpha = 0.2f),
-                        selectedLabelColor = SuccessGreen
-                    ),
-                    modifier = Modifier.testTag("catalog_instock_chip")
-                )
 
-                // Loyalty Points Quick Access Chip
-                AssistChip(
-                    onClick = { viewModel.navigateTo(AppScreen.AUTH) },
-                    leadingIcon = {
-                        Icon(Icons.Default.Loyalty, contentDescription = "Loyalty points", tint = AccentGold, modifier = Modifier.size(15.dp))
-                    },
-                    label = {
-                        Text("${loyaltyAccount.pointsBalance} pts", fontSize = 11.sp, fontWeight = FontWeight.Black, color = AccentGold)
-                    },
-                    modifier = Modifier.testTag("home_loyalty_chip")
-                )
+                        DropdownMenu(
+                            expanded = priceMenuExpanded,
+                            onDismissRequest = { priceMenuExpanded = false }
+                        ) {
+                            PriceRangeFilter.entries.forEach { range ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = range.label,
+                                            fontWeight = if (range == priceRangeFilter) FontWeight.Black else FontWeight.Normal,
+                                            color = if (range == priceRangeFilter) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    },
+                                    onClick = {
+                                        viewModel.setPriceRangeFilter(range)
+                                        priceMenuExpanded = false
+                                    },
+                                    modifier = Modifier.testTag("price_filter_${range.name}")
+                                )
+                            }
+                        }
+                    }
 
-                // Help Center, Support & Legal Chip
-                AssistChip(
-                    onClick = { viewModel.navigateTo(AppScreen.HELP_SUPPORT) },
-                    leadingIcon = {
-                        Icon(Icons.Default.HelpOutline, contentDescription = "Help and support", tint = CyberCyan, modifier = Modifier.size(15.dp))
-                    },
-                    label = {
-                        Text("Help & Legal", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CyberCyan)
-                    },
-                    modifier = Modifier.testTag("home_help_support_chip")
-                )
+                    // Brand Filter Dropdown Chip
+                    if (availableBrandFilters.isNotEmpty()) {
+                        Box {
+                            FilterChip(
+                                selected = selectedBrandFilter != null,
+                                onClick = { brandMenuExpanded = true },
+                                label = {
+                                    Text(
+                                        text = selectedBrandFilter ?: "Brands",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                },
+                                trailingIcon = {
+                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(15.dp))
+                                },
+                                modifier = Modifier.height(34.dp).testTag("catalog_brand_filter_chip")
+                            )
+                            DropdownMenu(
+                                expanded = brandMenuExpanded,
+                                onDismissRequest = { brandMenuExpanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("All Brands", fontWeight = if (selectedBrandFilter == null) FontWeight.Black else FontWeight.Normal) },
+                                    onClick = {
+                                        viewModel.selectBrandFilter(null)
+                                        brandMenuExpanded = false
+                                    }
+                                )
+                                availableBrandFilters.forEach { bName ->
+                                    DropdownMenuItem(
+                                        text = { Text(bName, fontWeight = if (selectedBrandFilter == bName) FontWeight.Black else FontWeight.Normal) },
+                                        onClick = {
+                                            viewModel.selectBrandFilter(bName)
+                                            brandMenuExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
 
-                // Live Audio & Video Call with Admin Chip
-                AssistChip(
-                    onClick = { viewModel.openLiveCallScreen() },
-                    leadingIcon = {
-                        Icon(Icons.Default.Videocam, contentDescription = "Live Audio and Video Call", tint = SuccessGreen, modifier = Modifier.size(16.dp))
-                    },
-                    label = {
-                        Text("Live Audio/Video", fontSize = 11.sp, fontWeight = FontWeight.Black, color = SuccessGreen)
-                    },
-                    modifier = Modifier.testTag("home_live_call_chip")
+                    // In-Stock Only Filter Chip
+                    FilterChip(
+                        selected = inStockOnly,
+                        onClick = { viewModel.setInStockOnly(!inStockOnly) },
+                        leadingIcon = {
+                            Icon(Icons.Default.Inventory, contentDescription = "In stock only", modifier = Modifier.size(14.dp))
+                        },
+                        label = {
+                            Text(
+                                text = if (inStockOnly) "In Stock ✓" else "In Stock",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = SuccessGreen.copy(alpha = 0.2f),
+                            selectedLabelColor = SuccessGreen
+                        ),
+                        modifier = Modifier.height(34.dp).testTag("catalog_instock_chip")
+                    )
+
+                    // Loyalty Points Quick Access Chip
+                    AssistChip(
+                        onClick = { viewModel.navigateTo(AppScreen.AUTH) },
+                        leadingIcon = {
+                            Icon(Icons.Default.Loyalty, contentDescription = "Loyalty points", tint = AccentGold, modifier = Modifier.size(15.dp))
+                        },
+                        label = {
+                            Text("${loyaltyAccount.pointsBalance} pts", fontSize = 11.sp, fontWeight = FontWeight.Black, color = AccentGold)
+                        },
+                        modifier = Modifier.height(34.dp).testTag("home_loyalty_chip")
+                    )
+
+                    // Help Center, Support & Legal Chip
+                    AssistChip(
+                        onClick = { viewModel.navigateTo(AppScreen.HELP_SUPPORT) },
+                        leadingIcon = {
+                            Icon(Icons.Default.HelpOutline, contentDescription = "Help and support", tint = CyberCyan, modifier = Modifier.size(15.dp))
+                        },
+                        label = {
+                            Text("Help", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CyberCyan)
+                        },
+                        modifier = Modifier.height(34.dp).testTag("home_help_support_chip")
+                    )
+                }
+            }
+
+            // Expandable Search Panel (Takes 0dp until tapped so catalog stays front-and-center)
+            AnimatedVisibility(
+                visible = isSearchExpanded || searchQuery.isNotEmpty(),
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                DropdownSearchBar(
+                    searchQuery = searchQuery,
+                    onSearchQueryChange = { viewModel.setSearchQuery(it) },
+                    recentSearches = recentSearches,
+                    onRecordSearch = { viewModel.recordRecentSearch(it) },
+                    onClearRecentSearches = { viewModel.clearRecentSearches() },
+                    onCollapse = { isSearchExpanded = false }
                 )
             }
 
@@ -1381,226 +1446,164 @@ private fun DropdownSearchBar(
     recentSearches: List<String> = emptyList(),
     onRecordSearch: (String) -> Unit = {},
     onClearRecentSearches: () -> Unit = {},
+    onCollapse: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var isExpanded by remember { mutableStateOf(false) }
-
     Card(
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isExpanded || searchQuery.isNotEmpty()) {
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f)
-            } else {
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-            }
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.78f)
         ),
         border = BorderStroke(
             1.dp,
-            if (searchQuery.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+            if (searchQuery.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
         ),
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 2.dp)
             .animateContentSize()
     ) {
-        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
-            // Dropdown Toggle Trigger Header
+        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { isExpanded = !isExpanded }
-                    .padding(vertical = 4.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
+                Text(
+                    text = "🔍 SEARCH CATALOG",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 0.5.sp
+                    ),
+                    color = AccentGold
+                )
+                Surface(
+                    onClick = onCollapse,
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
                 ) {
-                    Surface(
-                        shape = CircleShape,
-                        color = if (searchQuery.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                        modifier = Modifier.size(30.dp)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.Search,
-                                contentDescription = "Search Dropdown",
-                                tint = if (searchQuery.isNotEmpty()) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.width(10.dp))
-
-                    if (searchQuery.isNotEmpty()) {
                         Text(
-                            text = "Filter: \"$searchQuery\"",
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
-                            ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            text = "HIDE",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
                         )
-                    } else {
-                        Text(
-                            text = "🔍 DROP-DOWN SEARCH CATALOG",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 0.5.sp
-                            ),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        Spacer(modifier = Modifier.width(2.dp))
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowUp,
+                            contentDescription = "Hide Search",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(15.dp)
                         )
-                    }
-                }
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(
-                            onClick = { onSearchQueryChange("") },
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Icon(Icons.Default.Clear, contentDescription = "Clear search", modifier = Modifier.size(16.dp))
-                        }
-                        Spacer(modifier = Modifier.width(4.dp))
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = if (isExpanded) "CLOSE" else "SEARCH",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.width(2.dp))
-                            Icon(
-                                imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
                     }
                 }
             }
 
-            // Expanded Search Form
-            AnimatedVisibility(
-                visible = isExpanded,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
-            ) {
-                Column(modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)) {
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = onSearchQueryChange,
-                        placeholder = { Text("Type brand, item, or keyword...", fontSize = 13.sp) },
-                        leadingIcon = {
-                            Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
-                        },
-                        trailingIcon = {
-                            if (searchQuery.isNotEmpty()) {
-                                IconButton(onClick = { onSearchQueryChange("") }) {
-                                    Icon(Icons.Default.Clear, contentDescription = "Clear", modifier = Modifier.size(18.dp))
-                                }
-                            }
-                        },
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                            focusedContainerColor = MaterialTheme.colorScheme.surface
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("catalog_dropdown_search_input")
-                    )
+            Spacer(modifier = Modifier.height(6.dp))
 
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Recent Search History
-                    if (recentSearches.isNotEmpty()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Recent Searches:",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = "Clear",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = CyberCyan,
-                                modifier = Modifier.clickable { onClearRecentSearches() }
-                            )
-                        }
-                        FlowRow(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 4.dp, bottom = 6.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            recentSearches.forEach { term ->
-                                AssistChip(
-                                    onClick = {
-                                        onSearchQueryChange(term)
-                                        onRecordSearch(term)
-                                        isExpanded = false
-                                    },
-                                    leadingIcon = {
-                                        Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(13.dp))
-                                    },
-                                    label = { Text(term, fontSize = 10.sp) },
-                                    modifier = Modifier.height(28.dp)
-                                )
-                            }
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = onSearchQueryChange,
+                placeholder = { Text("Type brand, item, or keyword...", fontSize = 13.sp) },
+                leadingIcon = {
+                    Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { onSearchQueryChange("") }) {
+                            Icon(Icons.Default.Clear, contentDescription = "Clear", modifier = Modifier.size(18.dp))
                         }
                     }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                    focusedContainerColor = MaterialTheme.colorScheme.surface
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("catalog_dropdown_search_input")
+            )
 
-                    // Quick Search Tags
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Recent Search History
+            if (recentSearches.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
-                        text = "Popular Searches:",
+                        text = "Recent Searches:",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-
-                    FlowRow(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        val tags = listOf("3D Sneaker", "Nike", "Leather", "Gucci", "Cold Brew", "Smart", "Perfume", "Jacket")
-                        tags.forEach { tag ->
-                            AssistChip(
-                                onClick = {
-                                    onSearchQueryChange(tag)
-                                    onRecordSearch(tag)
-                                    isExpanded = false
-                                },
-                                label = { Text(tag, fontSize = 10.sp) },
-                                modifier = Modifier.height(28.dp)
-                            )
-                        }
+                    Text(
+                        text = "Clear",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = CyberCyan,
+                        modifier = Modifier.clickable { onClearRecentSearches() }
+                    )
+                }
+                FlowRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp, bottom = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    recentSearches.forEach { term ->
+                        AssistChip(
+                            onClick = {
+                                onSearchQueryChange(term)
+                                onRecordSearch(term)
+                                onCollapse()
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(13.dp))
+                            },
+                            label = { Text(term, fontSize = 10.sp) },
+                            modifier = Modifier.height(28.dp)
+                        )
                     }
+                }
+            }
+
+            // Quick Search Tags
+            Text(
+                text = "Popular Searches:",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            FlowRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                val tags = listOf("3D Sneaker", "Nike", "Leather", "Gucci", "Cold Brew", "Smart", "Perfume", "Jacket")
+                tags.forEach { tag ->
+                    AssistChip(
+                        onClick = {
+                            onSearchQueryChange(tag)
+                            onRecordSearch(tag)
+                            onCollapse()
+                        },
+                        label = { Text(tag, fontSize = 10.sp) },
+                        modifier = Modifier.height(28.dp)
+                    )
                 }
             }
         }
@@ -1616,7 +1619,7 @@ fun DigitalClock(modifier: Modifier = Modifier) {
         while (true) {
             val now = java.util.Calendar.getInstance().time
             time = java.text.SimpleDateFormat("hh:mm:ss a", java.util.Locale.getDefault()).format(now)
-            date = java.text.SimpleDateFormat("EEEE, dd MMM yyyy", java.util.Locale.getDefault()).format(now)
+            date = java.text.SimpleDateFormat("EEE, dd MMM", java.util.Locale.getDefault()).format(now)
             kotlinx.coroutines.delay(1000L) // Live second-by-second digital clock
         }
     }
@@ -1624,16 +1627,20 @@ fun DigitalClock(modifier: Modifier = Modifier) {
     Column(modifier = modifier, horizontalAlignment = Alignment.Start) {
         Text(
             text = time,
-            style = MaterialTheme.typography.titleMedium,
+            fontSize = 13.sp,
+            lineHeight = 14.sp,
             fontWeight = FontWeight.Black,
             color = AccentGold,
-            letterSpacing = 0.8.sp
+            letterSpacing = 0.5.sp,
+            maxLines = 1
         )
         Text(
             text = date,
-            style = MaterialTheme.typography.labelSmall,
+            fontSize = 9.5.sp,
+            lineHeight = 11.sp,
             fontWeight = FontWeight.Bold,
-            color = CyberCyan
+            color = CyberCyan,
+            maxLines = 1
         )
     }
 }
