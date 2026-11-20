@@ -4,6 +4,8 @@ import android.util.Log
 import com.example.data.model.AppUpdateManifest
 import com.example.data.model.Customer
 import com.example.data.model.Order
+import com.example.data.model.PreOrderRequest
+import com.example.data.model.PreOrderStatus
 import com.example.data.model.Product
 import com.example.data.model.SupabaseConfig
 import kotlinx.coroutines.Dispatchers
@@ -1525,5 +1527,188 @@ class SupabaseSyncService(
             }
         }
         Result.success(null)
+    }
+
+    suspend fun syncPreOrdersWithCloud(
+        localList: List<PreOrderRequest>,
+        preferLocalIds: Set<String> = emptySet()
+    ): Result<List<PreOrderRequest>> = withContext(Dispatchers.IO) {
+        val validationErr = validateCredentialsBeforeRequest()
+        if (validationErr != null) {
+            return@withContext Result.failure(Exception(validationErr))
+        }
+        try {
+            val baseUrl = cleanUrl(config.url)
+            val ts = System.currentTimeMillis()
+            val objectPath = "system/pre_orders.json"
+            val remoteCandidates = listOf(
+                "$baseUrl/storage/v1/object/public/product-media/$objectPath?t=$ts" to false,
+                "$baseUrl/storage/v1/object/public/shop-receipts/$objectPath?t=$ts" to false,
+                "$baseUrl/storage/v1/object/product-media/$objectPath?t=$ts" to true,
+                "$baseUrl/storage/v1/object/shop-receipts/$objectPath?t=$ts" to true
+            )
+
+            var remoteJsonRaw: String? = null
+            var sawNotFoundOrEmpty = false
+            var lastNetworkError: Exception? = null
+
+            for ((url, useAuth) in remoteCandidates) {
+                try {
+                    val reqBuilder = Request.Builder().url(url).get()
+                    if (useAuth) reqBuilder.addSupabaseAuthHeaders()
+                    client.newCall(reqBuilder.build()).execute().use { resp ->
+                        val body = resp.body?.string()?.trim().orEmpty()
+                        if (resp.isSuccessful && body.startsWith("[")) {
+                            remoteJsonRaw = body
+                        } else if (resp.code == 400 || resp.code == 404) {
+                            sawNotFoundOrEmpty = true
+                        }
+                    }
+                    if (remoteJsonRaw != null) break
+                } catch (e: Exception) {
+                    lastNetworkError = e
+                }
+            }
+
+            if (remoteJsonRaw == null && !sawNotFoundOrEmpty && lastNetworkError != null) {
+                return@withContext Result.failure(lastNetworkError!!)
+            }
+
+            val remoteList = mutableListOf<PreOrderRequest>()
+            if (!remoteJsonRaw.isNullOrBlank()) {
+                try {
+                    val arr = JSONArray(remoteJsonRaw)
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.optJSONObject(i) ?: continue
+                        val id = obj.optString("id", "").trim()
+                        if (id.isBlank()) continue
+                        val statusStr = obj.optString("status", PreOrderStatus.PENDING.name)
+                        val parsedStatus = PreOrderStatus.entries.firstOrNull { it.name == statusStr }
+                            ?: PreOrderStatus.PENDING
+                        remoteList.add(
+                            PreOrderRequest(
+                                id = id,
+                                customerId = obj.optString("customerId", "guest"),
+                                customerName = obj.optString("customerName", "Valued Customer"),
+                                customerPhone = obj.optString("customerPhone", ""),
+                                productName = obj.optString("productName", ""),
+                                brandName = obj.optString("brandName", ""),
+                                category = obj.optString("category", "Clothes"),
+                                preferredSize = obj.optString("preferredSize", "Standard"),
+                                preferredColor = obj.optString("preferredColor", "Any"),
+                                targetBudget = obj.optDouble("targetBudget", 0.0),
+                                description = obj.optString("description", ""),
+                                photoUrl = obj.optString("photoUrl", ""),
+                                status = parsedStatus,
+                                createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
+                                adminResponse = obj.optString("adminResponse", ""),
+                                adminQuotedPrice = obj.optDouble("adminQuotedPrice", 0.0),
+                                customerReply = obj.optString("customerReply", "")
+                            )
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.w("SupabaseSyncService", "Failed parsing remote pre_orders.json", e)
+                }
+            }
+
+            // Merge local + remote by request id
+            val mergedById = linkedMapOf<String, PreOrderRequest>()
+            remoteList.forEach { mergedById[it.id] = it }
+
+            localList.forEach { local ->
+                val remote = mergedById[local.id]
+                if (remote == null) {
+                    mergedById[local.id] = local
+                } else if (local.id in preferLocalIds) {
+                    mergedById[local.id] = local.copy(
+                        photoUrl = local.photoUrl.takeIf { it.startsWith("http", ignoreCase = true) }
+                            ?: remote.photoUrl.takeIf { it.startsWith("http", ignoreCase = true) }
+                            ?: local.photoUrl.ifBlank { remote.photoUrl },
+                        adminResponse = local.adminResponse.ifBlank { remote.adminResponse },
+                        adminQuotedPrice = if (local.adminQuotedPrice > 0.0) local.adminQuotedPrice else remote.adminQuotedPrice,
+                        customerReply = local.customerReply.ifBlank { remote.customerReply }
+                    )
+                } else {
+                    val resolvedPhoto = listOf(remote.photoUrl, local.photoUrl)
+                        .firstOrNull { it.startsWith("http", ignoreCase = true) }
+                        ?: remote.photoUrl.ifBlank { local.photoUrl }
+                    val resolvedStatus = when {
+                        remote.status != PreOrderStatus.PENDING && local.status == PreOrderStatus.PENDING -> remote.status
+                        local.status != PreOrderStatus.PENDING && remote.status == PreOrderStatus.PENDING -> local.status
+                        remote.status.ordinal >= local.status.ordinal -> remote.status
+                        else -> local.status
+                    }
+                    mergedById[local.id] = remote.copy(
+                        customerId = if (remote.customerId == "guest" && local.customerId != "guest") local.customerId else remote.customerId,
+                        customerName = remote.customerName.ifBlank { local.customerName },
+                        customerPhone = remote.customerPhone.ifBlank { local.customerPhone },
+                        photoUrl = resolvedPhoto,
+                        status = resolvedStatus,
+                        adminResponse = remote.adminResponse.ifBlank { local.adminResponse },
+                        adminQuotedPrice = if (remote.adminQuotedPrice > 0.0) remote.adminQuotedPrice else local.adminQuotedPrice,
+                        customerReply = remote.customerReply.ifBlank { local.customerReply }
+                    )
+                }
+            }
+
+            val merged = mergedById.values.sortedByDescending { it.createdAt }
+
+            // Push merged array back up if anything changed or remote didn't exist yet
+            val needsUpload = remoteJsonRaw == null ||
+                preferLocalIds.isNotEmpty() ||
+                merged.size != remoteList.size ||
+                merged != remoteList
+
+            if (needsUpload) {
+                val jsonArr = JSONArray()
+                merged.forEach { r ->
+                    jsonArr.put(JSONObject().apply {
+                        put("id", r.id)
+                        put("customerId", r.customerId)
+                        put("customerName", r.customerName)
+                        put("customerPhone", r.customerPhone)
+                        put("productName", r.productName)
+                        put("brandName", r.brandName)
+                        put("category", r.category)
+                        put("preferredSize", r.preferredSize)
+                        put("preferredColor", r.preferredColor)
+                        put("targetBudget", r.targetBudget)
+                        put("description", r.description)
+                        put("photoUrl", r.photoUrl)
+                        put("status", r.status.name)
+                        put("createdAt", r.createdAt)
+                        put("adminResponse", r.adminResponse)
+                        put("adminQuotedPrice", r.adminQuotedPrice)
+                        put("customerReply", r.customerReply)
+                    })
+                }
+                val bytes = jsonArr.toString().toByteArray(Charsets.UTF_8)
+                val mediaType = "application/json".toMediaType()
+
+                suspend fun uploadToBucket(bucketId: String): Boolean {
+                    val url = "$baseUrl/storage/v1/object/$bucketId/$objectPath"
+                    val request = Request.Builder()
+                        .url(url)
+                        .addSupabaseAuthHeaders()
+                        .header("Content-Type", "application/json")
+                        .header("x-upsert", "true")
+                        .post(bytes.toRequestBody(mediaType))
+                        .build()
+                    return client.newCall(request).execute().use { resp ->
+                        resp.isSuccessful || resp.code in 200..201
+                    }
+                }
+
+                if (!uploadToBucket("product-media")) {
+                    uploadToBucket("shop-receipts")
+                }
+            }
+
+            Result.success(merged)
+        } catch (e: Exception) {
+            Log.e("SupabaseSyncService", "syncPreOrdersWithCloud failed", e)
+            Result.failure(e)
+        }
     }
 }

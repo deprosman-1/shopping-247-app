@@ -646,15 +646,16 @@ fun HomeScreen(
 
                         DropdownMenu(
                             expanded = sortMenuExpanded,
-                            onDismissRequest = { sortMenuExpanded = false }
+                            onDismissRequest = { sortMenuExpanded = false },
+                            containerColor = Color.White
                         ) {
                             CatalogSortOption.entries.forEach { option ->
                                 DropdownMenuItem(
                                     text = {
                                         Text(
                                             text = option.label,
-                                            fontWeight = if (option == sortOption) FontWeight.Black else FontWeight.Normal,
-                                            color = if (option == sortOption) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                            fontWeight = if (option == sortOption) FontWeight.Black else FontWeight.Bold,
+                                            color = if (option == sortOption) Color(0xFFB91C1C) else Color(0xFF111827)
                                         )
                                     },
                                     onClick = {
@@ -693,15 +694,16 @@ fun HomeScreen(
 
                         DropdownMenu(
                             expanded = priceMenuExpanded,
-                            onDismissRequest = { priceMenuExpanded = false }
+                            onDismissRequest = { priceMenuExpanded = false },
+                            containerColor = Color.White
                         ) {
                             PriceRangeFilter.entries.forEach { range ->
                                 DropdownMenuItem(
                                     text = {
                                         Text(
                                             text = range.label,
-                                            fontWeight = if (range == priceRangeFilter) FontWeight.Black else FontWeight.Normal,
-                                            color = if (range == priceRangeFilter) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                            fontWeight = if (range == priceRangeFilter) FontWeight.Black else FontWeight.Bold,
+                                            color = if (range == priceRangeFilter) Color(0xFFB91C1C) else Color(0xFF111827)
                                         )
                                     },
                                     onClick = {
@@ -734,10 +736,17 @@ fun HomeScreen(
                             )
                             DropdownMenu(
                                 expanded = brandMenuExpanded,
-                                onDismissRequest = { brandMenuExpanded = false }
+                                onDismissRequest = { brandMenuExpanded = false },
+                                containerColor = Color.White
                             ) {
                                 DropdownMenuItem(
-                                    text = { Text("All Brands", fontWeight = if (selectedBrandFilter == null) FontWeight.Black else FontWeight.Normal) },
+                                    text = {
+                                        Text(
+                                            text = "All Brands",
+                                            fontWeight = if (selectedBrandFilter == null) FontWeight.Black else FontWeight.Bold,
+                                            color = if (selectedBrandFilter == null) Color(0xFFB91C1C) else Color(0xFF111827)
+                                        )
+                                    },
                                     onClick = {
                                         viewModel.selectBrandFilter(null)
                                         brandMenuExpanded = false
@@ -745,7 +754,13 @@ fun HomeScreen(
                                 )
                                 availableBrandFilters.forEach { bName ->
                                     DropdownMenuItem(
-                                        text = { Text(bName, fontWeight = if (selectedBrandFilter == bName) FontWeight.Black else FontWeight.Normal) },
+                                        text = {
+                                            Text(
+                                                text = bName,
+                                                fontWeight = if (selectedBrandFilter == bName) FontWeight.Black else FontWeight.Bold,
+                                                color = if (selectedBrandFilter == bName) Color(0xFFB91C1C) else Color(0xFF111827)
+                                            )
+                                        },
                                         onClick = {
                                             viewModel.selectBrandFilter(bName)
                                             brandMenuExpanded = false

@@ -454,7 +454,16 @@ fun AdminControlRoomScreen(
             ) { _, _ ->
                 when (selectedTab) {
                     0 -> ProductManagementTab(viewModel, products)
-                    1 -> CustomerIdentityTab(viewModel, customers, orders, onCustomerClick = { selectedCustomerFile = it })
+                    1 -> CustomerIdentityTab(
+                        viewModel = viewModel,
+                        customers = customers,
+                        orders = orders,
+                        onCustomerClick = { selectedCustomerFile = it },
+                        onOpenPreOrdersTab = {
+                            selectedTab = 7
+                            viewModel.selectAdminTab(7)
+                        }
+                    )
                     2 -> PaymentReceiptsTab(viewModel, orders)
                     3 -> SalesAnalyticsTab(products, orders)
                     4 -> SupabaseCloudTab(viewModel, cloudStatusMsg)
@@ -498,6 +507,21 @@ private fun matchesCustomerFolder(order: Order, customer: Customer): Boolean {
         val len = minOf(10, minOf(custDigits.length, ordDigits.length))
         if (custDigits.takeLast(len) == ordDigits.takeLast(len)) return true
     }
+    return false
+}
+
+private fun matchesCustomerPreOrder(req: PreOrderRequest, customer: Customer): Boolean {
+    if (req.customerId == customer.id) return true
+    val custDigits = customer.phoneNumber.filter { it.isDigit() }
+    val reqDigits = req.customerPhone.filter { it.isDigit() }
+    if (custDigits.length >= 7 && reqDigits.length >= 7) {
+        val len = minOf(10, minOf(custDigits.length, reqDigits.length))
+        if (custDigits.takeLast(len) == reqDigits.takeLast(len)) return true
+    }
+    if (customer.fullName.isNotBlank() && req.customerName.isNotBlank() &&
+        req.customerName != "Valued Customer" &&
+        req.customerName.equals(customer.fullName, ignoreCase = true)
+    ) return true
     return false
 }
 
@@ -552,6 +576,10 @@ private fun CustomerFileModal(
 ) {
     val context = LocalContext.current
     val storeProfile by viewModel.storeProfile.collectAsState()
+    val allPreOrders by viewModel.preOrderRequests.collectAsState()
+    val customerPreOrders = remember(allPreOrders, customer) {
+        allPreOrders.filter { matchesCustomerPreOrder(it, customer) }
+    }
     val nairaFormat = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "NG")).apply {
             maximumFractionDigits = 0
@@ -561,7 +589,7 @@ private fun CustomerFileModal(
     val shortDateTimeFormat = remember { SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()) }
     val timeOnlyFormat = remember { SimpleDateFormat("hh:mm:ss a", Locale.getDefault()) }
 
-    var folderSectionTab by remember { mutableIntStateOf(0) } // 0 = All, 1 = Sign-Up Credentials, 2 = Orders
+    var folderSectionTab by remember { mutableIntStateOf(0) } // 0 = All, 1 = Sign-Up Credentials, 2 = Orders, 3 = Pre-Orders
     var showPasswordPlain by remember { mutableStateOf(false) }
     var selectedOrderFilter by remember { mutableStateOf<OrderStatus?>(null) }
     var viewingReceiptUrl by remember { mutableStateOf<String?>(null) }
@@ -637,7 +665,7 @@ private fun CustomerFileModal(
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
 
-                // Folder Internal Divider Tabs: All / Credentials / Orders
+                // Folder Internal Divider Tabs: All / Credentials / Orders / Pre-Orders
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -659,6 +687,11 @@ private fun CustomerFileModal(
                         selected = folderSectionTab == 2,
                         onClick = { folderSectionTab = 2 },
                         label = { Text("📦 Orders (${orders.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                    )
+                    FilterChip(
+                        selected = folderSectionTab == 3,
+                        onClick = { folderSectionTab = 3 },
+                        label = { Text("✨ Pre-Orders (${customerPreOrders.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
                     )
                 }
 
@@ -882,7 +915,7 @@ private fun CustomerFileModal(
                                 // Quick Metrics Grid
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Surface(
                                         shape = RoundedCornerShape(8.dp),
@@ -890,18 +923,28 @@ private fun CustomerFileModal(
                                         modifier = Modifier.weight(1f)
                                     ) {
                                         Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text("TOTAL ORDERS", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                            Text("${orders.size}", fontSize = 16.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                                            Text("ORDERS", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text("${orders.size}", fontSize = 15.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                                         }
                                     }
                                     Surface(
                                         shape = RoundedCornerShape(8.dp),
                                         color = MaterialTheme.colorScheme.surface,
-                                        modifier = Modifier.weight(1.5f)
+                                        modifier = Modifier.weight(1f)
                                     ) {
                                         Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text("LIFETIME SPEND", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                            Text(nairaFormat.format(orders.sumOf { it.totalAmount }), fontSize = 14.sp, fontWeight = FontWeight.Black, color = SuccessGreen)
+                                            Text("PRE-ORDERS", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text("${customerPreOrders.size}", fontSize = 15.sp, fontWeight = FontWeight.Black, color = AccentGold)
+                                        }
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.surface,
+                                        modifier = Modifier.weight(1.4f)
+                                    ) {
+                                        Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text("SPEND", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text(nairaFormat.format(orders.sumOf { it.totalAmount }), fontSize = 13.sp, fontWeight = FontWeight.Black, color = SuccessGreen)
                                         }
                                     }
                                     Surface(
@@ -911,7 +954,7 @@ private fun CustomerFileModal(
                                     ) {
                                         Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                             Text("DELIVERED", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                            Text("${orders.count { it.status == OrderStatus.DELIVERED }}", fontSize = 16.sp, fontWeight = FontWeight.Black, color = CyberCyan)
+                                            Text("${orders.count { it.status == OrderStatus.DELIVERED }}", fontSize = 15.sp, fontWeight = FontWeight.Black, color = CyberCyan)
                                         }
                                     }
                                 }
@@ -1672,6 +1715,53 @@ private fun CustomerFileModal(
                             }
                         }
                     }
+                    }
+
+                    // ==========================================
+                    // 3. PRE-ORDERS & SPECIAL BRAND REQUESTS INSIDE THIS CUSTOMER'S FOLDER
+                    // ==========================================
+                    if (folderSectionTab == 0 || folderSectionTab == 3) {
+                        item {
+                            Text(
+                                text = "Pre-Orders & Brand Requests (${customerPreOrders.size})",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+
+                        if (customerPreOrders.isEmpty()) {
+                            item {
+                                Surface(
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(24.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "No Pre-Order or Special Brand requests submitted by this customer yet.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            items(customerPreOrders, key = { "folder_po_${it.id}" }) { req ->
+                                AdminPreOrderItemCard(
+                                    req = req,
+                                    viewModel = viewModel,
+                                    nairaFormat = nairaFormat,
+                                    dateFormat = shortDateTimeFormat,
+                                    context = context
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -3935,11 +4025,13 @@ private fun CustomerIdentityTab(
     viewModel: MainViewModel,
     customers: List<Customer>,
     orders: List<Order>,
-    onCustomerClick: (Customer) -> Unit
+    onCustomerClick: (Customer) -> Unit,
+    onOpenPreOrdersTab: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     val cloudStatus by viewModel.cloudStatusMessage.collectAsState()
+    val preOrders by viewModel.preOrderRequests.collectAsState()
     val nairaFormat = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "NG")).apply {
             maximumFractionDigits = 0
@@ -3949,10 +4041,15 @@ private fun CustomerIdentityTab(
     val nowMillis = remember(customers.size) { System.currentTimeMillis() }
 
     var searchQuery by remember { mutableStateOf("") }
-    var filterType by remember { mutableStateOf("ALL") } // ALL, RECENT, ACTIVE, DELIVERED, NO_ORDERS
+    var filterType by remember { mutableStateOf("ALL") } // ALL, RECENT, ACTIVE, DELIVERED, NO_ORDERS, PREORDERS
+
+    val unmatchedPreOrdersCount = remember(preOrders, customers) {
+        preOrders.count { req -> customers.none { cust -> matchesCustomerPreOrder(req, cust) } }
+    }
 
     val filteredCustomers = customers.filter { cust ->
         val custOrders = orders.filter { matchesCustomerFolder(it, cust) }
+        val custPreOrders = preOrders.filter { matchesCustomerPreOrder(it, cust) }
         val isRecentSignUp = cust.createdAt > 0L && (nowMillis - cust.createdAt) < 172_800_000L
 
         val matchesSearch = searchQuery.isBlank() ||
@@ -3961,7 +4058,12 @@ private fun CustomerIdentityTab(
                 cust.email.contains(searchQuery, ignoreCase = true) ||
                 cust.id.contains(searchQuery, ignoreCase = true) ||
                 "CUST-${cust.id.take(6)}".contains(searchQuery, ignoreCase = true) ||
-                custOrders.any { it.orderId.contains(searchQuery, ignoreCase = true) }
+                custOrders.any { it.orderId.contains(searchQuery, ignoreCase = true) } ||
+                custPreOrders.any {
+                    it.id.contains(searchQuery, ignoreCase = true) ||
+                        it.productName.contains(searchQuery, ignoreCase = true) ||
+                        it.brandName.contains(searchQuery, ignoreCase = true)
+                }
 
         val matchesFilter = when (filterType) {
             "RECENT" -> isRecentSignUp || custOrders.isEmpty()
@@ -3973,6 +4075,7 @@ private fun CustomerIdentityTab(
             }
             "DELIVERED" -> custOrders.any { it.status == OrderStatus.DELIVERED }
             "NO_ORDERS" -> custOrders.isEmpty()
+            "PREORDERS" -> custPreOrders.isNotEmpty()
             else -> true
         }
 
@@ -4017,7 +4120,7 @@ private fun CustomerIdentityTab(
                                     color = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
                                 Text(
-                                    text = "${customers.size} Separate Customer Folder(s) • ${orders.size} Total Orders",
+                                    text = "${customers.size} Customer Folder(s) • ${orders.size} Orders • ${preOrders.size} Pre-Orders",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
                                 )
@@ -4027,10 +4130,41 @@ private fun CustomerIdentityTab(
 
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        text = "Every registered customer automatically gets a separate folder containing their Sign-Up Credentials (Name, Phone, Password, Address & Timestamp) and all Customer Orders & Receipts.",
+                        text = "Every registered customer automatically gets a separate folder containing their Sign-Up Credentials (Name, Phone, Password, Address & Timestamp), all Customer Orders & Receipts, and Customer Pre-Orders.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.9f)
                     )
+
+                    if (unmatchedPreOrdersCount > 0) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Surface(
+                            onClick = onOpenPreOrdersTab,
+                            shape = RoundedCornerShape(10.dp),
+                            color = AccentGold.copy(alpha = 0.2f),
+                            border = BorderStroke(1.dp, AccentGold),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "✨ $unmatchedPreOrdersCount Guest / Direct Pre-Order(s) waiting in Pre-Orders File",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = AccentGold,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    text = "OPEN →",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = AccentGold
+                                )
+                            }
+                        }
+                    }
 
                     Spacer(modifier = Modifier.height(10.dp))
                     Button(
@@ -4053,7 +4187,7 @@ private fun CustomerIdentityTab(
                         } else {
                             Icon(Icons.Default.CloudSync, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Sync Customer Folders & Orders from Cloud", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("Sync Customer Folders, Orders & Pre-Orders", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                     if (!cloudStatus.isNullOrBlank()) {
@@ -4073,7 +4207,7 @@ private fun CustomerIdentityTab(
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                label = { Text("Search Folders by Name, Phone, Order # or ID") },
+                label = { Text("Search Folders by Name, Phone, Order # or Pre-Order") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {
@@ -4102,6 +4236,11 @@ private fun CustomerIdentityTab(
                     selected = filterType == "ALL",
                     onClick = { filterType = "ALL" },
                     label = { Text("All Folders (${customers.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                )
+                FilterChip(
+                    selected = filterType == "PREORDERS",
+                    onClick = { filterType = "PREORDERS" },
+                    label = { Text("Has Pre-Orders", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
                 )
                 FilterChip(
                     selected = filterType == "RECENT",
@@ -4157,6 +4296,7 @@ private fun CustomerIdentityTab(
         // Separate Customer Folder Cards (Each Customer = 1 Distinct Folder)
         items(filteredCustomers, key = { it.id }) { customer ->
             val customerOrders = orders.filter { matchesCustomerFolder(it, customer) }
+            val customerPreOrders = preOrders.filter { matchesCustomerPreOrder(it, customer) }
             val totalSpend = customerOrders.sumOf { it.totalAmount }
             val activeOrders = customerOrders.filter { it.status != OrderStatus.DELIVERED && it.status != OrderStatus.CANCELLED }
             val isNewSignUp = customer.createdAt > 0L && (nowMillis - customer.createdAt) < 172_800_000L
@@ -4398,10 +4538,25 @@ private fun CustomerIdentityTab(
                         ) {
                             Column {
                                 Text(
-                                    text = "${customerOrders.size} Order(s) Inside Folder",
+                                    text = "${customerOrders.size} Order(s) • ${customerPreOrders.size} Pre-Order(s)",
                                     fontWeight = FontWeight.Bold,
                                     style = MaterialTheme.typography.bodySmall
                                 )
+                                if (customerPreOrders.isNotEmpty()) {
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = AccentGold.copy(alpha = 0.2f),
+                                        modifier = Modifier.padding(top = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "✨ ${customerPreOrders.size} Pre-Order Request(s) Inside Folder",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = AccentGold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
                                 if (activeOrders.isNotEmpty()) {
                                     Surface(
                                         shape = RoundedCornerShape(4.dp),
@@ -4464,9 +4619,9 @@ private fun CustomerIdentityTab(
                             Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "📂 Open Customer Folder (${customerOrders.size} Orders)",
+                                text = "📂 Open Folder (${customerOrders.size} Orders • ${customerPreOrders.size} Pre-Orders)",
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp
+                                fontSize = 12.sp
                             )
                         }
                     }
@@ -8140,10 +8295,15 @@ private fun PromoActivationTab(viewModel: MainViewModel) {
 private fun AdminPreOrdersTab(viewModel: MainViewModel) {
     val context = LocalContext.current
     val preOrders by viewModel.preOrderRequests.collectAsState()
+    val isRefreshing by viewModel.isRefreshing.collectAsState()
     val nairaFormat = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "NG")).apply { maximumFractionDigits = 0 }
     }
     val dateFormat = remember { SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()) }
+
+    LaunchedEffect(Unit) {
+        viewModel.syncPreOrdersNow()
+    }
 
     var filterStatus by remember { mutableStateOf<PreOrderStatus?>(null) }
     val filteredPreOrders = remember(preOrders, filterStatus) {
@@ -8233,6 +8393,31 @@ private fun AdminPreOrdersTab(viewModel: MainViewModel) {
                                 Text("IN PROGRESS", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CyberCyan)
                                 Text("$processingCount", fontSize = 18.sp, fontWeight = FontWeight.Black, color = CyberCyan)
                             }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(
+                        enabled = !isRefreshing,
+                        onClick = {
+                            viewModel.syncPreOrdersNow { _, msg ->
+                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(46.dp)
+                            .testTag("admin_sync_preorders_button")
+                    ) {
+                        if (isRefreshing) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Syncing Pre-Orders from Cloud...", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        } else {
+                            Icon(Icons.Default.CloudSync, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Sync Customer Pre-Orders from Cloud Now", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -8546,11 +8731,19 @@ private fun AdminPreOrderItemCard(
                     )
                     ExposedDropdownMenu(
                         expanded = statusDropdownExpanded,
-                        onDismissRequest = { statusDropdownExpanded = false }
+                        onDismissRequest = { statusDropdownExpanded = false },
+                        containerColor = Color.White
                     ) {
-                        PreOrderStatus.values().forEach { st ->
+                        PreOrderStatus.entries.forEach { st ->
+                            val isSelected = selectedStatus == st
                             DropdownMenuItem(
-                                text = { Text(st.label, fontWeight = FontWeight.Bold) },
+                                text = {
+                                    Text(
+                                        text = st.label,
+                                        fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
+                                        color = if (isSelected) Color(0xFFB91C1C) else Color(0xFF111827)
+                                    )
+                                },
                                 onClick = {
                                     selectedStatus = st
                                     statusDropdownExpanded = false

@@ -128,6 +128,24 @@ object ShopNotificationHelper {
         )
     }
 
+    fun notifyAdminNewPreOrder(
+        context: Context,
+        requestId: String,
+        customerName: String,
+        productName: String,
+        brandName: String
+    ) {
+        if (!hasNotificationPermission(context)) return
+        ensureChannels(context)
+        postNotification(
+            context = context,
+            channelId = CHANNEL_ORDERS,
+            notificationId = ("preorder_admin_$requestId").hashCode(),
+            title = "New Customer Pre-Order ($requestId)",
+            body = "${customerName.ifBlank { "Customer" }} requested \"$productName\" (${brandName.ifBlank { "Custom" }}). Open Admin File to quote & reply."
+        )
+    }
+
     fun notifyPartnerPaymentAlert(
         context: Context,
         partnerName: String,

@@ -114,14 +114,15 @@ fun CategorySelectorButton(
 
         DropdownMenu(
             expanded = expanded,
-            onDismissRequest = { expanded = false }
+            onDismissRequest = { expanded = false },
+            containerColor = Color.White
         ) {
             DropdownMenuItem(
                 leadingIcon = {
                     Icon(
                         imageVector = Icons.Default.LocalMall,
                         contentDescription = null,
-                        tint = if (selectedCategory == null) AccentGold else MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = if (selectedCategory == null) Color(0xFFB91C1C) else Color(0xFF111827),
                         modifier = Modifier.size(18.dp)
                     )
                 },
@@ -132,13 +133,13 @@ fun CategorySelectorButton(
                     ) {
                         Text(
                             text = "All 3D Items ($totalCount)",
-                            fontWeight = if (selectedCategory == null) FontWeight.Black else FontWeight.Medium,
-                            color = if (selectedCategory == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            fontWeight = if (selectedCategory == null) FontWeight.Black else FontWeight.Bold,
+                            color = if (selectedCategory == null) Color(0xFFB91C1C) else Color(0xFF111827)
                         )
                     }
                 },
                 trailingIcon = if (selectedCategory == null) {
-                    { Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp)) }
+                    { Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFFB91C1C), modifier = Modifier.size(16.dp)) }
                 } else null,
                 onClick = {
                     onSelectCategory(null)
@@ -148,7 +149,10 @@ fun CategorySelectorButton(
                 modifier = Modifier.testTag("category_chip_all")
             )
 
-            HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+            HorizontalDivider(
+                modifier = Modifier.padding(vertical = 2.dp),
+                color = Color(0xFFE5E7EB)
+            )
 
             ProductCategory.entries.forEach { cat ->
                 val isSelected = selectedCategory == cat.displayName
@@ -158,19 +162,19 @@ fun CategorySelectorButton(
                         Icon(
                             imageVector = getCategoryIcon(cat),
                             contentDescription = cat.displayName,
-                            tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = if (isSelected) Color(0xFFB91C1C) else Color(0xFF111827),
                             modifier = Modifier.size(18.dp)
                         )
                     },
                     text = {
                         Text(
                             text = if (count > 0) "${cat.displayName} ($count)" else cat.displayName,
-                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Medium,
-                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
+                            color = if (isSelected) Color(0xFFB91C1C) else Color(0xFF111827)
                         )
                     },
                     trailingIcon = if (isSelected) {
-                        { Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp)) }
+                        { Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFFB91C1C), modifier = Modifier.size(16.dp)) }
                     } else null,
                     onClick = {
                         onSelectCategory(if (isSelected) null else cat.displayName)

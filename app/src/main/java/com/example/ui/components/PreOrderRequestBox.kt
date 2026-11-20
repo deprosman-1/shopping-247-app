@@ -94,6 +94,23 @@ fun PreOrderRequestCard(
     onOpenDialog: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val currentCustomer by viewModel.currentCustomer.collectAsState()
+    val savedDeliveryInfo by viewModel.savedDeliveryInfo.collectAsState()
+
+    var customerNameInput by remember(currentCustomer?.id, savedDeliveryInfo.fullName) {
+        mutableStateOf(
+            currentCustomer?.fullName?.takeIf { it.isNotBlank() }
+                ?: savedDeliveryInfo.fullName.takeIf { it.isNotBlank() }
+                ?: ""
+        )
+    }
+    var customerPhoneInput by remember(currentCustomer?.id, savedDeliveryInfo.phoneNumber) {
+        mutableStateOf(
+            currentCustomer?.phoneNumber?.takeIf { it.isNotBlank() }
+                ?: savedDeliveryInfo.phoneNumber.takeIf { it.isNotBlank() }
+                ?: ""
+        )
+    }
     var productName by remember { mutableStateOf("") }
     var brandName by remember { mutableStateOf("") }
     var category by remember { mutableStateOf(ProductCategory.CLOTHES.displayName) }
@@ -158,6 +175,29 @@ fun PreOrderRequestCard(
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             Spacer(modifier = Modifier.height(14.dp))
 
+            // Customer Contact Identity Row (pre-filled when signed in, editable for guests)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = customerNameInput,
+                    onValueChange = { customerNameInput = it },
+                    label = { Text("Your Full Name *") },
+                    placeholder = { Text("Customer name") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f).testTag("preorder_customer_name_input")
+                )
+                OutlinedTextField(
+                    value = customerPhoneInput,
+                    onValueChange = { customerPhoneInput = it },
+                    label = { Text("Phone / WhatsApp *") },
+                    placeholder = { Text("+234...") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    singleLine = true,
+                    modifier = Modifier.weight(1f).testTag("preorder_customer_phone_input")
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
             // Form Inputs
             OutlinedTextField(
                 value = productName,
@@ -180,7 +220,7 @@ fun PreOrderRequestCard(
                     modifier = Modifier.weight(1f).testTag("preorder_brand_input")
                 )
 
-                // Category Dropdown
+                // Category Dropdown (Bold Black & Bold Red on Crisp White Popup)
                 ExposedDropdownMenuBox(
                     expanded = categoryExpanded,
                     onExpandedChange = { categoryExpanded = !categoryExpanded },
@@ -192,15 +232,44 @@ fun PreOrderRequestCard(
                         readOnly = true,
                         label = { Text("Category") },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryExpanded) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                        modifier = Modifier
+                            .menuAnchor()
+                            .fillMaxWidth()
+                            .testTag("preorder_category_selector")
                     )
                     ExposedDropdownMenu(
                         expanded = categoryExpanded,
-                        onDismissRequest = { categoryExpanded = false }
+                        onDismissRequest = { categoryExpanded = false },
+                        containerColor = Color.White
                     ) {
-                        ProductCategory.values().forEach { cat ->
+                        ProductCategory.entries.forEach { cat ->
+                            val isSelected = category == cat.displayName
                             DropdownMenuItem(
-                                text = { Text(cat.displayName) },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = getCategoryIcon(cat),
+                                        contentDescription = cat.displayName,
+                                        tint = if (isSelected) Color(0xFFB91C1C) else Color(0xFF111827),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                text = {
+                                    Text(
+                                        text = cat.displayName,
+                                        fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
+                                        color = if (isSelected) Color(0xFFB91C1C) else Color(0xFF111827)
+                                    )
+                                },
+                                trailingIcon = if (isSelected) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Default.CheckCircle,
+                                            contentDescription = null,
+                                            tint = Color(0xFFB91C1C),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                } else null,
                                 onClick = {
                                     category = cat.displayName
                                     categoryExpanded = false
@@ -328,6 +397,10 @@ fun PreOrderRequestCard(
                         Toast.makeText(context, "Please enter product name and brand", Toast.LENGTH_SHORT).show()
                         return@Button
                     }
+                    if (customerNameInput.isBlank() || customerPhoneInput.isBlank()) {
+                        Toast.makeText(context, "Please enter your Name & Phone/WhatsApp so Admin can reach you", Toast.LENGTH_SHORT).show()
+                        return@Button
+                    }
                     val budget = budgetInput.toDoubleOrNull() ?: 0.0
                     val success = viewModel.submitPreOrderRequest(
                         productName = productName,
@@ -337,16 +410,19 @@ fun PreOrderRequestCard(
                         preferredColor = colorInput,
                         targetBudget = budget,
                         description = description,
-                        photoUrl = photoUrl
+                        photoUrl = photoUrl,
+                        customerNameOverride = customerNameInput.trim(),
+                        customerPhoneOverride = customerPhoneInput.trim()
                     )
                     if (success) {
-                        Toast.makeText(context, "✅ Pre-Order Request Sent to Admin!", Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, "✅ Pre-Order Request Sent & Synced to Admin File!", Toast.LENGTH_LONG).show()
                         productName = ""
                         brandName = ""
                         sizeInput = ""
                         colorInput = ""
                         budgetInput = ""
                         description = ""
+                        photoUrl = ""
                         isSubmitted = true
                     }
                 },
@@ -409,8 +485,21 @@ fun CustomerPreOrdersList(
 ) {
     val requests by viewModel.preOrderRequests.collectAsState()
     val currentCust by viewModel.currentCustomer.collectAsState()
-    val myRequests = remember(requests, currentCust) {
-        requests.filter { it.customerId == currentCust?.id || currentCust == null }
+    val savedInfo by viewModel.savedDeliveryInfo.collectAsState()
+    val myRequests = remember(requests, currentCust, savedInfo) {
+        val custPhoneDigits = (currentCust?.phoneNumber ?: savedInfo.phoneNumber).filter { it.isDigit() }
+        val custName = (currentCust?.fullName ?: savedInfo.fullName).trim()
+        requests.filter { req ->
+            val reqPhoneDigits = req.customerPhone.filter { it.isDigit() }
+            val phoneMatch = custPhoneDigits.length >= 7 && reqPhoneDigits.length >= 7 &&
+                custPhoneDigits.takeLast(minOf(10, custPhoneDigits.length)) == reqPhoneDigits.takeLast(minOf(10, reqPhoneDigits.length))
+            val nameMatch = custName.isNotBlank() && req.customerName.equals(custName, ignoreCase = true)
+            when {
+                currentCust != null -> req.customerId == currentCust!!.id || phoneMatch || nameMatch
+                custPhoneDigits.length >= 7 -> phoneMatch || nameMatch
+                else -> req.customerId == "guest"
+            }
+        }
     }
     val nairaFormat = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "NG")).apply { maximumFractionDigits = 0 }

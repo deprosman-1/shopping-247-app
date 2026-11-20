@@ -375,9 +375,136 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    // Pre-Order & Special Brand Requests State & Methods
+    // Pre-Order & Special Brand Requests State & Methods (Loaded in init after adminPrefs is constructed)
     private val _preOrderRequests = MutableStateFlow<List<com.example.data.model.PreOrderRequest>>(emptyList())
     val preOrderRequests: StateFlow<List<com.example.data.model.PreOrderRequest>> = _preOrderRequests.asStateFlow()
+
+    private fun loadPreOrderRequests(): List<com.example.data.model.PreOrderRequest> {
+        val raw = adminPrefs.getString("pre_order_requests_json", null) ?: return emptyList()
+        return try {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).mapNotNull { i ->
+                val obj = arr.optJSONObject(i) ?: return@mapNotNull null
+                val id = obj.optString("id", "").trim()
+                if (id.isBlank()) return@mapNotNull null
+                val statusName = obj.optString("status", com.example.data.model.PreOrderStatus.PENDING.name)
+                val status = com.example.data.model.PreOrderStatus.entries.firstOrNull { it.name == statusName }
+                    ?: com.example.data.model.PreOrderStatus.PENDING
+                com.example.data.model.PreOrderRequest(
+                    id = id,
+                    customerId = obj.optString("customerId", "guest"),
+                    customerName = obj.optString("customerName", "Valued Customer"),
+                    customerPhone = obj.optString("customerPhone", ""),
+                    productName = obj.optString("productName", ""),
+                    brandName = obj.optString("brandName", ""),
+                    category = obj.optString("category", "Clothes"),
+                    preferredSize = obj.optString("preferredSize", "Standard"),
+                    preferredColor = obj.optString("preferredColor", "Any"),
+                    targetBudget = obj.optDouble("targetBudget", 0.0),
+                    description = obj.optString("description", ""),
+                    photoUrl = obj.optString("photoUrl", ""),
+                    status = status,
+                    createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
+                    adminResponse = obj.optString("adminResponse", ""),
+                    adminQuotedPrice = obj.optDouble("adminQuotedPrice", 0.0),
+                    customerReply = obj.optString("customerReply", "")
+                )
+            }.sortedByDescending { it.createdAt }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun persistPreOrderRequests(list: List<com.example.data.model.PreOrderRequest>) {
+        val arr = JSONArray()
+        list.forEach { r ->
+            arr.put(JSONObject().apply {
+                put("id", r.id)
+                put("customerId", r.customerId)
+                put("customerName", r.customerName)
+                put("customerPhone", r.customerPhone)
+                put("productName", r.productName)
+                put("brandName", r.brandName)
+                put("category", r.category)
+                put("preferredSize", r.preferredSize)
+                put("preferredColor", r.preferredColor)
+                put("targetBudget", r.targetBudget)
+                put("description", r.description)
+                put("photoUrl", r.photoUrl)
+                put("status", r.status.name)
+                put("createdAt", r.createdAt)
+                put("adminResponse", r.adminResponse)
+                put("adminQuotedPrice", r.adminQuotedPrice)
+                put("customerReply", r.customerReply)
+            })
+        }
+        adminPrefs.edit().putString("pre_order_requests_json", arr.toString()).apply()
+    }
+
+    private suspend fun syncPreOrdersWithCloudInternal(
+        preferLocalIds: Set<String> = emptySet(),
+        notifyOnNewRemote: Boolean = false
+    ): Result<List<com.example.data.model.PreOrderRequest>> {
+        if (repository.supabaseSync.isPlaceholderConfig()) {
+            return Result.success(_preOrderRequests.value)
+        }
+        val beforeIds = _preOrderRequests.value.map { it.id }.toSet()
+        val beforeSnapshot = _preOrderRequests.value.associateBy { it.id }
+        val res = repository.supabaseSync.syncPreOrdersWithCloud(
+            localList = _preOrderRequests.value,
+            preferLocalIds = preferLocalIds
+        )
+        res.onSuccess { merged ->
+            _preOrderRequests.value = merged
+            persistPreOrderRequests(merged)
+            if (notifyOnNewRemote) {
+                val recentCutoffMs = appLaunchTimestampMs - 300_000L
+                val isAdminDevice = _isAdminUnlocked.value || (_currentCustomer.value?.isAdmin == true)
+                val newItems = merged.filter { it.id !in beforeIds && it.createdAt >= recentCutoffMs }
+                if (newItems.isNotEmpty() && isAdminDevice) {
+                    val latest = newItems.first()
+                    ShopNotificationHelper.notifyAdminNewPreOrder(
+                        context = getApplication(),
+                        requestId = latest.id,
+                        customerName = latest.customerName,
+                        productName = latest.productName,
+                        brandName = latest.brandName
+                    )
+                    voiceManager.speakText("New Pre-Order Request received from ${latest.customerName} for ${latest.productName}.")
+                }
+                // Notify customer if Admin updated an existing request remotely
+                val myCustId = _currentCustomer.value?.id
+                merged.forEach { cur ->
+                    val prev = beforeSnapshot[cur.id]
+                    if (prev != null &&
+                        (prev.status != cur.status || (prev.adminResponse != cur.adminResponse && cur.adminResponse.isNotBlank())) &&
+                        (myCustId == null || cur.customerId == myCustId)
+                    ) {
+                        ShopNotificationHelper.notifyPreOrderReply(
+                            context = getApplication(),
+                            requestId = cur.id,
+                            productName = cur.productName,
+                            statusLabel = cur.status.label
+                        )
+                    }
+                }
+            }
+        }
+        return res
+    }
+
+    fun syncPreOrdersNow(onComplete: ((Boolean, String) -> Unit)? = null) {
+        viewModelScope.launch {
+            _isRefreshing.value = true
+            val res = syncPreOrdersWithCloudInternal(notifyOnNewRemote = false)
+            _isRefreshing.value = false
+            res.onSuccess { list ->
+                onComplete?.invoke(true, "✅ Synced ${list.size} Pre-Order request(s) with Cloud.")
+            }.onFailure { err ->
+                onComplete?.invoke(false, "Saved locally. Cloud sync note: ${err.message ?: "Connect Supabase first"}")
+            }
+        }
+    }
 
     fun submitPreOrderRequest(
         productName: String,
@@ -387,29 +514,94 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferredColor: String = "Any",
         targetBudget: Double = 0.0,
         description: String = "",
-        photoUrl: String = ""
+        photoUrl: String = "",
+        customerNameOverride: String = "",
+        customerPhoneOverride: String = ""
     ): Boolean {
         val currentCust = _currentCustomer.value
+        val savedInfo = _savedDeliveryInfo.value
+        val resolvedName = customerNameOverride.trim().ifBlank {
+            currentCust?.fullName?.takeIf { it.isNotBlank() }
+                ?: savedInfo.fullName.takeIf { it.isNotBlank() }
+                ?: "Valued Customer"
+        }
+        val resolvedPhone = customerPhoneOverride.trim().ifBlank {
+            currentCust?.phoneNumber?.takeIf { it.isNotBlank() }
+                ?: savedInfo.phoneNumber.takeIf { it.isNotBlank() }
+                ?: ""
+        }
+        val resolvedDigits = resolvedPhone.filter { it.isDigit() }
+        val matchedCustomerId = currentCust?.id ?: allCustomers.value.firstOrNull { c ->
+            val cDigits = c.phoneNumber.filter { it.isDigit() }
+            val phoneMatch = resolvedDigits.length >= 7 && cDigits.length >= 7 &&
+                resolvedDigits.takeLast(minOf(10, resolvedDigits.length)) == cDigits.takeLast(minOf(10, cDigits.length))
+            val nameMatch = resolvedName.isNotBlank() && resolvedName != "Valued Customer" &&
+                c.fullName.equals(resolvedName, ignoreCase = true)
+            phoneMatch || nameMatch
+        }?.id ?: "guest"
+
         val req = com.example.data.model.PreOrderRequest(
             id = "REQ-${java.util.UUID.randomUUID().toString().take(6).uppercase()}",
-            customerId = currentCust?.id ?: "guest",
-            customerName = currentCust?.fullName ?: "Valued Customer",
-            customerPhone = currentCust?.phoneNumber ?: "+2348000000000",
+            customerId = matchedCustomerId,
+            customerName = resolvedName,
+            customerPhone = resolvedPhone,
             productName = productName.trim(),
             brandName = brandName.trim(),
             category = category,
-            preferredSize = preferredSize,
-            preferredColor = preferredColor,
+            preferredSize = preferredSize.ifBlank { "Standard" },
+            preferredColor = preferredColor.ifBlank { "Any" },
             targetBudget = targetBudget,
             description = description.trim(),
             photoUrl = photoUrl,
             status = com.example.data.model.PreOrderStatus.PENDING,
             createdAt = System.currentTimeMillis()
         )
-        val updated = _preOrderRequests.value.toMutableList()
-        updated.add(0, req)
+        val updated = (listOf(req) + _preOrderRequests.value).distinctBy { it.id }
         _preOrderRequests.value = updated
-        voiceManager.speakText("Special Pre-Order Request alert! A customer submitted a request for ${productName.trim()} by ${brandName.trim()}.")
+        persistPreOrderRequests(updated)
+        if (savedInfo.phoneNumber.isBlank() && resolvedPhone.isNotBlank()) {
+            persistDeliveryInfoLocally(
+                fullName = resolvedName.takeIf { it != "Valued Customer" },
+                phoneNumber = resolvedPhone
+            )
+        }
+        voiceManager.speakText("Special Pre-Order Request submitted for ${productName.trim()} by ${brandName.trim()}.")
+
+        viewModelScope.launch {
+            var workingReq = req
+            if (photoUrl.isNotBlank() && !photoUrl.startsWith("http", ignoreCase = true)) {
+                val uploadedUrl = repository.persistReturnProofImage(req.id, photoUrl)
+                if (uploadedUrl.isNotBlank() && uploadedUrl != photoUrl) {
+                    workingReq = req.copy(photoUrl = uploadedUrl)
+                    val refreshedList = _preOrderRequests.value.map { if (it.id == req.id) workingReq else it }
+                    _preOrderRequests.value = refreshedList
+                    persistPreOrderRequests(refreshedList)
+                }
+            }
+            val syncRes = syncPreOrdersWithCloudInternal(
+                preferLocalIds = setOf(workingReq.id),
+                notifyOnNewRemote = false
+            )
+            if (syncRes.isFailure || !isOnline.value) {
+                enqueueOfflineAction(
+                    type = OfflineActionType.PREORDER_SYNC,
+                    referenceId = workingReq.id,
+                    summary = "Pre-Order ${workingReq.id}: ${workingReq.productName}"
+                )
+            } else {
+                startLiveCallSignalingIfConfigured()
+                liveCallClient.sendSignal(
+                    "PRE_ORDER",
+                    "global_preorders",
+                    JSONObject().apply {
+                        put("id", workingReq.id)
+                        put("customerName", workingReq.customerName)
+                        put("productName", workingReq.productName)
+                        put("brandName", workingReq.brandName)
+                    }
+                )
+            }
+        }
         return true
     }
 
@@ -431,6 +623,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else req
         }
         _preOrderRequests.value = updated
+        persistPreOrderRequests(updated)
         voiceManager.speakText("Pre-order request $requestId has been updated by Admin.")
         if (updatedProductName.isNotBlank()) {
             ShopNotificationHelper.notifyPreOrderReply(
@@ -438,6 +631,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 requestId = requestId,
                 productName = updatedProductName,
                 statusLabel = status.label
+            )
+        }
+        viewModelScope.launch {
+            syncPreOrdersWithCloudInternal(preferLocalIds = setOf(requestId))
+            startLiveCallSignalingIfConfigured()
+            liveCallClient.sendSignal(
+                "PRE_ORDER",
+                "global_preorders",
+                JSONObject().apply { put("id", requestId) }
             )
         }
     }
@@ -449,7 +651,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else req
         }
         _preOrderRequests.value = updated
+        persistPreOrderRequests(updated)
         voiceManager.speakText("New customer reply received for request $requestId.")
+        viewModelScope.launch {
+            syncPreOrdersWithCloudInternal(preferLocalIds = setOf(requestId))
+            startLiveCallSignalingIfConfigured()
+            liveCallClient.sendSignal(
+                "PRE_ORDER",
+                "global_preorders",
+                JSONObject().apply { put("id", requestId) }
+            )
+        }
     }
 
     // Wishlist State (persisted in user profile within Supabase)
@@ -1227,6 +1439,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val isOnline: StateFlow<Boolean> = offlineConnectivityManager.isOnline
 
     init {
+        _preOrderRequests.value = loadPreOrderRequests()
         _latestVersionName.value = _storeProfile.value.latestAppVersionName
         if (_storeProfile.value.updateReleaseNotes.isNotBlank()) {
             _releaseNotes.value = _storeProfile.value.updateReleaseNotes
@@ -1297,6 +1510,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     repository.supabaseSync.updateConfig(connectedCfg)
                     _supabaseConfigState.value = repository.supabaseSync.getConfig()
                     val syncRes = repository.fetchAndSyncAllFromCloudDetailed()
+                    syncPreOrdersWithCloudInternal(notifyOnNewRemote = false)
                     hasCompletedInitialCloudPull = true
                     if (syncRes.isSuccess) {
                         val s = syncRes.getOrThrow()
@@ -1379,6 +1593,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (!repository.supabaseSync.isPlaceholderConfig()) {
                         val wasBaselineEstablished = hasCompletedInitialCloudPull
                         val syncRes = repository.fetchAndSyncAllFromCloudDetailed()
+                        syncPreOrdersWithCloudInternal(notifyOnNewRemote = wasBaselineEstablished)
                         if (syncRes.isSuccess) {
                             val summary = syncRes.getOrThrow()
                             hasCompletedInitialCloudPull = true
@@ -1415,12 +1630,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isRefreshing.value = true
             val res = repository.fetchAndSyncAllFromCloudDetailed()
+            syncPreOrdersWithCloudInternal(notifyOnNewRemote = false)
             _isRefreshing.value = false
             _lastSyncTimestamp.value = System.currentTimeMillis()
             res.onSuccess { summary ->
                 if (summary.errors.isEmpty()) {
                     _isSupabaseConnected.value = true
-                    _cloudStatusMessage.value = "✅ Synced: ${summary.syncedProducts} products (${summary.customCloudProducts} custom), ${summary.syncedCustomers} customers, ${summary.syncedOrders} orders."
+                    _cloudStatusMessage.value = "✅ Synced: ${summary.syncedProducts} products (${summary.customCloudProducts} custom), ${summary.syncedCustomers} customers, ${summary.syncedOrders} orders & ${_preOrderRequests.value.size} pre-orders."
                 } else {
                     _cloudStatusMessage.value = "⚠️ Partial sync: ${summary.errors.joinToString("; ")}"
                 }
@@ -1437,8 +1653,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isSupabaseBusy.value = true
             _isRefreshing.value = true
-            _cloudStatusMessage.value = "🔄 Syncing catalog, customers, orders & receipts with Supabase..."
+            _cloudStatusMessage.value = "🔄 Syncing catalog, customers, orders, pre-orders & receipts with Supabase..."
             val res = repository.fetchAndSyncAllFromCloudDetailed()
+            syncPreOrdersWithCloudInternal(notifyOnNewRemote = false)
             _isSupabaseBusy.value = false
             _isRefreshing.value = false
             _lastSyncTimestamp.value = System.currentTimeMillis()
@@ -1446,7 +1663,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val s = res.getOrThrow()
                 if (s.errors.isEmpty()) {
                     _isSupabaseConnected.value = true
-                    "✅ Live Sync Complete! Cloud: ${s.syncedProducts} products (${s.customCloudProducts} uploaded), ${s.syncedCustomers} customers (+${s.newRemoteCustomers} new), ${s.syncedOrders} orders (+${s.newRemoteOrders} new) | Pushed local: ${s.pushedLocalProducts} prod, ${s.pushedLocalCustomers} cust, ${s.pushedLocalOrders} ord."
+                    "✅ Live Sync Complete! Cloud: ${s.syncedProducts} products (${s.customCloudProducts} uploaded), ${s.syncedCustomers} customers (+${s.newRemoteCustomers} new), ${s.syncedOrders} orders (+${s.newRemoteOrders} new), ${_preOrderRequests.value.size} pre-orders | Pushed local: ${s.pushedLocalProducts} prod, ${s.pushedLocalCustomers} cust, ${s.pushedLocalOrders} ord."
                 } else {
                     "⚠️ Sync completed with table warnings: ${s.errors.joinToString("; ")}"
                 }
@@ -3721,7 +3938,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val queued = _offlineQueue.value
         if (queued.isEmpty() || !isOnline.value) return
         val res = if (!repository.supabaseSync.isPlaceholderConfig()) {
-            repository.fetchAndSyncAllFromCloudDetailed()
+            val baseRes = repository.fetchAndSyncAllFromCloudDetailed()
+            syncPreOrdersWithCloudInternal(notifyOnNewRemote = false)
+            baseRes
         } else {
             Result.success(com.example.data.repository.CloudSyncSummary())
         }
@@ -3948,6 +4167,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (rawSignal.isNotBlank()) {
                         _inboundWebRtcSignal.value = rawSignal
                     }
+                }
+            }
+            "PRE_ORDER" -> {
+                viewModelScope.launch {
+                    syncPreOrdersWithCloudInternal(notifyOnNewRemote = true)
                 }
             }
             "HANGUP" -> {
