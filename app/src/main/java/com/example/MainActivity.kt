@@ -51,6 +51,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -58,6 +59,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.ui.components.AppUpdateDialog
 import com.example.ui.components.ReceiptViewDialog
 import com.example.ui.screens.AdminControlRoomScreen
 import com.example.ui.screens.AuthScreen
@@ -169,6 +171,10 @@ fun DeprosApp(
     val isAdminUnlocked by viewModel.isAdminUnlocked.collectAsState()
     val showAdminControl = isAdminUnlocked || (currentCustomer?.isAdmin == true)
     val liveCallState by viewModel.liveCallState.collectAsState()
+    val updateAvailable by viewModel.updateAvailable.collectAsState()
+    val latestVersionName by viewModel.latestVersionName.collectAsState()
+    val releaseNotes by viewModel.releaseNotes.collectAsState()
+    val updateDownloadUrl by viewModel.updateDownloadUrl.collectAsState()
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -442,6 +448,18 @@ fun DeprosApp(
                     order = receiptOrder,
                     storeProfile = storeProfile,
                     onDismiss = { viewModel.dismissReceipt() }
+                )
+            }
+
+            // Global Live App Update Prompt (appears immediately when Admin publishes a newer APK)
+            if (updateAvailable) {
+                val installedVer = remember(viewModel) { viewModel.getInstalledAppVersion().second }
+                AppUpdateDialog(
+                    latestVersionName = latestVersionName,
+                    releaseNotes = releaseNotes,
+                    updateUrl = updateDownloadUrl,
+                    installedVersionName = installedVer,
+                    onDismiss = { viewModel.dismissUpdateDialog() }
                 )
             }
         }

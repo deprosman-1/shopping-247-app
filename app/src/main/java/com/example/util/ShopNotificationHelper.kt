@@ -231,6 +231,23 @@ object ShopNotificationHelper {
         )
     }
 
+    fun notifyAppUpdateAvailable(
+        context: Context,
+        versionName: String,
+        versionCode: Int,
+        notes: String = ""
+    ) {
+        if (!hasNotificationPermission(context)) return
+        ensureChannels(context)
+        postNotification(
+            context = context,
+            channelId = CHANNEL_ORDERS,
+            notificationId = 24810 + versionCode,
+            title = "New 24/7 SHOPPING Update Ready (v$versionName)",
+            body = notes.ifBlank { "Tap to install the latest features and live upgrades on your phone." }
+        )
+    }
+
     private fun postNotification(
         context: Context,
         channelId: String,

@@ -8535,14 +8535,24 @@ private fun AdminSecuritySettingsTab(viewModel: MainViewModel) {
     var extraBankNumberInput by remember(storeProfile.extraBankAccountNumber) { mutableStateOf(storeProfile.extraBankAccountNumber) }
     var extraBankHolderInput by remember(storeProfile.extraBankAccountName) { mutableStateOf(storeProfile.extraBankAccountName) }
 
+    val installedApkInfo = remember(viewModel) { viewModel.getInstalledAppVersion() }
     var apkDownloadUrlInput by remember(storeProfile.apkDownloadUrl) {
         mutableStateOf(
             com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(storeProfile.apkDownloadUrl)
                 .ifBlank { com.example.util.WebPortalExporter.DEFAULT_GITHUB_APK_RELEASE_URL }
         )
     }
-    var latestVersionCodeInput by remember(storeProfile.latestAppVersionCode) { mutableStateOf(storeProfile.latestAppVersionCode.toString()) }
-    var latestVersionNameInput by remember(storeProfile.latestAppVersionName) { mutableStateOf(storeProfile.latestAppVersionName) }
+    var latestVersionCodeInput by remember(storeProfile.latestAppVersionCode, installedApkInfo.first) {
+        mutableStateOf(maxOf(storeProfile.latestAppVersionCode, installedApkInfo.first).toString())
+    }
+    var latestVersionNameInput by remember(storeProfile.latestAppVersionName, installedApkInfo.first) {
+        val defaultName = if (installedApkInfo.first >= storeProfile.latestAppVersionCode) {
+            installedApkInfo.second
+        } else {
+            storeProfile.latestAppVersionName
+        }
+        mutableStateOf(defaultName)
+    }
     var updateNotesInput by remember(storeProfile.updateReleaseNotes) { mutableStateOf(storeProfile.updateReleaseNotes) }
     var isPublishingUpdate by remember { mutableStateOf(false) }
 
@@ -8878,11 +8888,44 @@ private fun AdminSecuritySettingsTab(viewModel: MainViewModel) {
                     }
 
                     Text(
-                        text = "Products, prices & orders sync automatically via Supabase. Whenever you export a new APK from AI Studio, upload it to GitHub Releases (up to 2 GB free & unlimited downloads), paste its direct .apk release link below, and bump the Build Code (e.g. 2) so all installed apps see the Update button.",
+                        text = "Products, prices, promos & orders already update 100% silently in the background. When you install a newer APK build, tap below to push a live popup & notification to every customer phone for 1-tap app upgrade (Android OS requires 1 customer tap to install new APK code outside Google Play).",
                         style = MaterialTheme.typography.bodySmall,
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
+                    Button(
+                        enabled = !isPublishingUpdate,
+                        onClick = {
+                            isPublishingUpdate = true
+                            latestVersionCodeInput = installedApk.first.toString()
+                            latestVersionNameInput = installedApk.second
+                            val cleanApkUrl = com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(apkDownloadUrlInput)
+                                .ifBlank { com.example.util.WebPortalExporter.DEFAULT_GITHUB_APK_RELEASE_URL }
+                            apkDownloadUrlInput = cleanApkUrl
+                            viewModel.publishInstalledBuildAsUpdate(
+                                releaseNotes = updateNotesInput,
+                                apkDownloadUrl = cleanApkUrl
+                            ) { _, msg ->
+                                isPublishingUpdate = false
+                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = Color(0xFF052E16)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                            .testTag("push_installed_version_button")
+                    ) {
+                        Icon(Icons.Default.SystemUpdate, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (isPublishingUpdate) "Pushing Update..." else "Push My Installed Build (v${installedApk.second}) Live Now",
+                            fontWeight = FontWeight.Black,
+                            fontSize = 12.5.sp
+                        )
+                    }
 
                     OutlinedTextField(
                         value = apkDownloadUrlInput,

@@ -1271,17 +1271,6 @@ fun HomeScreen(
         if (showQrShareDialog) {
             ShareAppDialog(onDismiss = { showQrShareDialog = false }, viewModel = viewModel)
         }
-
-        if (updateAvailable) {
-            val installedVer = remember(viewModel) { viewModel.getInstalledAppVersion().second }
-            AppUpdateDialog(
-                latestVersionName = latestVersionName,
-                releaseNotes = releaseNotes,
-                updateUrl = updateDownloadUrl,
-                installedVersionName = installedVer,
-                onDismiss = { viewModel.dismissUpdateDialog() }
-            )
-        }
     }
 }
 

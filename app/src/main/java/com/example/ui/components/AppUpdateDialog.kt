@@ -133,23 +133,16 @@ fun AppUpdateDialog(
                 // Action Buttons
                 Button(
                     onClick = {
-                        val target = com.example.util.WebPortalExporter.normalizeWebUrl(updateUrl)
-                        if (target.isBlank()) {
-                            Toast.makeText(
-                                context,
-                                "No APK download link set yet. Ask Seller / Admin to add the Official APK Update URL in Store Settings.",
-                                Toast.LENGTH_LONG
-                            ).show()
-                        } else {
-                            try {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(target)).apply {
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                context.startActivity(intent)
-                                onDismiss()
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "Could not open update link: ${e.message}", Toast.LENGTH_SHORT).show()
+                        val target = com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(updateUrl)
+                            .ifBlank { com.example.util.WebPortalExporter.DEFAULT_GITHUB_APK_RELEASE_URL }
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(target)).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             }
+                            context.startActivity(intent)
+                            onDismiss()
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Could not open update link: ${e.message}", Toast.LENGTH_SHORT).show()
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = Color.White),
@@ -164,6 +157,14 @@ fun AppUpdateDialog(
                     Text("UPDATE APP NOW", fontWeight = FontWeight.Black, fontSize = 14.sp)
                 }
 
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Store items & prices already sync automatically. Tap above once to download and install the new app version.",
+                    fontSize = 10.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+
                 Spacer(modifier = Modifier.height(10.dp))
 
                 OutlinedButton(
@@ -171,7 +172,7 @@ fun AppUpdateDialog(
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(46.dp)
+                        .height(48.dp)
                         .testTag("dismiss_update_button")
                 ) {
                     Text("Later", fontWeight = FontWeight.Bold, fontSize = 13.sp)

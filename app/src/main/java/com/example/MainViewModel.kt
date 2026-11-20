@@ -335,13 +335,44 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
             val res = repository.supabaseSync.publishAppUpdateManifest(manifest)
             if (res.isSuccess) {
-                _cloudStatusMessage.value = "✅ Published APK Update v$cleanName (Build $cleanCode) to Cloud!"
-                onComplete(true, "✅ Published APK Update v$cleanName! Customers tapping 'Update App' or opening the app will receive the update link.")
+                startLiveCallSignalingIfConfigured()
+                liveCallClient.sendSignal(
+                    "APP_UPDATE",
+                    "global_updates",
+                    JSONObject().apply {
+                        put("versionCode", cleanCode)
+                        put("versionName", cleanName)
+                        put("releaseNotes", cleanNotes)
+                        put("updateUrl", cleanUrl)
+                    }
+                )
+                _cloudStatusMessage.value = "✅ Published APK Update v$cleanName (Build $cleanCode) to Cloud & Live Customer Alerts!"
+                onComplete(true, "✅ Published APK Update v$cleanName (Build $cleanCode)! All customer phones are notified automatically with 1-tap update.")
             } else {
                 val err = res.exceptionOrNull()?.message ?: "Cloud not connected"
                 onComplete(false, "Saved locally on this device, but cloud publish needs active Supabase: $err")
             }
         }
+    }
+
+    fun publishInstalledBuildAsUpdate(
+        releaseNotes: String,
+        apkDownloadUrl: String = "",
+        onComplete: (Boolean, String) -> Unit
+    ) {
+        val (installedCode, installedName) = getInstalledAppVersion()
+        val resolvedUrl = apkDownloadUrl.trim().ifBlank {
+            _storeProfile.value.apkDownloadUrl.ifBlank {
+                com.example.util.WebPortalExporter.DEFAULT_GITHUB_APK_RELEASE_URL
+            }
+        }
+        publishAppUpdateNotice(
+            versionCode = installedCode,
+            versionName = installedName,
+            releaseNotes = releaseNotes,
+            apkDownloadUrl = resolvedUrl,
+            onComplete = onComplete
+        )
     }
 
     // Pre-Order & Special Brand Requests State & Methods
@@ -1479,6 +1510,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _updateDownloadUrl.value = effectiveDownloadUrl
                 if (showPopupIfFound) {
                     _updateAvailable.value = true
+                }
+                val lastNotified = adminPrefs.getInt("last_notified_update_code", 0)
+                if (effectiveRemoteCode > lastNotified) {
+                    adminPrefs.edit().putInt("last_notified_update_code", effectiveRemoteCode).apply()
+                    ShopNotificationHelper.notifyAppUpdateAvailable(
+                        context = getApplication(),
+                        versionName = effectiveRemoteName,
+                        versionCode = effectiveRemoteCode,
+                        notes = effectiveNotes
+                    )
                 }
                 val msg = "🚀 New update v$effectiveRemoteName (Build $effectiveRemoteCode) available!"
                 _cloudStatusMessage.value = msg
@@ -3857,6 +3898,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _liveCallState.value = state.copy(
                         mode = switched,
                         statusBanner = "$actor switched call to ${switched.label}"
+                    )
+                }
+            }
+            "APP_UPDATE" -> {
+                val remoteCode = ev.payload.optInt("versionCode", 1)
+                val remoteName = ev.payload.optString("versionName", "1.0").trim().ifBlank { "1.0" }
+                val notes = ev.payload.optString("releaseNotes", "").trim()
+                val dlUrl = com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(
+                    ev.payload.optString("updateUrl", "")
+                ).ifBlank {
+                    com.example.util.WebPortalExporter.DEFAULT_GITHUB_APK_RELEASE_URL
+                }
+                val (installedCode, _) = getInstalledAppVersion()
+                if (remoteCode > installedCode) {
+                    _latestVersionName.value = remoteName
+                    _releaseNotes.value = notes
+                    _updateDownloadUrl.value = dlUrl
+                    _updateAvailable.value = true
+                    adminPrefs.edit().putInt("last_notified_update_code", remoteCode).apply()
+                    ShopNotificationHelper.notifyAppUpdateAvailable(
+                        context = getApplication(),
+                        versionName = remoteName,
+                        versionCode = remoteCode,
+                        notes = notes
                     )
                 }
             }

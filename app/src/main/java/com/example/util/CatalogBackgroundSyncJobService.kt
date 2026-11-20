@@ -63,6 +63,28 @@ class CatalogBackgroundSyncJobService : JobService() {
                             prefs.edit().putStringSet("back_in_stock_product_ids", remaining).apply()
                         }
                     }
+
+                    // Check if Admin published a newer APK version on Cloud
+                    val manifest = syncService.fetchAppUpdateManifest().getOrNull()
+                    if (manifest != null) {
+                        val pkgInfo = appContext.packageManager.getPackageInfo(appContext.packageName, 0)
+                        val installedCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                            pkgInfo.longVersionCode.toInt()
+                        } else {
+                            @Suppress("DEPRECATION")
+                            pkgInfo.versionCode
+                        }
+                        val lastNotified = prefs.getInt("last_notified_update_code", 0)
+                        if (manifest.versionCode > installedCode && manifest.versionCode > lastNotified) {
+                            prefs.edit().putInt("last_notified_update_code", manifest.versionCode).apply()
+                            ShopNotificationHelper.notifyAppUpdateAvailable(
+                                context = appContext,
+                                versionName = manifest.versionName,
+                                versionCode = manifest.versionCode,
+                                notes = manifest.releaseNotes
+                            )
+                        }
+                    }
                 }
             } catch (_: Exception) {
             } finally {
