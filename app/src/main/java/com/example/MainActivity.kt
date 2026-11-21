@@ -79,8 +79,17 @@ import com.example.ui.theme.SuccessGreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.util.CatalogBackgroundSyncJobService
 
+data class RawSharedReceiptPayload(
+    val streamUris: List<android.net.Uri>,
+    val mimeType: String?,
+    val sharedText: String?,
+    val sharedSubject: String?,
+    val receivedAtMillis: Long = System.currentTimeMillis()
+)
+
 class MainActivity : ComponentActivity() {
     private val pendingCloudCredentials = kotlinx.coroutines.flow.MutableStateFlow<Pair<String, String>?>(null)
+    private val pendingSharedReceiptPayload = kotlinx.coroutines.flow.MutableStateFlow<RawSharedReceiptPayload?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -121,7 +130,10 @@ class MainActivity : ComponentActivity() {
         handleDeepLinkIntent(intent)
         setContent {
             MyApplicationTheme {
-                DeprosApp(pendingCloudCredentials = pendingCloudCredentials)
+                DeprosApp(
+                    pendingCloudCredentials = pendingCloudCredentials,
+                    pendingSharedReceiptPayload = pendingSharedReceiptPayload
+                )
             }
         }
     }
@@ -132,8 +144,56 @@ class MainActivity : ComponentActivity() {
         handleDeepLinkIntent(intent)
     }
 
+    @Suppress("DEPRECATION")
+    private fun extractStreamUris(intent: android.content.Intent): List<android.net.Uri> {
+        val result = mutableListOf<android.net.Uri>()
+        if (intent.action == android.content.Intent.ACTION_SEND_MULTIPLE) {
+            val list: ArrayList<android.net.Uri>? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, android.net.Uri::class.java)
+            } else {
+                intent.getParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM)
+            }
+            list?.forEach { if (!result.contains(it)) result.add(it) }
+        } else {
+            val single: android.net.Uri? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra(android.content.Intent.EXTRA_STREAM, android.net.Uri::class.java)
+            } else {
+                intent.getParcelableExtra(android.content.Intent.EXTRA_STREAM)
+            }
+            if (single != null) result.add(single)
+        }
+        val clip = intent.clipData
+        if (clip != null) {
+            for (i in 0 until clip.itemCount) {
+                val clipUri = clip.getItemAt(i)?.uri
+                if (clipUri != null && !result.contains(clipUri)) {
+                    result.add(clipUri)
+                }
+            }
+        }
+        return result
+    }
+
     private fun handleDeepLinkIntent(intent: android.content.Intent?) {
-        val data = intent?.data
+        if (intent == null) return
+        val action = intent.action
+        if (action == android.content.Intent.ACTION_SEND || action == android.content.Intent.ACTION_SEND_MULTIPLE) {
+            val uris = extractStreamUris(intent)
+            val sharedText = intent.getStringExtra(android.content.Intent.EXTRA_TEXT)
+            val sharedSubject = intent.getStringExtra(android.content.Intent.EXTRA_SUBJECT)
+            if (uris.isNotEmpty() || !sharedText.isNullOrBlank()) {
+                pendingSharedReceiptPayload.value = RawSharedReceiptPayload(
+                    streamUris = uris,
+                    mimeType = intent.type,
+                    sharedText = sharedText,
+                    sharedSubject = sharedSubject,
+                    receivedAtMillis = System.currentTimeMillis()
+                )
+            }
+            return
+        }
+
+        val data = intent.data
         if (data != null) {
             val sbUrl = data.getQueryParameter("sb_url")?.trim()
             val sbKey = data.getQueryParameter("sb_key")?.trim()
@@ -158,7 +218,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun DeprosApp(
     viewModel: MainViewModel = viewModel(),
-    pendingCloudCredentials: kotlinx.coroutines.flow.MutableStateFlow<Pair<String, String>?>? = null
+    pendingCloudCredentials: kotlinx.coroutines.flow.MutableStateFlow<Pair<String, String>?>? = null,
+    pendingSharedReceiptPayload: kotlinx.coroutines.flow.MutableStateFlow<RawSharedReceiptPayload?>? = null
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val currentScreen by viewModel.currentScreen.collectAsState()
@@ -199,6 +260,22 @@ fun DeprosApp(
             val (u, k) = deepLinkCreds
             pendingCloudCredentials?.value = null
             viewModel.applyStoreSyncLinkOrCredentials(u, k) { _, msg ->
+                android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    val incomingReceiptPayload = pendingSharedReceiptPayload?.collectAsState()?.value
+    LaunchedEffect(incomingReceiptPayload) {
+        if (incomingReceiptPayload != null) {
+            pendingSharedReceiptPayload?.value = null
+            viewModel.handleIncomingSharedReceipt(
+                context = context,
+                streamUris = incomingReceiptPayload.streamUris,
+                mimeTypeHint = incomingReceiptPayload.mimeType,
+                sharedText = incomingReceiptPayload.sharedText,
+                sharedSubject = incomingReceiptPayload.sharedSubject
+            ) { msg ->
                 android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
             }
         }

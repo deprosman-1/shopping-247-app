@@ -4796,7 +4796,7 @@ private fun PaymentReceiptsTab(
 
     val isRefreshing by viewModel.isRefreshing.collectAsState()
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp)) {
         // Live Sync Orders & Receipts Button Bar
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -4804,7 +4804,7 @@ private fun PaymentReceiptsTab(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Live Orders & Receipts",
+                text = "Live Orders & Receipts (${filteredOrders.size})",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Black
             )
@@ -4828,7 +4828,7 @@ private fun PaymentReceiptsTab(
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
         // Filter Chips Bar
         Row(
@@ -4851,49 +4851,60 @@ private fun PaymentReceiptsTab(
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
         val totalRevenue = orders.sumOf { it.totalAmount }
         val totalProfit = orders.sumOf { it.profit }
         val tenPercentOfTotalProfit = totalProfit * 0.10
 
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-            modifier = Modifier.fillMaxWidth()
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .testTag("admin_live_orders_receipts_list"),
+            contentPadding = PaddingValues(top = 4.dp, bottom = 96.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column {
-                        Text("Total Revenue (Sales)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                        Text(nairaFormat.format(totalRevenue), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                    }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text("SUM TOTAL PROFIT (ALL ORDERS)", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = SuccessGreen)
-                        Text(nairaFormat.format(totalProfit), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = SuccessGreen)
+            item(key = "live_orders_revenue_summary") {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Column {
+                                Text("Total Revenue (Sales)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                Text(nairaFormat.format(totalRevenue), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text("SUM TOTAL PROFIT (ALL ORDERS)", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = SuccessGreen)
+                                Text(nairaFormat.format(totalProfit), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = SuccessGreen)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text("10% MADE FROM TOTAL PROFIT:", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = AccentGold)
+                            Text(nairaFormat.format(tenPercentOfTotalProfit), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Black, color = AccentGold)
+                        }
                     }
                 }
-                Spacer(modifier = Modifier.height(8.dp))
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("10% MADE FROM TOTAL PROFIT:", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = AccentGold)
-                    Text(nairaFormat.format(tenPercentOfTotalProfit), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Black, color = AccentGold)
+            }
+
+            if (filteredOrders.isEmpty()) {
+                item(key = "live_orders_empty") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 48.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("No payment receipts in this category.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        if (filteredOrders.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No payment receipts in this category.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
+            } else {
                 items(filteredOrders, key = { it.orderId }) { order ->
                     val paymentColor = when (order.paymentMethod) {
                         PaymentMethod.OPAY -> OPayGreen
@@ -4915,7 +4926,14 @@ private fun PaymentReceiptsTab(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(order.orderId, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
+                                Column {
+                                    Text(order.orderId, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
+                                    Text(
+                                        text = dateFormat.format(java.util.Date(order.createdAt)),
+                                        fontSize = 10.5.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
                                     color = paymentColor.copy(alpha = 0.15f)
@@ -4924,15 +4942,45 @@ private fun PaymentReceiptsTab(
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(4.dp))
+                            Spacer(modifier = Modifier.height(6.dp))
                             Text("Customer: ${order.customerName} (${order.customerPhone})", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
                             Text("Delivery: ${order.deliveryAddress}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (order.paymentAccount.isNotBlank()) {
+                                Text("Paid To: ${order.paymentAccount}", style = MaterialTheme.typography.bodySmall, color = CyberCyan, fontWeight = FontWeight.SemiBold)
+                            }
                             Text("Total Settlement: ${nairaFormat.format(order.totalAmount)}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.ExtraBold)
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text("Total Profit from Order: ${nairaFormat.format(order.profit)}", style = MaterialTheme.typography.bodySmall, color = SuccessGreen, fontWeight = FontWeight.Bold)
                                 Text("10% from Profit: ${nairaFormat.format(order.profit * 0.10)}", style = MaterialTheme.typography.bodySmall, color = AccentGold, fontWeight = FontWeight.Bold)
                             }
                             Text("Payment Ref / STAN: ${order.paymentReference}", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+
+                            if (order.verificationNote.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = CyberCyan.copy(alpha = 0.08f),
+                                    border = BorderStroke(1.dp, CyberCyan.copy(alpha = 0.28f)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp)) {
+                                        Text(
+                                            text = "RECEIPT & VERIFICATION MESSAGE",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = CyberCyan
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = order.verificationNote,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontSize = 11.5.sp,
+                                            lineHeight = 16.sp,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                            }
 
                             // TOTAL PROFIT MADE FROM EACH ITEM BREAKDOWN
                             Spacer(modifier = Modifier.height(6.dp))
@@ -5039,10 +5087,9 @@ private fun PaymentReceiptsTab(
                                                 color = if (order.receiptImageUrl.isNotBlank()) SuccessGreen else MaterialTheme.colorScheme.primary
                                             )
                                             Text(
-                                                text = "Payer: ${order.senderName.ifBlank { order.customerName }} • Ref: ${order.paymentReference.ifBlank { "N/A" }}",
+                                                text = "Payer: ${order.senderName.ifBlank { order.customerName }}\nRef: ${order.paymentReference.ifBlank { "N/A" }}",
                                                 style = MaterialTheme.typography.labelSmall,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
+                                                lineHeight = 14.sp
                                             )
                                             Text("Tap to view full receipt photo", fontSize = 10.sp, color = CyberCyan, fontWeight = FontWeight.SemiBold)
                                         }
@@ -8813,12 +8860,47 @@ private fun AdminSecuritySettingsTab(
     val currentAdminPassword by viewModel.adminPassword.collectAsState()
     val storeProfile by viewModel.storeProfile.collectAsState()
     val isCloudLinked by viewModel.isSupabaseConnected.collectAsState()
+    val liveSupabaseCfg by viewModel.supabaseConfigState.collectAsState()
     val isCloudBusy by viewModel.isSupabaseBusy.collectAsState()
-    val hasCloudCfg = remember(isCloudLinked) {
+    val hasCloudCfg = remember(isCloudLinked, liveSupabaseCfg) {
         !viewModel.repository.supabaseSync.isPlaceholderConfig()
     }
     var showRestrictedLinkBox by remember { mutableStateOf(false) }
     var pastedRestrictedSyncLink by remember { mutableStateOf("") }
+    var lastAutoActivatedClip by remember { mutableStateOf("") }
+
+    val tryAutoPasteAndActivateSync: (Boolean) -> Unit = { manualTrigger ->
+        val clipText = try {
+            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            cm?.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()?.trim().orEmpty()
+        } catch (_: Exception) {
+            ""
+        }
+        val extracted = com.example.util.SharedReceiptHelper.extractStoreSyncCredentials(clipText)
+        if (extracted != null) {
+            pastedRestrictedSyncLink = clipText
+            showRestrictedLinkBox = true
+            if (manualTrigger || clipText != lastAutoActivatedClip) {
+                lastAutoActivatedClip = clipText
+                viewModel.applyStoreSyncLinkOrCredentials(clipText) { ok, msg ->
+                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                    if (ok) showRestrictedLinkBox = true
+                }
+            }
+        } else if (manualTrigger) {
+            showRestrictedLinkBox = true
+            if (clipText.isNotBlank()) {
+                pastedRestrictedSyncLink = clipText
+                Toast.makeText(context, "Clipboard pasted — tap Connect & Sync to verify link.", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "Copy your Store Link or WhatsApp Invite first, then tap this box to auto-paste & activate.", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        tryAutoPasteAndActivateSync(false)
+    }
 
     var storeNameInput by remember(storeProfile.storeName) { mutableStateOf(storeProfile.storeName) }
     var taglineInput by remember(storeProfile.tagline) { mutableStateOf(storeProfile.tagline) }
@@ -9359,10 +9441,13 @@ private fun AdminSecuritySettingsTab(
                     }
 
                     Surface(
+                        onClick = { tryAutoPasteAndActivateSync(true) },
                         shape = RoundedCornerShape(12.dp),
                         color = if (hasCloudCfg) SuccessGreen.copy(alpha = 0.12f) else Color(0xFFF59E0B).copy(alpha = 0.14f),
                         border = BorderStroke(1.dp, if (hasCloudCfg) SuccessGreen.copy(alpha = 0.45f) else Color(0xFFF59E0B).copy(alpha = 0.55f)),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("store_cloud_sync_active_box")
                     ) {
                         Row(
                             modifier = Modifier
@@ -9379,14 +9464,30 @@ private fun AdminSecuritySettingsTab(
                                     color = if (hasCloudCfg) SuccessGreen else AccentGold
                                 )
                                 Text(
-                                    text = if (hasCloudCfg) "Sign-ups, catalog & orders sync live to Supabase Cloud." else "Configure Supabase URL & Anon Key or paste Store Sync Link below.",
+                                    text = if (hasCloudCfg) {
+                                        "Sign-ups, catalog & orders sync live. Tap to auto-paste a new Store Link or WhatsApp Invite."
+                                    } else {
+                                        "Tap here to auto-paste & activate copied Store Link or WhatsApp Invite."
+                                    },
                                     fontSize = 10.5.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                             AssistChip(
-                                onClick = { showRestrictedLinkBox = !showRestrictedLinkBox },
-                                label = { Text(if (showRestrictedLinkBox) "Hide" else "Link Device", fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+                                onClick = {
+                                    if (!showRestrictedLinkBox) {
+                                        tryAutoPasteAndActivateSync(true)
+                                    } else {
+                                        showRestrictedLinkBox = false
+                                    }
+                                },
+                                label = {
+                                    Text(
+                                        text = if (showRestrictedLinkBox) "Hide" else "Auto-Paste",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             )
                         }
                     }
@@ -9394,23 +9495,57 @@ private fun AdminSecuritySettingsTab(
                     if (showRestrictedLinkBox) {
                         OutlinedTextField(
                             value = pastedRestrictedSyncLink,
-                            onValueChange = { pastedRestrictedSyncLink = it },
-                            label = { Text("Paste Store Link or Full WhatsApp Invite") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Button(
-                            enabled = !isCloudBusy && pastedRestrictedSyncLink.isNotBlank(),
-                            onClick = {
-                                viewModel.applyStoreSyncLinkOrCredentials(pastedRestrictedSyncLink) { ok, msg ->
-                                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                                    if (ok) showRestrictedLinkBox = false
+                            onValueChange = { newVal ->
+                                pastedRestrictedSyncLink = newVal
+                                if (newVal != lastAutoActivatedClip &&
+                                    !isCloudBusy &&
+                                    com.example.util.SharedReceiptHelper.extractStoreSyncCredentials(newVal) != null
+                                ) {
+                                    lastAutoActivatedClip = newVal
+                                    viewModel.applyStoreSyncLinkOrCredentials(newVal) { _, msg ->
+                                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                    }
                                 }
                             },
-                            modifier = Modifier.fillMaxWidth()
+                            label = { Text("Paste Store Link or Full WhatsApp Invite (Auto-Activates)") },
+                            placeholder = { Text("Paste Store Link or WhatsApp invite here — activates automatically!") },
+                            minLines = 2,
+                            maxLines = 4,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("store_cloud_sync_link_input")
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text(if (isCloudBusy) "Linking & Uploading..." else "Connect & Sync Store Cloud Now", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            OutlinedButton(
+                                enabled = !isCloudBusy,
+                                onClick = { tryAutoPasteAndActivateSync(true) },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("store_cloud_sync_autopaste_button")
+                            ) {
+                                Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Paste & Activate", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Button(
+                                enabled = !isCloudBusy && pastedRestrictedSyncLink.isNotBlank(),
+                                onClick = {
+                                    lastAutoActivatedClip = pastedRestrictedSyncLink
+                                    viewModel.applyStoreSyncLinkOrCredentials(pastedRestrictedSyncLink) { ok, msg ->
+                                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                        if (ok) showRestrictedLinkBox = false
+                                    }
+                                },
+                                modifier = Modifier
+                                    .weight(1.2f)
+                                    .testTag("store_cloud_sync_connect_button")
+                            ) {
+                                Text(if (isCloudBusy) "Linking & Uploading..." else "Connect & Sync Now", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
 

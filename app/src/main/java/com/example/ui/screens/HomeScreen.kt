@@ -46,6 +46,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import android.widget.Toast
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Favorite
@@ -94,6 +95,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
@@ -158,6 +160,7 @@ fun HomeScreen(
     val cartCount by viewModel.cartTotalCount.collectAsState()
     val wishlistCount by viewModel.wishlistCount.collectAsState()
     val wishlistIds by viewModel.wishlistIds.collectAsState()
+    val pendingSharedReceipt by viewModel.pendingSharedReceipt.collectAsState()
     val currentCustomer by viewModel.currentCustomer.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     val isFullScreen by viewModel.isFullScreen.collectAsState()
@@ -545,6 +548,50 @@ fun HomeScreen(
                 }
             }
 
+            if (pendingSharedReceipt != null) {
+                val receiptLabel = pendingSharedReceipt?.detectedPaymentMethod?.title
+                    ?: pendingSharedReceipt?.sourceAppLabel
+                    ?: "OPay / Moniepoint"
+                Surface(
+                    onClick = {
+                        if (cartCount > 0) viewModel.navigateTo(AppScreen.CHECKOUT)
+                        else Toast.makeText(context, "Add any item to Cart, then Checkout to attach your $receiptLabel receipt.", Toast.LENGTH_SHORT).show()
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    color = SuccessGreen.copy(alpha = 0.16f),
+                    border = BorderStroke(1.dp, SuccessGreen),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 2.dp)
+                        .testTag("home_pending_shared_receipt_banner")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Default.ReceiptLong, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (cartCount > 0) "$receiptLabel Receipt Attached — Tap to Checkout" else "$receiptLabel Receipt Ready — Add item(s) to Checkout",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Black,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        IconButton(
+                            onClick = { viewModel.clearPendingSharedReceipt() },
+                            modifier = Modifier.size(22.dp)
+                        ) {
+                            Icon(Icons.Default.Clear, contentDescription = "Dismiss shared receipt", tint = Color.White, modifier = Modifier.size(14.dp))
+                        }
+                    }
+                }
+            }
+
             // Rearranged Unified Upper Toolbar: Pinned Category Dropdown + Scrollable Action & Filter Strip
             val categoryCounts = remember(allProducts) {
                 allProducts.groupingBy { it.category }.eachCount()
@@ -637,32 +684,54 @@ fun HomeScreen(
                                 Icon(Icons.Default.Sort, contentDescription = "Sort Products", modifier = Modifier.size(15.dp))
                             },
                             label = {
-                                Text("Sort: ${sortOption.label}", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("Sort: ${sortOption.label}", fontSize = 11.sp, fontWeight = FontWeight.Black)
                             },
                             trailingIcon = {
                                 Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(15.dp))
                             },
+                            colors = FilterChipDefaults.filterChipColors(
+                                labelColor = Color.White,
+                                iconColor = AccentGold,
+                                selectedContainerColor = AccentGold.copy(alpha = 0.22f),
+                                selectedLabelColor = AccentGold,
+                                selectedLeadingIconColor = AccentGold,
+                                selectedTrailingIconColor = AccentGold
+                            ),
                             modifier = Modifier.height(34.dp).testTag("catalog_sort_chip")
                         )
 
                         DropdownMenu(
                             expanded = sortMenuExpanded,
                             onDismissRequest = { sortMenuExpanded = false },
-                            containerColor = Color.White
+                            containerColor = Color.White,
+                            border = BorderStroke(1.2.dp, Color(0xFFD1D5DB))
                         ) {
                             CatalogSortOption.entries.forEach { option ->
+                                val isSelected = option == sortOption
                                 DropdownMenuItem(
                                     text = {
                                         Text(
                                             text = option.label,
-                                            fontWeight = if (option == sortOption) FontWeight.Black else FontWeight.Bold,
-                                            color = if (option == sortOption) Color(0xFFB91C1C) else Color(0xFF111827)
+                                            fontSize = 14.sp,
+                                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.ExtraBold,
+                                            color = if (isSelected) Color(0xFFDC2626) else Color(0xFF000000)
                                         )
                                     },
+                                    trailingIcon = if (isSelected) {
+                                        { Icon(Icons.Default.Check, contentDescription = "Selected", tint = Color(0xFFDC2626), modifier = Modifier.size(16.dp)) }
+                                    } else null,
+                                    colors = MenuDefaults.itemColors(
+                                        textColor = Color(0xFF000000),
+                                        leadingIconColor = Color(0xFF000000),
+                                        trailingIconColor = Color(0xFFDC2626)
+                                    ),
                                     onClick = {
                                         viewModel.setSortOption(option)
                                         sortMenuExpanded = false
-                                    }
+                                    },
+                                    modifier = Modifier
+                                        .background(if (isSelected) Color(0xFFFEF2F2) else Color.White)
+                                        .testTag("sort_option_${option.name}")
                                 )
                             }
                         }
@@ -680,15 +749,19 @@ fun HomeScreen(
                                 Text(
                                     text = if (priceRangeFilter == PriceRangeFilter.ALL) "Price" else priceRangeFilter.label,
                                     fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Black
                                 )
                             },
                             trailingIcon = {
                                 Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(15.dp))
                             },
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
-                                selectedLabelColor = MaterialTheme.colorScheme.primary
+                                labelColor = Color.White,
+                                iconColor = AccentGold,
+                                selectedContainerColor = AccentGold.copy(alpha = 0.22f),
+                                selectedLabelColor = AccentGold,
+                                selectedLeadingIconColor = AccentGold,
+                                selectedTrailingIconColor = AccentGold
                             ),
                             modifier = Modifier.height(34.dp).testTag("catalog_price_filter_chip")
                         )
@@ -696,22 +769,35 @@ fun HomeScreen(
                         DropdownMenu(
                             expanded = priceMenuExpanded,
                             onDismissRequest = { priceMenuExpanded = false },
-                            containerColor = Color.White
+                            containerColor = Color.White,
+                            border = BorderStroke(1.2.dp, Color(0xFFD1D5DB))
                         ) {
                             PriceRangeFilter.entries.forEach { range ->
+                                val isSelected = range == priceRangeFilter
                                 DropdownMenuItem(
                                     text = {
                                         Text(
                                             text = range.label,
-                                            fontWeight = if (range == priceRangeFilter) FontWeight.Black else FontWeight.Bold,
-                                            color = if (range == priceRangeFilter) Color(0xFFB91C1C) else Color(0xFF111827)
+                                            fontSize = 14.sp,
+                                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.ExtraBold,
+                                            color = if (isSelected) Color(0xFFDC2626) else Color(0xFF000000)
                                         )
                                     },
+                                    trailingIcon = if (isSelected) {
+                                        { Icon(Icons.Default.Check, contentDescription = "Selected", tint = Color(0xFFDC2626), modifier = Modifier.size(16.dp)) }
+                                    } else null,
+                                    colors = MenuDefaults.itemColors(
+                                        textColor = Color(0xFF000000),
+                                        leadingIconColor = Color(0xFF000000),
+                                        trailingIconColor = Color(0xFFDC2626)
+                                    ),
                                     onClick = {
                                         viewModel.setPriceRangeFilter(range)
                                         priceMenuExpanded = false
                                     },
-                                    modifier = Modifier.testTag("price_filter_${range.name}")
+                                    modifier = Modifier
+                                        .background(if (isSelected) Color(0xFFFEF2F2) else Color.White)
+                                        .testTag("price_filter_${range.name}")
                                 )
                             }
                         }
@@ -727,45 +813,79 @@ fun HomeScreen(
                                     Text(
                                         text = selectedBrandFilter ?: "Brands",
                                         fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
+                                        fontWeight = FontWeight.Black
                                     )
                                 },
                                 trailingIcon = {
                                     Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(15.dp))
                                 },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    labelColor = Color.White,
+                                    iconColor = AccentGold,
+                                    selectedContainerColor = AccentGold.copy(alpha = 0.22f),
+                                    selectedLabelColor = AccentGold,
+                                    selectedTrailingIconColor = AccentGold
+                                ),
                                 modifier = Modifier.height(34.dp).testTag("catalog_brand_filter_chip")
                             )
                             DropdownMenu(
                                 expanded = brandMenuExpanded,
                                 onDismissRequest = { brandMenuExpanded = false },
-                                containerColor = Color.White
+                                containerColor = Color.White,
+                                border = BorderStroke(1.2.dp, Color(0xFFD1D5DB))
                             ) {
+                                val allSelected = selectedBrandFilter == null
                                 DropdownMenuItem(
                                     text = {
                                         Text(
                                             text = "All Brands",
-                                            fontWeight = if (selectedBrandFilter == null) FontWeight.Black else FontWeight.Bold,
-                                            color = if (selectedBrandFilter == null) Color(0xFFB91C1C) else Color(0xFF111827)
+                                            fontSize = 14.sp,
+                                            fontWeight = if (allSelected) FontWeight.Black else FontWeight.ExtraBold,
+                                            color = if (allSelected) Color(0xFFDC2626) else Color(0xFF000000)
                                         )
                                     },
+                                    trailingIcon = if (allSelected) {
+                                        { Icon(Icons.Default.Check, contentDescription = "Selected", tint = Color(0xFFDC2626), modifier = Modifier.size(16.dp)) }
+                                    } else null,
+                                    colors = MenuDefaults.itemColors(
+                                        textColor = Color(0xFF000000),
+                                        leadingIconColor = Color(0xFF000000),
+                                        trailingIconColor = Color(0xFFDC2626)
+                                    ),
                                     onClick = {
                                         viewModel.selectBrandFilter(null)
                                         brandMenuExpanded = false
-                                    }
+                                    },
+                                    modifier = Modifier
+                                        .background(if (allSelected) Color(0xFFFEF2F2) else Color.White)
+                                        .testTag("brand_filter_all")
                                 )
                                 availableBrandFilters.forEach { bName ->
+                                    val isSelected = selectedBrandFilter == bName
                                     DropdownMenuItem(
                                         text = {
                                             Text(
                                                 text = bName,
-                                                fontWeight = if (selectedBrandFilter == bName) FontWeight.Black else FontWeight.Bold,
-                                                color = if (selectedBrandFilter == bName) Color(0xFFB91C1C) else Color(0xFF111827)
+                                                fontSize = 14.sp,
+                                                fontWeight = if (isSelected) FontWeight.Black else FontWeight.ExtraBold,
+                                                color = if (isSelected) Color(0xFFDC2626) else Color(0xFF000000)
                                             )
                                         },
+                                        trailingIcon = if (isSelected) {
+                                            { Icon(Icons.Default.Check, contentDescription = "Selected", tint = Color(0xFFDC2626), modifier = Modifier.size(16.dp)) }
+                                        } else null,
+                                        colors = MenuDefaults.itemColors(
+                                            textColor = Color(0xFF000000),
+                                            leadingIconColor = Color(0xFF000000),
+                                            trailingIconColor = Color(0xFFDC2626)
+                                        ),
                                         onClick = {
                                             viewModel.selectBrandFilter(bName)
                                             brandMenuExpanded = false
-                                        }
+                                        },
+                                        modifier = Modifier
+                                            .background(if (isSelected) Color(0xFFFEF2F2) else Color.White)
+                                            .testTag("brand_filter_${bName.lowercase()}")
                                     )
                                 }
                             }

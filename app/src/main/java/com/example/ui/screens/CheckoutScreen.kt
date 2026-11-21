@@ -210,9 +210,37 @@ fun CheckoutScreen(
     }
     var paymentReference by rememberSaveable { mutableStateOf("REF-${System.currentTimeMillis().toString().takeLast(6)}") }
     var receiptImageUri by remember { mutableStateOf<Uri?>(null) }
+    val pendingSharedReceipt by viewModel.pendingSharedReceipt.collectAsState()
+    var lastAppliedSharedTimestamp by rememberSaveable { mutableStateOf(0L) }
 
     var currentStepName by rememberSaveable { mutableStateOf(CheckoutStep.SELECT_DELIVERY_CONDITION.name) }
     val currentStep = CheckoutStep.entries.firstOrNull { it.name == currentStepName } ?: CheckoutStep.SELECT_DELIVERY_CONDITION
+
+    LaunchedEffect(pendingSharedReceipt) {
+        val shared = pendingSharedReceipt ?: return@LaunchedEffect
+        if (shared.receivedAtMillis != lastAppliedSharedTimestamp) {
+            lastAppliedSharedTimestamp = shared.receivedAtMillis
+            if (shared.receiptUri.isNotBlank()) {
+                receiptImageUri = Uri.parse(shared.receiptUri)
+            }
+            shared.detectedPaymentMethod?.let { selectedPaymentMethod = it }
+            if (shared.extractedReference.isNotBlank()) {
+                paymentReference = shared.extractedReference
+            }
+            if (shared.extractedSender.isNotBlank()) {
+                senderName = shared.extractedSender
+            }
+            if (currentStep == CheckoutStep.SELECT_DELIVERY_CONDITION) {
+                currentStepName = CheckoutStep.UPLOAD_PAYMENT_RECEIPT_ORDER_CONFIRMATION_AND_TOTAL.name
+            }
+            val label = shared.detectedPaymentMethod?.title ?: shared.sourceAppLabel.ifBlank { "OPay / Moniepoint" }
+            Toast.makeText(
+                context,
+                "✅ $label invoice attached automatically — review & Submit Order!",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
     var isPlacingOrder by remember { mutableStateOf(false) }
     var showNoReceiptDialog by remember { mutableStateOf(false) }
     var appliedCheckoutBargainPrice by remember { mutableStateOf<Double?>(null) }
@@ -2607,9 +2635,19 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
 
                     Spacer(modifier = Modifier.height(10.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        val activeSharedReceipt by viewModel.pendingSharedReceipt.collectAsState()
                         Icon(Icons.Default.CheckCircle, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Payment Receipt Attached & Visible", fontWeight = FontWeight.Bold, color = SuccessGreen, fontSize = 12.sp)
+                        Text(
+                            text = if (activeSharedReceipt?.receiptUri == receiptImageUri?.toString()) {
+                                "Direct OPay / Moniepoint Receipt Attached!"
+                            } else {
+                                "Payment Receipt Attached & Visible"
+                            },
+                            fontWeight = FontWeight.Bold,
+                            color = SuccessGreen,
+                            fontSize = 12.sp
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -2630,7 +2668,12 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                     }
                     Spacer(modifier = Modifier.height(10.dp))
                     Text("No receipt selected yet", fontWeight = FontWeight.Bold)
-                    Text("Select payment screenshot or camera receipt slip", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        text = "Tip: Tap Share / Send directly on your OPay or Moniepoint invoice → select 24/7 SHOPPING (no need to save to folder!), or pick a photo below.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
                     Spacer(modifier = Modifier.height(12.dp))
                     Button(
                         onClick = onChooseReceipt,

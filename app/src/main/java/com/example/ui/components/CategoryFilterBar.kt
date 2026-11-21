@@ -122,7 +122,7 @@ fun CategorySelectorButton(
                     Icon(
                         imageVector = Icons.Default.LocalMall,
                         contentDescription = null,
-                        tint = if (selectedCategory == null) Color(0xFFB91C1C) else Color(0xFF111827),
+                        tint = if (selectedCategory == null) Color(0xFFDC2626) else Color(0xFF000000),
                         modifier = Modifier.size(18.dp)
                     )
                 },
@@ -133,14 +133,19 @@ fun CategorySelectorButton(
                     ) {
                         Text(
                             text = "All 3D Items ($totalCount)",
-                            fontWeight = if (selectedCategory == null) FontWeight.Black else FontWeight.Bold,
-                            color = if (selectedCategory == null) Color(0xFFB91C1C) else Color(0xFF111827)
+                            fontWeight = if (selectedCategory == null) FontWeight.Black else FontWeight.ExtraBold,
+                            color = if (selectedCategory == null) Color(0xFFDC2626) else Color(0xFF000000)
                         )
                     }
                 },
                 trailingIcon = if (selectedCategory == null) {
-                    { Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFFB91C1C), modifier = Modifier.size(16.dp)) }
+                    { Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(16.dp)) }
                 } else null,
+                colors = androidx.compose.material3.MenuDefaults.itemColors(
+                    textColor = Color(0xFF000000),
+                    leadingIconColor = Color(0xFF000000),
+                    trailingIconColor = Color(0xFFDC2626)
+                ),
                 onClick = {
                     onSelectCategory(null)
                     expanded = false
@@ -162,20 +167,25 @@ fun CategorySelectorButton(
                         Icon(
                             imageVector = getCategoryIcon(cat),
                             contentDescription = cat.displayName,
-                            tint = if (isSelected) Color(0xFFB91C1C) else Color(0xFF111827),
+                            tint = if (isSelected) Color(0xFFDC2626) else Color(0xFF000000),
                             modifier = Modifier.size(18.dp)
                         )
                     },
                     text = {
                         Text(
                             text = if (count > 0) "${cat.displayName} ($count)" else cat.displayName,
-                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
-                            color = if (isSelected) Color(0xFFB91C1C) else Color(0xFF111827)
+                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.ExtraBold,
+                            color = if (isSelected) Color(0xFFDC2626) else Color(0xFF000000)
                         )
                     },
                     trailingIcon = if (isSelected) {
-                        { Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFFB91C1C), modifier = Modifier.size(16.dp)) }
+                        { Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(16.dp)) }
                     } else null,
+                    colors = androidx.compose.material3.MenuDefaults.itemColors(
+                        textColor = Color(0xFF000000),
+                        leadingIconColor = Color(0xFF000000),
+                        trailingIconColor = Color(0xFFDC2626)
+                    ),
                     onClick = {
                         onSelectCategory(if (isSelected) null else cat.displayName)
                         expanded = false

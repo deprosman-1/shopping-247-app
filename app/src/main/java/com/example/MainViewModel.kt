@@ -49,7 +49,12 @@ import com.example.data.repository.EcommerceRepository
 import com.example.util.CatalogBackgroundSyncJobService
 import com.example.util.DeliveryZoneHelper
 import com.example.util.OfflineConnectivityManager
+import com.example.util.PendingSharedReceipt
+import com.example.util.SharedReceiptHelper
 import com.example.util.ShopNotificationHelper
+import android.net.Uri
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -109,6 +114,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // Current logged-in Customer
     private val _currentCustomer = MutableStateFlow<Customer?>(null)
     val currentCustomer: StateFlow<Customer?> = _currentCustomer.asStateFlow()
+
+    // Direct OPay / Moniepoint / Banking App Shared Invoice Receipt
+    private val _pendingSharedReceipt = MutableStateFlow<PendingSharedReceipt?>(null)
+    val pendingSharedReceipt: StateFlow<PendingSharedReceipt?> = _pendingSharedReceipt.asStateFlow()
 
     // Products & Filtering
     val allProducts: StateFlow<List<Product>> = repository.allProducts
@@ -2189,6 +2198,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 clearCart()
+                _pendingSharedReceipt.value = null
                 val syncErr = repository.lastCloudSyncError
                 if (syncErr.isNullOrBlank()) {
                     _cloudStatusMessage.value = "✅ Order ${savedOrder.orderId} & receipt synced to Supabase Cloud!"
@@ -2589,31 +2599,70 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun handleIncomingSharedReceipt(
+        context: Context,
+        streamUris: List<Uri>,
+        mimeTypeHint: String?,
+        sharedText: String?,
+        sharedSubject: String?,
+        onFeedback: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            val parsedText = SharedReceiptHelper.parseReceiptShareText(
+                rawText = sharedText.orEmpty(),
+                subject = sharedSubject.orEmpty()
+            )
+            val savedFileUri = withContext(Dispatchers.IO) {
+                streamUris.firstNotNullOfOrNull { rawUri ->
+                    SharedReceiptHelper.persistSharedReceiptToAppStorage(
+                        context = context,
+                        sourceUri = rawUri,
+                        mimeTypeHint = mimeTypeHint
+                    )
+                }
+            }
+            if (savedFileUri == null && parsedText.extractedReference.isBlank() && sharedText.isNullOrBlank()) {
+                onFeedback("Could not read shared receipt from app. Try sharing again as Image or PDF.")
+                return@launch
+            }
+            val pending = PendingSharedReceipt(
+                receiptUri = savedFileUri?.toString().orEmpty(),
+                detectedPaymentMethod = parsedText.detectedPaymentMethod,
+                extractedReference = parsedText.extractedReference,
+                extractedSender = parsedText.extractedSender,
+                rawTextSummary = sharedText.orEmpty().trim(),
+                sourceAppLabel = parsedText.sourceAppLabel.ifBlank { "OPay / Moniepoint" },
+                receivedAtMillis = System.currentTimeMillis()
+            )
+            _pendingSharedReceipt.value = pending
+            if (parsedText.detectedPaymentMethod != null || parsedText.extractedSender.isNotBlank()) {
+                persistDeliveryInfoLocally(senderName = parsedText.extractedSender)
+            }
+            val methodTag = pending.detectedPaymentMethod?.title ?: pending.sourceAppLabel
+            if (_cartItems.value.isNotEmpty()) {
+                navigateTo(AppScreen.CHECKOUT)
+                onFeedback("✅ $methodTag receipt attached directly to Checkout!")
+            } else {
+                onFeedback("✅ $methodTag receipt saved! Add item(s) & open Checkout — it attaches automatically.")
+            }
+        }
+    }
+
+    fun clearPendingSharedReceipt() {
+        _pendingSharedReceipt.value = null
+    }
+
     fun applyStoreSyncLinkOrCredentials(
         rawInput: String,
         optionalKey: String = "",
         onResult: ((Boolean, String) -> Unit)? = null
     ) {
         val trimmed = rawInput.trim()
-        var parsedUrl = ""
-        var parsedKey = optionalKey.trim()
+        val extracted = SharedReceiptHelper.extractStoreSyncCredentials(trimmed)
+        var parsedUrl = extracted?.supabaseUrl ?: ""
+        var parsedKey = extracted?.supabaseKey?.takeIf { it.isNotBlank() } ?: optionalKey.trim()
 
-        if (trimmed.contains("sb_url=") || trimmed.contains("sb_key=")) {
-            try {
-                val embeddedLink = Regex("(https?://|depros://|deprosboutique://)[^\\s]+", RegexOption.IGNORE_CASE)
-                    .findAll(trimmed)
-                    .map { it.value.trimEnd('.', ',', ';', ')', ']') }
-                    .firstOrNull { it.contains("sb_url=") || it.contains("sb_key=") }
-                val candidateUri = when {
-                    embeddedLink != null -> android.net.Uri.parse(embeddedLink)
-                    trimmed.startsWith("sb_url=", ignoreCase = true) || trimmed.startsWith("sb_key=", ignoreCase = true) ->
-                        android.net.Uri.parse("depros://connect?$trimmed")
-                    else -> android.net.Uri.parse(trimmed)
-                }
-                parsedUrl = candidateUri.getQueryParameter("sb_url") ?: ""
-                parsedKey = candidateUri.getQueryParameter("sb_key") ?: parsedKey
-            } catch (_: Exception) {}
-        } else {
+        if (parsedUrl.isBlank() && optionalKey.isNotBlank()) {
             parsedUrl = trimmed
         }
 
