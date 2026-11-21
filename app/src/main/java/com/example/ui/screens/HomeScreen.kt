@@ -183,6 +183,7 @@ fun HomeScreen(
     val isOnline by viewModel.isOnline.collectAsState()
     val offlineQueue by viewModel.offlineQueue.collectAsState()
     val lockedPartnerIds by viewModel.lockedPartnerIds.collectAsState()
+    val allOrders by viewModel.allOrders.collectAsState()
 
     LaunchedEffect(products) {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -356,8 +357,20 @@ fun HomeScreen(
                             }
 
                             IconButton(
+                                onClick = { viewModel.openCustomerAccountShortcut() },
+                                modifier = Modifier.size(48.dp).testTag("home_customer_account_shortcut")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Person,
+                                    contentDescription = "Customer Account Shortcut",
+                                    tint = if (currentCustomer != null) SuccessGreen else AccentGold,
+                                    modifier = Modifier.size(21.dp)
+                                )
+                            }
+
+                            IconButton(
                                 onClick = { viewModel.navigateTo(AppScreen.CART) },
-                                modifier = Modifier.size(40.dp).testTag("cart_nav_button")
+                                modifier = Modifier.size(48.dp).testTag("cart_nav_button")
                             ) {
                                 BadgedBox(
                                     badge = {
@@ -1094,6 +1107,9 @@ fun HomeScreen(
                                             ) { product ->
                                                 val effectiveDiscount = viewModel.getEffectiveDiscountPercent(product.category)
                                                 val isLocked = product.isCatalogLocked || (product.partnerId.isNotBlank() && product.partnerId in lockedPartnerIds)
+                                                val isDeliveredOrdered = remember(product.title, allOrders) {
+                                                    allOrders.any { it.status == com.example.data.model.OrderStatus.DELIVERED && it.itemsSummary.contains(product.title, ignoreCase = true) }
+                                                }
                                                 ProductStandardCard(
                                                     product = product,
                                                     promoDiscountPercent = effectiveDiscount,
@@ -1107,6 +1123,7 @@ fun HomeScreen(
                                                         Toast.makeText(context, if (watching) "Restock alert set!" else "Restock alert removed", Toast.LENGTH_SHORT).show()
                                                     },
                                                     isCatalogLocked = isLocked,
+                                                    isDeliveredOrdered = isDeliveredOrdered,
                                                     modifier = Modifier.width(168.dp)
                                                 )
                                             }
@@ -1332,6 +1349,9 @@ fun HomeScreen(
                                         ) { product ->
                                             val effectiveDiscount = viewModel.getEffectiveDiscountPercent(product.category)
                                             val isLocked = product.isCatalogLocked || (product.partnerId.isNotBlank() && product.partnerId in lockedPartnerIds)
+                                            val isDeliveredOrdered = remember(product.title, allOrders) {
+                                                allOrders.any { it.status == com.example.data.model.OrderStatus.DELIVERED && it.itemsSummary.contains(product.title, ignoreCase = true) }
+                                            }
                                             ProductStandardCard(
                                                 product = product,
                                                 promoDiscountPercent = effectiveDiscount,
@@ -1345,6 +1365,7 @@ fun HomeScreen(
                                                     Toast.makeText(context, if (watching) "Restock alert set!" else "Restock alert removed", Toast.LENGTH_SHORT).show()
                                                 },
                                                 isCatalogLocked = isLocked,
+                                                isDeliveredOrdered = isDeliveredOrdered,
                                                 modifier = Modifier.width(166.dp)
                                             )
                                         }
@@ -1423,6 +1444,9 @@ fun HomeScreen(
                         ) { product ->
                             val effectiveDiscount = viewModel.getEffectiveDiscountPercent(product.category)
                             val isLocked = product.isCatalogLocked || (product.partnerId.isNotBlank() && product.partnerId in lockedPartnerIds)
+                            val isDeliveredOrdered = remember(product.title, allOrders) {
+                                allOrders.any { it.status == com.example.data.model.OrderStatus.DELIVERED && it.itemsSummary.contains(product.title, ignoreCase = true) }
+                            }
                             ProductStandardCard(
                                 product = product,
                                 promoDiscountPercent = effectiveDiscount,
@@ -1435,7 +1459,8 @@ fun HomeScreen(
                                     val watching = viewModel.toggleBackInStockWatch(product)
                                     Toast.makeText(context, if (watching) "Restock alert set!" else "Restock alert removed", Toast.LENGTH_SHORT).show()
                                 },
-                                isCatalogLocked = isLocked
+                                isCatalogLocked = isLocked,
+                                isDeliveredOrdered = isDeliveredOrdered
                             )
                         }
                     }

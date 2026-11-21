@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.ReceiptLong
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Verified
 import com.example.ui.theme.AccentGold
 import com.example.ui.theme.CyberCyan
@@ -350,7 +351,12 @@ fun OrdersReceiptsScreen(
                                 }
                             },
                             onCancelOrder = { cancellingOrder = order },
-                            onRequestReturn = { returningOrder = order }
+                            onRequestReturn = { returningOrder = order },
+                            onRateOrder = {
+                                viewModel.openCustomerAccountShortcut(
+                                    com.example.CustomerAccountDestination.RATINGS_AND_REVIEWS
+                                )
+                            }
                         )
                     }
                 }
@@ -401,7 +407,8 @@ private fun OrderReceiptCard(
     onViewReceipt: () -> Unit,
     onReorder: () -> Unit = {},
     onCancelOrder: () -> Unit = {},
-    onRequestReturn: () -> Unit = {}
+    onRequestReturn: () -> Unit = {},
+    onRateOrder: () -> Unit = {}
 ) {
     val nairaFormat = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "NG")).apply {
@@ -528,6 +535,19 @@ private fun OrderReceiptCard(
                             Icon(Icons.Default.Cancel, contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(15.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Cancel", fontSize = 11.5.sp, color = Color(0xFFDC2626))
+                        }
+                    }
+
+                    if (order.status == OrderStatus.DELIVERED) {
+                        OutlinedButton(
+                            onClick = onRateOrder,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, AccentGold),
+                            modifier = Modifier.testTag("rate_order_button_${order.orderId}")
+                        ) {
+                            Icon(Icons.Default.Star, contentDescription = null, tint = AccentGold, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Rate & Review", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = AccentGold)
                         }
                     }
 

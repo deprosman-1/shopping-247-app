@@ -144,6 +144,14 @@ fun ProductDetailScreen(
     val storeProfile by viewModel.storeProfile.collectAsState()
     val isWideDualAxisMode by viewModel.isWideDualAxisMode.collectAsState()
     val lockedPartnerIds by viewModel.lockedPartnerIds.collectAsState()
+    val allOrders by viewModel.allOrders.collectAsState()
+    val isDeliveredOrderedProduct = remember(product?.title, allOrders) {
+        val title = product?.title?.trim().orEmpty()
+        title.isNotBlank() && allOrders.any { ord ->
+            ord.status == com.example.data.model.OrderStatus.DELIVERED &&
+                ord.itemsSummary.contains(title, ignoreCase = true)
+        }
+    }
 
     var quantity by remember { mutableIntStateOf(1) }
     var addedFeedback by remember { mutableStateOf(false) }
@@ -723,21 +731,36 @@ fun ProductDetailScreen(
                                 modifier = Modifier.weight(1f)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = AccentGold.copy(alpha = 0.15f)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                            if (isDeliveredOrderedProduct) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = AccentGold.copy(alpha = 0.15f)
                                 ) {
-                                    Icon(Icons.Default.Star, contentDescription = null, tint = AccentGold, modifier = Modifier.size(13.dp))
-                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.Star, contentDescription = "Delivered Rating", tint = AccentGold, modifier = Modifier.size(13.dp))
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                        Text(
+                                            text = "${product.rating} (${product.reviewCount})",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp,
+                                            color = AccentGold
+                                        )
+                                    }
+                                }
+                            } else {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                                ) {
                                     Text(
-                                        text = "${product.rating} (${product.reviewCount})",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 11.sp,
-                                        color = AccentGold
+                                        text = "Delivered to Rate",
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                                     )
                                 }
                             }
@@ -1404,13 +1427,10 @@ fun ProductDetailScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Customer Product Reviews & Verified Purchase Ratings
+                // Customer Product Reviews & Verified Purchase Ratings (Active ONLY on Delivered Ordered Products)
                 val allReviews by viewModel.productReviews.collectAsState()
                 val reviewsForProduct = remember(allReviews, product.id) {
                     allReviews.filter { it.productId == product.id }
-                }
-                val isVerifiedBuyer = remember(product.title) {
-                    viewModel.hasVerifiedDeliveredPurchase(product.title)
                 }
                 var reviewStars by remember { mutableIntStateOf(5) }
                 var reviewComment by remember { mutableStateOf("") }
@@ -1419,7 +1439,10 @@ fun ProductDetailScreen(
                 Card(
                     shape = RoundedCornerShape(18.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                    border = BorderStroke(
+                        1.dp,
+                        if (isDeliveredOrderedProduct) SuccessGreen.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                    ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("product_reviews_section")
@@ -1430,19 +1453,23 @@ fun ProductDetailScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = "Customer Reviews & Ratings",
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Black
                                 )
                                 Text(
-                                    text = "${product.rating} ★ overall (${product.reviewCount} total ratings)",
+                                    text = if (isDeliveredOrderedProduct) {
+                                        "${product.rating} ★ overall (${product.reviewCount} total ratings)"
+                                    } else {
+                                        "Active ONLY on delivered ordered products"
+                                    },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            if (isVerifiedBuyer) {
+                            if (isDeliveredOrderedProduct) {
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
                                     color = SuccessGreen.copy(alpha = 0.14f)
@@ -1453,7 +1480,7 @@ fun ProductDetailScreen(
                                     ) {
                                         Icon(Icons.Default.Verified, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(13.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Verified Buyer", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = SuccessGreen)
+                                        Text("Delivered Order", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = SuccessGreen)
                                     }
                                 }
                             }
@@ -1463,135 +1490,170 @@ fun ProductDetailScreen(
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        Text(
-                            text = "Rate this item:",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(vertical = 4.dp)
-                        ) {
-                            (1..5).forEach { star ->
-                                IconButton(
-                                    onClick = { reviewStars = star },
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .testTag("review_star_$star")
+                        if (!isDeliveredOrderedProduct) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                                border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.45f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("reviews_locked_notice")
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = if (star <= reviewStars) Icons.Default.Star else Icons.Default.StarBorder,
-                                        contentDescription = "$star Stars",
-                                        tint = if (star <= reviewStars) AccentGold else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(26.dp)
+                                    Text(
+                                        text = "Ratings & Views Locked",
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 13.sp,
+                                        color = AccentGold
                                     )
+                                    Text(
+                                        text = "Ratings and customer review views become active only after an order containing ${product.title} is marked DELIVERED.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    OutlinedButton(
+                                        onClick = { viewModel.navigateTo(AppScreen.ORDERS) },
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.testTag("reviews_locked_track_orders_button")
+                                    ) {
+                                        Text("Track My Orders", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
-                            Spacer(modifier = Modifier.width(6.dp))
+                        } else {
                             Text(
-                                text = "$reviewStars / 5 Stars",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
-                                color = AccentGold
+                                text = "Rate this delivered item:",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold
                             )
-                        }
-
-                        OutlinedTextField(
-                            value = reviewComment,
-                            onValueChange = { reviewComment = it },
-                            label = { Text("Share your review or fit feedback") },
-                            placeholder = { Text("Quality, sizing, packaging, delivery speed...") },
-                            minLines = 2,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("product_review_comment_input")
-                        )
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        Button(
-                            onClick = {
-                                viewModel.submitProductReview(
-                                    productId = product.id,
-                                    rating = reviewStars,
-                                    comment = reviewComment
-                                ) { success, msg ->
-                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                                    if (success) reviewComment = ""
-                                }
-                            },
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("submit_product_review_button")
-                        ) {
-                            Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Post Review", fontWeight = FontWeight.Bold)
-                        }
-
-                        if (reviewsForProduct.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(14.dp))
-                            reviewsForProduct.take(6).forEachIndexed { idx, rev ->
-                                if (idx > 0) {
-                                    HorizontalDivider(
-                                        modifier = Modifier.padding(vertical = 8.dp),
-                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
-                                    )
-                                }
-                                Column(modifier = Modifier.fillMaxWidth()) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            ) {
+                                (1..5).forEach { star ->
+                                    IconButton(
+                                        onClick = { reviewStars = star },
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .testTag("review_star_$star")
                                     ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                text = rev.customerName,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 12.5.sp
-                                            )
-                                            if (rev.isVerifiedPurchase) {
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Surface(
-                                                    shape = RoundedCornerShape(4.dp),
-                                                    color = SuccessGreen.copy(alpha = 0.14f)
-                                                ) {
-                                                    Text(
-                                                        text = "✓ Verified Purchase",
-                                                        fontSize = 9.5.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = SuccessGreen,
-                                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                                                    )
+                                        Icon(
+                                            imageVector = if (star <= reviewStars) Icons.Default.Star else Icons.Default.StarBorder,
+                                            contentDescription = "$star Stars",
+                                            tint = if (star <= reviewStars) AccentGold else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(26.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "$reviewStars / 5 Stars",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = AccentGold
+                                )
+                            }
+
+                            OutlinedTextField(
+                                value = reviewComment,
+                                onValueChange = { reviewComment = it },
+                                label = { Text("Share your review or fit feedback") },
+                                placeholder = { Text("Quality, sizing, packaging, delivery speed...") },
+                                minLines = 2,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("product_review_comment_input")
+                            )
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Button(
+                                onClick = {
+                                    viewModel.submitProductReview(
+                                        productId = product.id,
+                                        rating = reviewStars,
+                                        comment = reviewComment
+                                    ) { success, msg ->
+                                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                        if (success) reviewComment = ""
+                                    }
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("submit_product_review_button")
+                            ) {
+                                Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Post Review", fontWeight = FontWeight.Bold)
+                            }
+
+                            if (reviewsForProduct.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(14.dp))
+                                reviewsForProduct.take(6).forEachIndexed { idx, rev ->
+                                    if (idx > 0) {
+                                        HorizontalDivider(
+                                            modifier = Modifier.padding(vertical = 8.dp),
+                                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+                                        )
+                                    }
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = rev.customerName,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 12.5.sp
+                                                )
+                                                if (rev.isVerifiedPurchase) {
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Surface(
+                                                        shape = RoundedCornerShape(4.dp),
+                                                        color = SuccessGreen.copy(alpha = 0.14f)
+                                                    ) {
+                                                        Text(
+                                                            text = "✓ Delivered Buyer",
+                                                            fontSize = 9.5.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = SuccessGreen,
+                                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                                        )
+                                                    }
                                                 }
+                                            }
+                                            Text(
+                                                text = reviewDateFormat.format(Date(rev.createdAt)),
+                                                fontSize = 10.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(vertical = 2.dp)
+                                        ) {
+                                            repeat(rev.rating) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Star,
+                                                    contentDescription = null,
+                                                    tint = AccentGold,
+                                                    modifier = Modifier.size(13.dp)
+                                                )
                                             }
                                         }
                                         Text(
-                                            text = reviewDateFormat.format(Date(rev.createdAt)),
-                                            fontSize = 10.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            text = rev.comment,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurface
                                         )
                                     }
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(vertical = 2.dp)
-                                    ) {
-                                        repeat(rev.rating) {
-                                            Icon(
-                                                imageVector = Icons.Default.Star,
-                                                contentDescription = null,
-                                                tint = AccentGold,
-                                                modifier = Modifier.size(13.dp)
-                                            )
-                                        }
-                                    }
-                                    Text(
-                                        text = rev.comment,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
                                 }
                             }
                         }

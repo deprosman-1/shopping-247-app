@@ -48,17 +48,43 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.delay
 import com.example.ui.components.AppUpdateDialog
 import com.example.ui.components.ReceiptViewDialog
 import com.example.ui.screens.AdminControlRoomScreen
@@ -254,9 +280,12 @@ fun DeprosApp(
         }
     }
 
+    var showFullScreenBrandSplash by rememberSaveable { mutableStateOf(true) }
+
     val deepLinkCreds = pendingCloudCredentials?.collectAsState()?.value
     LaunchedEffect(deepLinkCreds) {
         if (deepLinkCreds != null) {
+            showFullScreenBrandSplash = false
             val (u, k) = deepLinkCreds
             pendingCloudCredentials?.value = null
             viewModel.applyStoreSyncLinkOrCredentials(u, k) { _, msg ->
@@ -268,6 +297,7 @@ fun DeprosApp(
     val incomingReceiptPayload = pendingSharedReceiptPayload?.collectAsState()?.value
     LaunchedEffect(incomingReceiptPayload) {
         if (incomingReceiptPayload != null) {
+            showFullScreenBrandSplash = false
             pendingSharedReceiptPayload?.value = null
             viewModel.handleIncomingSharedReceipt(
                 context = context,
@@ -281,11 +311,19 @@ fun DeprosApp(
         }
     }
 
+    LaunchedEffect(showFullScreenBrandSplash) {
+        if (showFullScreenBrandSplash) {
+            delay(2200L)
+            showFullScreenBrandSplash = false
+        }
+    }
+
     val view = LocalView.current
-    LaunchedEffect(isFullScreen) {
+    val effectiveImmersiveFullScreen = isFullScreen || showFullScreenBrandSplash
+    LaunchedEffect(effectiveImmersiveFullScreen) {
         val window = (view.context as ComponentActivity).window
         val insetsController = WindowCompat.getInsetsController(window, view)
-        if (isFullScreen) {
+        if (effectiveImmersiveFullScreen) {
             insetsController.hide(WindowInsetsCompat.Type.systemBars())
             insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         } else {
@@ -402,7 +440,7 @@ fun DeprosApp(
                     // Account
                     NavigationBarItem(
                         selected = currentScreen == AppScreen.AUTH,
-                        onClick = { viewModel.navigateTo(AppScreen.AUTH) },
+                        onClick = { viewModel.openCustomerAccountShortcut() },
                         icon = {
                             Icon(
                                 imageVector = if (currentScreen == AppScreen.AUTH) Icons.Filled.Person else Icons.Outlined.Person,
@@ -538,6 +576,118 @@ fun DeprosApp(
                     installedVersionName = installedVer,
                     onDismiss = { viewModel.dismissUpdateDialog() }
                 )
+            }
+        }
+
+        // Full-Screen "24/7 SHOPPING" Brand Launch Overlay (Edge-to-Edge Immersive View)
+        AnimatedVisibility(
+            visible = showFullScreenBrandSplash,
+            exit = fadeOut(animationSpec = tween(durationMillis = 380))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { showFullScreenBrandSplash = false }
+                    .testTag("fullscreen_brand_splash")
+            ) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFF022C22),
+                                Color(0xFF052E16),
+                                Color(0xFF064E3B),
+                                Color(0xFF022C22)
+                            )
+                        )
+                    )
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                AccentGold.copy(alpha = 0.22f),
+                                Color.Transparent
+                            ),
+                            center = Offset(size.width * 0.5f, size.height * 0.42f),
+                            radius = size.minDimension * 0.65f
+                        ),
+                        center = Offset(size.width * 0.5f, size.height * 0.42f),
+                        radius = size.minDimension * 0.65f
+                    )
+                }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 24.dp, vertical = 32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(28.dp),
+                            color = Color(0xFF064E3B),
+                            border = androidx.compose.foundation.BorderStroke(2.dp, AccentGold),
+                            shadowElevation = 12.dp,
+                            modifier = Modifier.size(104.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                Image(
+                                    painter = painterResource(id = R.drawable.shopping_logo_icon_1794752250458),
+                                    contentDescription = "24/7 SHOPPING Official Brand Crest",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(4.dp)
+                                        .clip(RoundedCornerShape(24.dp))
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = "24/7 SHOPPING",
+                            fontSize = 36.sp,
+                            lineHeight = 40.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 2.sp,
+                            color = AccentGold,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.testTag("fullscreen_brand_title")
+                        )
+
+                        Text(
+                            text = storeProfile.tagline.ifBlank { "Shopping with ease and comfort" },
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White.copy(alpha = 0.92f),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = AccentGold.copy(alpha = 0.16f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, AccentGold.copy(alpha = 0.7f))
+                    ) {
+                        Text(
+                            text = "OPENING STOREFRONT • TAP TO ENTER",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 1.sp,
+                            color = AccentGold,
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp)
+                        )
+                    }
+                }
             }
         }
     }

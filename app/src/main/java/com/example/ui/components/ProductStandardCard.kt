@@ -102,7 +102,8 @@ fun ProductStandardCard(
     onToggleWishlist: () -> Unit = {},
     isRestockWatched: Boolean = false,
     onToggleRestockWatch: (() -> Unit)? = null,
-    isCatalogLocked: Boolean = false
+    isCatalogLocked: Boolean = false,
+    isDeliveredOrdered: Boolean = false
 ) {
     val coroutineScope = rememberCoroutineScope()
     var addedFeedback by remember(product.id) { mutableStateOf(false) }
@@ -475,19 +476,29 @@ fun ProductStandardCard(
                             fontWeight = FontWeight.SemiBold
                         )
 
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Star,
-                                contentDescription = null,
-                                tint = AccentGold,
-                                modifier = Modifier.size(11.dp)
-                            )
-                            Spacer(modifier = Modifier.width(2.dp))
+                        if (isDeliveredOrdered) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Star,
+                                    contentDescription = "Delivered Product Rating",
+                                    tint = AccentGold,
+                                    modifier = Modifier.size(11.dp)
+                                )
+                                Spacer(modifier = Modifier.width(2.dp))
+                                Text(
+                                    text = "${product.rating}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 10.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        } else {
                             Text(
-                                text = "${product.rating}",
+                                text = "Delivered to Rate",
                                 style = MaterialTheme.typography.labelSmall,
-                                fontSize = 10.5.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                fontSize = 9.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                                maxLines = 1
                             )
                         }
                     }

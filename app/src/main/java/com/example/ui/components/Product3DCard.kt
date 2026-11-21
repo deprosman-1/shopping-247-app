@@ -86,7 +86,8 @@ fun Product3DCard(
     modifier: Modifier = Modifier,
     isWishlisted: Boolean = false,
     onToggleWishlist: () -> Unit = {},
-    isCatalogLocked: Boolean = false
+    isCatalogLocked: Boolean = false,
+    isDeliveredOrdered: Boolean = false
 ) {
     val coroutineScope = rememberCoroutineScope()
     var rotX by remember { mutableFloatStateOf(0f) }
@@ -349,19 +350,28 @@ fun Product3DCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    // Rating
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Star,
-                            contentDescription = null,
-                            tint = AccentGold,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(3.dp))
+                    // Rating (Active ONLY on Delivered Ordered Products)
+                    if (isDeliveredOrdered) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Star,
+                                contentDescription = "Delivered Product Rating",
+                                tint = AccentGold,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = "${product.rating} (${product.reviewCount})",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    } else {
                         Text(
-                            text = "${product.rating} (${product.reviewCount})",
+                            text = "Rate on Delivery",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                         )
                     }
 

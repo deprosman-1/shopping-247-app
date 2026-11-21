@@ -85,6 +85,7 @@ fun WishlistScreen(
     val currentCustomer by viewModel.currentCustomer.collectAsState()
     val isWideDualAxisMode by viewModel.isWideDualAxisMode.collectAsState()
     val lockedPartnerIds by viewModel.lockedPartnerIds.collectAsState()
+    val allOrders by viewModel.allOrders.collectAsState()
     val unlockedWishlistProducts = remember(wishlistProducts, lockedPartnerIds) {
         wishlistProducts.filter { !it.isCatalogLocked && (it.partnerId.isBlank() || it.partnerId !in lockedPartnerIds) }
     }
@@ -345,6 +346,9 @@ fun WishlistScreen(
                 ) { product ->
                     val effectiveDiscount = viewModel.getEffectiveDiscountPercent(product.category)
                     val isLocked = product.isCatalogLocked || (product.partnerId.isNotBlank() && product.partnerId in lockedPartnerIds)
+                    val isDeliveredOrdered = remember(product.title, allOrders) {
+                        allOrders.any { it.status == com.example.data.model.OrderStatus.DELIVERED && it.itemsSummary.contains(product.title, ignoreCase = true) }
+                    }
                     ProductStandardCard(
                         product = product,
                         promoDiscountPercent = effectiveDiscount,
@@ -356,7 +360,8 @@ fun WishlistScreen(
                         },
                         isWishlisted = wishlistIds.contains(product.id),
                         onToggleWishlist = { viewModel.toggleWishlist(product.id) },
-                        isCatalogLocked = isLocked
+                        isCatalogLocked = isLocked,
+                        isDeliveredOrdered = isDeliveredOrdered
                     )
                 }
             }

@@ -84,6 +84,15 @@ enum class AppScreen {
     LIVE_CALL
 }
 
+enum class CustomerAccountDestination {
+    MENU,
+    WELCOME_PROFILE,
+    INBOX,
+    RATINGS_AND_REVIEWS,
+    VOUCHERS,
+    FOLLOW_STORE
+}
+
 data class AdminPromoConfig(
     val isActive: Boolean = false,
     val discountPercent: Int = 10,
@@ -233,7 +242,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // Orders & Receipts
     val allOrders: StateFlow<List<Order>> = repository.allOrders
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val allCustomers: StateFlow<List<Customer>> = repository.allCustomers
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -744,6 +753,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val adminPrefs = getApplication<Application>().getSharedPreferences("depros_admin_settings", Context.MODE_PRIVATE)
 
+    // Customer Account Shortcut & Vertical Menu Destination
+    private val _customerAccountDestination = MutableStateFlow(CustomerAccountDestination.MENU)
+    val customerAccountDestination: StateFlow<CustomerAccountDestination> = _customerAccountDestination.asStateFlow()
+
+    private val _isFollowingStore = MutableStateFlow(adminPrefs.getBoolean("is_following_store", false))
+    val isFollowingStore: StateFlow<Boolean> = _isFollowingStore.asStateFlow()
+
+    fun openCustomerAccountShortcut(destination: CustomerAccountDestination = CustomerAccountDestination.MENU) {
+        _customerAccountDestination.value = destination
+        navigateTo(AppScreen.AUTH)
+    }
+
+    fun selectCustomerAccountDestination(destination: CustomerAccountDestination) {
+        _customerAccountDestination.value = destination
+    }
+
+    fun toggleFollowStore(): Boolean {
+        val next = !_isFollowingStore.value
+        _isFollowingStore.value = next
+        adminPrefs.edit().putBoolean("is_following_store", next).apply()
+        return next
+    }
+
     // Admin Security Settings (Password protected access)
     private val _adminPassword = MutableStateFlow(
         adminPrefs.getString("admin_password", "admin123")?.ifBlank { "admin123" } ?: "admin123"
@@ -1227,9 +1259,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val productReviews: StateFlow<List<ProductReview>> = _productReviews.asStateFlow()
 
     fun hasVerifiedDeliveredPurchase(productTitle: String): Boolean {
+        val cleanTitle = productTitle.trim()
+        if (cleanTitle.isBlank()) return false
         return allOrders.value.any { ord ->
             ord.status == OrderStatus.DELIVERED &&
-                ord.itemsSummary.contains(productTitle, ignoreCase = true)
+                ord.itemsSummary.contains(cleanTitle, ignoreCase = true)
+        }
+    }
+
+    fun getDeliveredOrderedProducts(): List<Product> {
+        val deliveredOrders = allOrders.value.filter { it.status == OrderStatus.DELIVERED }
+        if (deliveredOrders.isEmpty()) return emptyList()
+        return allProducts.value.filter { prod ->
+            prod.title.isNotBlank() && deliveredOrders.any { ord ->
+                ord.itemsSummary.contains(prod.title, ignoreCase = true)
+            }
         }
     }
 
@@ -1244,12 +1288,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             onResult?.invoke(false, "Please write a short review comment.")
             return
         }
-        val cleanRating = rating.coerceIn(1, 5)
         val prod = allProducts.value.find { it.id == productId }
+        if (prod == null || !hasVerifiedDeliveredPurchase(prod.title)) {
+            onResult?.invoke(false, "Ratings & reviews are active ONLY on delivered ordered products.")
+            return
+        }
+        val cleanRating = rating.coerceIn(1, 5)
         val customer = _currentCustomer.value
         val reviewerName = customer?.fullName?.ifBlank { null }
             ?: _savedDeliveryInfo.value.fullName.ifBlank { "Verified Shopper" }
-        val isVerified = prod != null && hasVerifiedDeliveredPurchase(prod.title)
         val newReview = ProductReview(
             productId = productId,
             customerId = customer?.id ?: "guest",
@@ -1257,28 +1304,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             rating = cleanRating,
             comment = cleanComment,
             createdAt = System.currentTimeMillis(),
-            isVerifiedPurchase = isVerified
+            isVerifiedPurchase = true
         )
         val updatedReviews = listOf(newReview) + _productReviews.value
         _productReviews.value = updatedReviews
         persistProductReviews(updatedReviews)
 
-        if (prod != null) {
-            val productRevList = updatedReviews.filter { it.productId == productId }
-            val newReviewCount = prod.reviewCount + 1
-            val combinedRating = if (prod.reviewCount > 0) {
-                ((prod.rating * prod.reviewCount) + cleanRating.toDouble()) / newReviewCount
-            } else {
-                productRevList.map { it.rating }.average()
-            }
-            val roundedRating = Math.round(combinedRating * 10.0) / 10.0
-            val updatedProd = prod.copy(rating = roundedRating, reviewCount = newReviewCount)
-            if (_selectedProduct.value?.id == productId) {
-                _selectedProduct.value = updatedProd
-            }
-            viewModelScope.launch {
-                repository.saveProduct(updatedProd)
-            }
+        val productRevList = updatedReviews.filter { it.productId == productId }
+        val newReviewCount = prod.reviewCount + 1
+        val combinedRating = if (prod.reviewCount > 0) {
+            ((prod.rating * prod.reviewCount) + cleanRating.toDouble()) / newReviewCount
+        } else {
+            productRevList.map { it.rating }.average()
+        }
+        val roundedRating = Math.round(combinedRating * 10.0) / 10.0
+        val updatedProd = prod.copy(rating = roundedRating, reviewCount = newReviewCount)
+        if (_selectedProduct.value?.id == productId) {
+            _selectedProduct.value = updatedProd
+        }
+        viewModelScope.launch {
+            repository.saveProduct(updatedProd)
         }
         onResult?.invoke(true, "Thank you! Your $cleanRating★ review has been published.")
     }
