@@ -143,6 +143,7 @@ fun ProductDetailScreen(
     val cartCount by viewModel.cartTotalCount.collectAsState()
     val storeProfile by viewModel.storeProfile.collectAsState()
     val isWideDualAxisMode by viewModel.isWideDualAxisMode.collectAsState()
+    val lockedPartnerIds by viewModel.lockedPartnerIds.collectAsState()
 
     var quantity by remember { mutableIntStateOf(1) }
     var addedFeedback by remember { mutableStateOf(false) }
@@ -318,8 +319,11 @@ fun ProductDetailScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         val isOutOfStock = product.stockQuantity <= 0
+                        val isCatalogLocked = product.isCatalogLocked ||
+                            (product.partnerId.isNotBlank() && product.partnerId in lockedPartnerIds)
                         Button(
                             onClick = {
+                                if (isCatalogLocked) return@Button
                                 viewModel.addToCart(
                                     product = product,
                                     brand = selectedBrand,
@@ -336,9 +340,9 @@ fun ProductDetailScreen(
                                     }
                                 )
                             },
-                            enabled = !isOutOfStock,
+                            enabled = !isOutOfStock && !isCatalogLocked,
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isOutOfStock) Color(0xFF6B7280) else MaterialTheme.colorScheme.primary
+                                containerColor = if (isOutOfStock || isCatalogLocked) Color(0xFF6B7280) else MaterialTheme.colorScheme.primary
                             ),
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier
@@ -347,14 +351,18 @@ fun ProductDetailScreen(
                                 .testTag("detail_add_to_cart_button")
                         ) {
                             Icon(
-                                imageVector = if (isOutOfStock) Icons.Default.Lock else Icons.Default.AddShoppingCart,
+                                imageVector = if (isOutOfStock || isCatalogLocked) Icons.Default.Lock else Icons.Default.AddShoppingCart,
                                 contentDescription = null,
                                 tint = Color.White,
                                 modifier = Modifier.size(20.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = if (isOutOfStock) "Out of Stock" else "Add to Cart",
+                                text = when {
+                                    isCatalogLocked -> "Display Only"
+                                    isOutOfStock -> "Out of Stock"
+                                    else -> "Add to Cart"
+                                },
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
@@ -362,17 +370,21 @@ fun ProductDetailScreen(
 
                         OutlinedButton(
                             onClick = {
-                                viewModel.addToCart(
-                                    product = product,
-                                    brand = selectedBrand,
-                                    size = selectedSize,
-                                    color = selectedColor,
-                                    quantity = quantity,
-                                    customBargainPrice = appliedBargainPrice,
-                                    bargainNote = bargainResultMsg
-                                )
-                                Toast.makeText(context, "Opening Cart...", Toast.LENGTH_SHORT).show()
-                                viewModel.navigateTo(AppScreen.CART)
+                                if (isCatalogLocked) {
+                                    Toast.makeText(context, "Display Only — Add-to-Cart paused until hosting is renewed.", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    viewModel.addToCart(
+                                        product = product,
+                                        brand = selectedBrand,
+                                        size = selectedSize,
+                                        color = selectedColor,
+                                        quantity = quantity,
+                                        customBargainPrice = appliedBargainPrice,
+                                        bargainNote = bargainResultMsg
+                                    )
+                                    Toast.makeText(context, "Opening Cart...", Toast.LENGTH_SHORT).show()
+                                    viewModel.navigateTo(AppScreen.CART)
+                                }
                             },
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier
@@ -381,14 +393,14 @@ fun ProductDetailScreen(
                                 .testTag("detail_buy_now_button")
                         ) {
                             Icon(
-                                imageVector = Icons.Default.ShoppingCart,
+                                imageVector = if (isCatalogLocked) Icons.Default.Lock else Icons.Default.ShoppingCart,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
+                                tint = if (isCatalogLocked) Color(0xFF94A3B8) else MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(20.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "View Cart",
+                                text = if (isCatalogLocked) "Catalog Locked" else "View Cart",
                                 fontWeight = FontWeight.ExtraBold
                             )
                         }
@@ -632,6 +644,46 @@ fun ProductDetailScreen(
                                 fontWeight = FontWeight.Black,
                                 color = Color(0xFFEF4444)
                             )
+                        }
+                    }
+                }
+
+                val isDetailCatalogLocked = product.isCatalogLocked ||
+                    (product.partnerId.isNotBlank() && product.partnerId in lockedPartnerIds)
+                if (isDetailCatalogLocked) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color(0xFF1E293B),
+                        border = BorderStroke(1.5.dp, AccentGold.copy(alpha = 0.8f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("detail_catalog_locked_banner")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = "Display Only",
+                                tint = AccentGold,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "DISPLAY ONLY — PARTNER HOSTING PERIOD ENDED",
+                                    color = AccentGold,
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 11.5.sp
+                                )
+                                Text(
+                                    text = "Add-to-Cart is temporarily locked by Admin while the Partner renews their hosting contract.",
+                                    color = Color.White.copy(alpha = 0.9f),
+                                    fontSize = 11.sp
+                                )
+                            }
                         }
                     }
                 }

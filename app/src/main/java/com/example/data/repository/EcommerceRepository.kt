@@ -389,6 +389,95 @@ class EcommerceRepository(
         }
     }
 
+    suspend fun setPartnerProductsCatalogLocked(partnerId: String, locked: Boolean): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            val entities = dao.getProductsByPartnerId(partnerId)
+            if (entities.isEmpty()) return@withContext Result.success(0)
+            val updated = entities.map { it.toDomain().copy(isCatalogLocked = locked) }
+            dao.insertProducts(updated.map { it.toEntity() })
+            if (!supabaseSync.isPlaceholderConfig()) {
+                updated.forEach { prod ->
+                    try { supabaseSync.syncProductToCloud(prod) } catch (_: Exception) {}
+                }
+            }
+            Result.success(updated.size)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deletePartnerProductsAndImages(
+        partnerId: String,
+        extraImageUrls: List<String> = emptyList()
+    ): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            val partnerEntities = dao.getProductsByPartnerId(partnerId)
+            val imageUrls = buildSet {
+                partnerEntities.forEach { entity ->
+                    val prod = entity.toDomain()
+                    if (prod.imageUrl.isNotBlank()) add(prod.imageUrl)
+                    addAll(prod.galleryUrls)
+                }
+                extraImageUrls.filter { it.isNotBlank() }.forEach { add(it) }
+            }
+
+            // 1. Delete local cached / staged image files
+            imageUrls.forEach { url ->
+                try {
+                    val filePath = when {
+                        url.startsWith("file://") -> url.removePrefix("file://")
+                        url.startsWith("/") -> url
+                        else -> null
+                    }
+                    if (!filePath.isNullOrBlank()) {
+                        val file = File(filePath)
+                        if (file.exists() && (file.absolutePath.contains("product_images") || file.absolutePath.contains("partner_staging"))) {
+                            file.delete()
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // 2. Delete product rows from Room & Supabase DB, plus Supabase Storage objects
+            dao.deleteProductsByPartner(partnerId)
+            if (!supabaseSync.isPlaceholderConfig()) {
+                try { supabaseSync.deletePartnerProductsFromCloud(partnerId) } catch (_: Exception) {}
+                partnerEntities.forEach { ent ->
+                    try { supabaseSync.deleteProductFromCloud(ent.id) } catch (_: Exception) {}
+                }
+                imageUrls.filter { it.startsWith("http", ignoreCase = true) }.forEach { remoteUrl ->
+                    try { supabaseSync.deleteStorageObjectByPublicUrl(remoteUrl) } catch (_: Exception) {}
+                }
+            }
+            Result.success(partnerEntities.size)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deductPartnerProductsStock(deductionsByProductId: Map<String, Int>): Result<List<Product>> = withContext(Dispatchers.IO) {
+        try {
+            val updated = mutableListOf<Product>()
+            deductionsByProductId.forEach { (productId, qtySold) ->
+                if (qtySold > 0) {
+                    val existing = dao.getProductById(productId)?.toDomain()
+                    if (existing != null) {
+                        val nextQty = (existing.stockQuantity - qtySold).coerceAtLeast(0)
+                        val saved = existing.copy(stockQuantity = nextQty)
+                        dao.insertProduct(saved.toEntity())
+                        updated.add(saved)
+                        if (!supabaseSync.isPlaceholderConfig()) {
+                            try { supabaseSync.syncProductToCloud(saved) } catch (_: Exception) {}
+                        }
+                    }
+                }
+            }
+            Result.success(updated)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     // Orders & Receipts Flow
     val allOrders: Flow<List<Order>> = dao.getAllOrders().map { entities ->
         entities.map { it.toDomain() }
@@ -683,7 +772,8 @@ class EcommerceRepository(
                             partnerId = product.partnerId.ifBlank { localExisting.partnerId },
                             partnerName = product.partnerName.ifBlank { localExisting.partnerName },
                             partnerCommissionPercent = if (product.partnerCommissionPercent > 0.0) product.partnerCommissionPercent else localExisting.partnerCommissionPercent,
-                            partnerBatchId = product.partnerBatchId.ifBlank { localExisting.partnerBatchId }
+                            partnerBatchId = product.partnerBatchId.ifBlank { localExisting.partnerBatchId },
+                            isCatalogLocked = product.isCatalogLocked || localExisting.isCatalogLocked
                         )
                     } else {
                         product
@@ -1108,7 +1198,8 @@ class EcommerceRepository(
             partnerId = partnerId,
             partnerName = partnerName,
             partnerCommissionPercent = partnerCommissionPercent,
-            partnerBatchId = partnerBatchId
+            partnerBatchId = partnerBatchId,
+            isCatalogLocked = isCatalogLocked
         )
     }
 
@@ -1138,7 +1229,8 @@ class EcommerceRepository(
             partnerName = partnerName,
             partnerCommissionPercent = partnerCommissionPercent,
             partnerBatchId = partnerBatchId,
-            galleryUrlsJson = galleryUrls.filter { it.isNotBlank() }.distinct().joinToString("|")
+            galleryUrlsJson = galleryUrls.filter { it.isNotBlank() }.distinct().joinToString("|"),
+            isCatalogLocked = isCatalogLocked
         )
     }
 

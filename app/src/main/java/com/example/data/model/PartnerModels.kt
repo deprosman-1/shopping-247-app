@@ -5,7 +5,8 @@ import java.util.UUID
 enum class PartnerAgreementStatus(val label: String) {
     PENDING_FINALIZATION("Awaiting 24/7 SHOPPING Signature"),
     FINALIZED("Agreement Finalized & Active"),
-    SUSPENDED("Paused / Expired")
+    SUSPENDED("Paused / Expired"),
+    TERMINATED("Contract Terminated • Products Deleted")
 }
 
 enum class HostingPeriodUnit(val label: String) {
@@ -28,7 +29,12 @@ enum class PartnerTransactionType(val label: String) {
     BATCH_UPLOADED_TO_SUPABASE("Batch Uploaded to Supabase Cloud"),
     CUSTOMER_ORDER_PAYMENT_ALERT("Customer Order Payment Alert"),
     ORDER_CONFIRMED_SALE("Confirmed Sale & Profit Split"),
-    MONTHLY_HOSTING_FEE("Monthly Hosting Payment")
+    MONTHLY_HOSTING_FEE("Monthly Hosting Payment (30-Day Cycle)"),
+    CATALOG_LOCKED_HOSTING_ENDED("Catalog Locked • Hosting Period Ended"),
+    HOSTING_CONTRACT_RENEWED("Hosting Contract Renewed & Unlocked"),
+    CONTRACT_TERMINATED_DELETED("Contract Terminated • Products Deleted Outright"),
+    PARTNER_OFFLINE_SALE_REMOVAL("Partner Offline Sale (Add-to-Cart Stock Removal)"),
+    UNREPORTED_OFFLINE_SALE_PENALTY("Unreported Offline Sale • Accrued Hosting % Fee")
 }
 
 enum class SalesReportPeriod(val label: String, val shortLabel: String, val lookbackDays: Long) {
@@ -60,7 +66,18 @@ data class PartnerOrganization(
     val adminCounterSignatureStrokes: String = "",
     val adminSignedAt: Long = 0L,
     val status: PartnerAgreementStatus = PartnerAgreementStatus.PENDING_FINALIZATION,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val isCatalogLocked: Boolean = false,
+    val catalogLockedAt: Long = 0L,
+    val hostingContractStartAt: Long = 0L,
+    val hostingContractEndAt: Long = 0L,
+    val lastHostingBillingAt: Long = 0L,
+    val nextHostingBillingDueAt: Long = 0L,
+    val hostingCyclesBilled: Int = 0,
+    val totalHostingFeesAutoDeducted: Double = 0.0,
+    val totalAutoDeducted247Share: Double = 0.0,
+    val totalAutoPartnerNetDeposited: Double = 0.0,
+    val totalAccruedOfflinePenalty: Double = 0.0
 )
 
 data class PartnerProductSubmission(

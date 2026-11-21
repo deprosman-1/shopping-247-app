@@ -153,4 +153,24 @@ object WhatsAppHelper {
     ) {
         openWhatsAppChat(context, recipientPhone, reportText)
     }
+
+    fun sendPartnerLifecycleNotice(
+        context: Context,
+        recipientPhone: String,
+        partnerName: String,
+        headline: String,
+        details: String,
+        storeProfile: StoreProfileConfig
+    ) {
+        val msg = """
+            *${storeProfile.storeName.uppercase()} — PARTNER MOU NOTICE*
+            *Partner:* $partnerName
+            *Action:* $headline
+
+            $details
+
+            Signed: ${storeProfile.storeName} Management
+        """.trimIndent()
+        openWhatsAppChat(context, recipientPhone, msg)
+    }
 }

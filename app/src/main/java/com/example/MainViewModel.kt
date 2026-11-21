@@ -58,6 +58,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -1511,6 +1512,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _supabaseConfigState.value = repository.supabaseSync.getConfig()
                     val syncRes = repository.fetchAndSyncAllFromCloudDetailed()
                     syncPreOrdersWithCloudInternal(notifyOnNewRemote = false)
+                    syncPartnerLedgerWithCloudInternal()
+                    runAutomatic30DayHostingBilling()
                     hasCompletedInitialCloudPull = true
                     if (syncRes.isSuccess) {
                         val s = syncRes.getOrThrow()
@@ -1594,6 +1597,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val wasBaselineEstablished = hasCompletedInitialCloudPull
                         val syncRes = repository.fetchAndSyncAllFromCloudDetailed()
                         syncPreOrdersWithCloudInternal(notifyOnNewRemote = wasBaselineEstablished)
+                        syncPartnerLedgerWithCloudInternal()
+                        runAutomatic30DayHostingBilling()
                         if (syncRes.isSuccess) {
                             val summary = syncRes.getOrThrow()
                             hasCompletedInitialCloudPull = true
@@ -1631,6 +1636,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _isRefreshing.value = true
             val res = repository.fetchAndSyncAllFromCloudDetailed()
             syncPreOrdersWithCloudInternal(notifyOnNewRemote = false)
+            syncPartnerLedgerWithCloudInternal()
+            runAutomatic30DayHostingBilling()
             _isRefreshing.value = false
             _lastSyncTimestamp.value = System.currentTimeMillis()
             res.onSuccess { summary ->
@@ -1656,6 +1663,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _cloudStatusMessage.value = "🔄 Syncing catalog, customers, orders, pre-orders & receipts with Supabase..."
             val res = repository.fetchAndSyncAllFromCloudDetailed()
             syncPreOrdersWithCloudInternal(notifyOnNewRemote = false)
+            syncPartnerLedgerWithCloudInternal()
+            runAutomatic30DayHostingBilling()
             _isSupabaseBusy.value = false
             _isRefreshing.value = false
             _lastSyncTimestamp.value = System.currentTimeMillis()
@@ -1899,6 +1908,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         bargainNote: String = "",
         onFeedback: ((Boolean, String) -> Unit)? = null
     ) {
+        if (isProductCatalogLocked(product)) {
+            onFeedback?.invoke(false, "🔒 '${product.title}' is Display Only — Hosting period ended and Add-to-Cart is locked by Admin.")
+            return
+        }
         if (product.stockQuantity <= 0) {
             onFeedback?.invoke(false, "Sorry, '${product.title}' is currently Out of Stock.")
             return
@@ -2021,7 +2034,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val variants = match.groupValues.getOrNull(3)?.split(",")?.map { it.trim() }.orEmpty()
                 val matchedProd = products.find { it.title.equals(title, ignoreCase = true) }
                     ?: products.find { it.title.contains(title, ignoreCase = true) }
-                if (matchedProd != null && matchedProd.stockQuantity > 0) {
+                if (matchedProd != null && matchedProd.stockQuantity > 0 && !isProductCatalogLocked(matchedProd)) {
                     val brand = variants.getOrNull(0)?.takeIf { it.isNotBlank() }
                         ?: matchedProd.availableBrands.firstOrNull() ?: matchedProd.brand
                     val size = variants.getOrNull(1)?.takeIf { it.isNotBlank() }
@@ -2071,6 +2084,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         viewModelScope.launch {
             val items = _cartItems.value
+            val lockedCartItem = items.firstOrNull { isProductCatalogLocked(it.product) }
+            if (lockedCartItem != null) {
+                onFailure("Cannot place order: '${lockedCartItem.product.title}' is currently Display Only (Admin Catalog Lock active).")
+                return@launch
+            }
             val summary = items.joinToString(";\n") {
                 "${it.quantity}x ${it.product.title} (${it.selectedBrand}, ${it.selectedSize}, ${it.selectedColor.name}) - ₦${(it.unitPrice * it.quantity).toInt()}"
             }
@@ -2080,6 +2098,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val discountedSubtotal = (subtotal - safeCouponDiscount - safeLoyaltyDiscount).coerceAtLeast(0.0)
             val deliveryFee = deliveryFeeAmount
             val total = customBargainTotal ?: (discountedSubtotal + deliveryFee)
+            val effectiveMerchandiseTotal = customBargainTotal
+                ?.let { (it - deliveryFee).coerceAtLeast(0.0) }
+                ?: discountedSubtotal
+            val discountFactor = if (subtotal > 0.0) {
+                (effectiveMerchandiseTotal / subtotal).coerceIn(0.0, 1.0)
+            } else {
+                1.0
+            }
             val calculatedItemProfits = items.sumOf { (it.unitPrice - it.product.costPrice) * it.quantity }
             val profit = if (customBargainTotal != null) {
                 val bargainDeduction = (subtotal - customBargainTotal).coerceAtLeast(0.0)
@@ -2094,19 +2120,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 " [Loyalty: -$loyaltyPointsRedeemed pts (-₦${safeLoyaltyDiscount.toInt()})]"
             } else ""
 
-            // Identify any partner-hosted items in the cart
+            // Identify any partner-hosted items & apply automated MOU % split
             val partnerItems = items.filter { it.product.partnerId.isNotBlank() }
             val primaryPartnerId = partnerItems.firstOrNull()?.product?.partnerId ?: ""
             val primaryPartnerName = partnerItems.firstOrNull()?.product?.partnerName ?: ""
             val totalPartnerCommissionAmt = partnerItems.sumOf { item ->
-                val gross = item.unitPrice * item.quantity
+                val gross = (item.unitPrice * item.quantity) * discountFactor
                 val pct = item.product.partnerCommissionPercent.coerceIn(0.0, 95.0)
                 gross * (pct / 100.0)
             }
             val totalPartnerNetAmt = partnerItems.sumOf { item ->
-                val gross = item.unitPrice * item.quantity
+                val gross = (item.unitPrice * item.quantity) * discountFactor
                 val pct = item.product.partnerCommissionPercent.coerceIn(0.0, 95.0)
-                gross * (1.0 - (pct / 100.0))
+                val share247 = gross * (pct / 100.0)
+                (gross - share247).coerceAtLeast(0.0)
             }
 
             val newOrder = Order(
@@ -2150,12 +2177,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     orderTotalAmount = savedOrder.totalAmount
                 )
 
-                // Record partner folder transactions & trigger automated payment alerts
+                // Automated MOU % split: deduct 24/7 SHOPPING share -> 24/7 account, deposit remaining balance -> Partner account
                 if (partnerItems.isNotEmpty()) {
                     recordPartnerOrderTransactionsAndAlerts(
                         order = savedOrder,
                         partnerItems = partnerItems,
-                        eventType = PartnerTransactionType.CUSTOMER_ORDER_PAYMENT_ALERT
+                        eventType = PartnerTransactionType.CUSTOMER_ORDER_PAYMENT_ALERT,
+                        discountFactor = discountFactor,
+                        creditPartnerTotals = true
                     )
                 }
 
@@ -2415,6 +2444,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val commPct = partnerProd.firstOrNull()?.partnerCommissionPercent
                         ?: partnerOrg?.stipulatedCommissionPercent
                         ?: 10.0
+                    val shareAmt = matchingOrder.partnerCommissionAmount.takeIf { it > 0.0 }
+                        ?: (matchingOrder.totalAmount * (commPct / 100.0))
+                    val netAmt = matchingOrder.partnerNetPayout.takeIf { it > 0.0 }
+                        ?: (matchingOrder.totalAmount - shareAmt).coerceAtLeast(0.0)
+                    val alreadyCreditedAtPayment = _partnerTransactions.value.any {
+                        it.orderId == matchingOrder.orderId &&
+                            it.partnerId == matchingOrder.partnerId &&
+                            it.type == PartnerTransactionType.CUSTOMER_ORDER_PAYMENT_ALERT
+                    }
                     val confirmedTxn = PartnerFolderTransaction(
                         partnerId = matchingOrder.partnerId,
                         partnerName = matchingOrder.partnerName.ifBlank { partnerOrg?.businessName ?: "Partner" },
@@ -2424,10 +2462,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         quantity = 1,
                         grossAmount = matchingOrder.totalAmount,
                         commissionPercent = commPct,
-                        commissionProfitAmount = matchingOrder.partnerCommissionAmount.takeIf { it > 0.0 }
-                            ?: (matchingOrder.totalAmount * (commPct / 100.0)),
-                        partnerNetAmount = matchingOrder.partnerNetPayout.takeIf { it > 0.0 }
-                            ?: (matchingOrder.totalAmount * (1.0 - commPct / 100.0)),
+                        commissionProfitAmount = shareAmt,
+                        partnerNetAmount = netAmt,
                         orderId = matchingOrder.orderId,
                         customerName = matchingOrder.customerName,
                         customerPhone = matchingOrder.customerPhone,
@@ -2440,6 +2476,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         note = "Confirmed Sale Settlement: $note"
                     )
                     appendPartnerTransaction(confirmedTxn)
+                    if (!alreadyCreditedAtPayment) {
+                        val updatedOrgs = _partnerOrganizations.value.map { org ->
+                            if (org.id == matchingOrder.partnerId) {
+                                org.copy(
+                                    totalAutoDeducted247Share = org.totalAutoDeducted247Share + shareAmt,
+                                    totalAutoPartnerNetDeposited = org.totalAutoPartnerNetDeposited + netAmt
+                                )
+                            } else org
+                        }
+                        _partnerOrganizations.value = updatedOrgs
+                        persistPartnerOrganizations(updatedOrgs)
+                    }
+                    pushPartnerLedgerAsync(preferLocal = true)
                     _latestPartnerPaymentAlert.value = confirmedTxn
                     val naira = java.text.NumberFormat.getCurrencyInstance(java.util.Locale("en", "NG")).apply {
                         maximumFractionDigits = 0
@@ -2723,7 +2772,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     status = try {
                         PartnerAgreementStatus.valueOf(obj.optString("status", PartnerAgreementStatus.PENDING_FINALIZATION.name))
                     } catch (_: Exception) { PartnerAgreementStatus.PENDING_FINALIZATION },
-                    createdAt = obj.optLong("createdAt", System.currentTimeMillis())
+                    createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
+                    isCatalogLocked = obj.optBoolean("isCatalogLocked", false),
+                    catalogLockedAt = obj.optLong("catalogLockedAt", 0L),
+                    hostingContractStartAt = obj.optLong("hostingContractStartAt", 0L),
+                    hostingContractEndAt = obj.optLong("hostingContractEndAt", 0L),
+                    lastHostingBillingAt = obj.optLong("lastHostingBillingAt", 0L),
+                    nextHostingBillingDueAt = obj.optLong("nextHostingBillingDueAt", 0L),
+                    hostingCyclesBilled = obj.optInt("hostingCyclesBilled", 0),
+                    totalHostingFeesAutoDeducted = obj.optDouble("totalHostingFeesAutoDeducted", 0.0),
+                    totalAutoDeducted247Share = obj.optDouble("totalAutoDeducted247Share", 0.0),
+                    totalAutoPartnerNetDeposited = obj.optDouble("totalAutoPartnerNetDeposited", 0.0),
+                    totalAccruedOfflinePenalty = obj.optDouble("totalAccruedOfflinePenalty", 0.0)
                 )
             }
         } catch (_: Exception) {
@@ -2758,6 +2818,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 put("adminSignedAt", p.adminSignedAt)
                 put("status", p.status.name)
                 put("createdAt", p.createdAt)
+                put("isCatalogLocked", p.isCatalogLocked)
+                put("catalogLockedAt", p.catalogLockedAt)
+                put("hostingContractStartAt", p.hostingContractStartAt)
+                put("hostingContractEndAt", p.hostingContractEndAt)
+                put("lastHostingBillingAt", p.lastHostingBillingAt)
+                put("nextHostingBillingDueAt", p.nextHostingBillingDueAt)
+                put("hostingCyclesBilled", p.hostingCyclesBilled)
+                put("totalHostingFeesAutoDeducted", p.totalHostingFeesAutoDeducted)
+                put("totalAutoDeducted247Share", p.totalAutoDeducted247Share)
+                put("totalAutoPartnerNetDeposited", p.totalAutoPartnerNetDeposited)
+                put("totalAccruedOfflinePenalty", p.totalAccruedOfflinePenalty)
             })
         }
         adminPrefs.edit().putString("partner_organizations_json", arr.toString()).apply()
@@ -2924,6 +2995,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _latestPartnerPaymentAlert = MutableStateFlow<PartnerFolderTransaction?>(null)
     val latestPartnerPaymentAlert: StateFlow<PartnerFolderTransaction?> = _latestPartnerPaymentAlert.asStateFlow()
 
+    val lockedPartnerIds: StateFlow<Set<String>> = _partnerOrganizations
+        .map { orgs ->
+            orgs.filter {
+                it.isCatalogLocked ||
+                    it.status == PartnerAgreementStatus.SUSPENDED ||
+                    it.status == PartnerAgreementStatus.TERMINATED
+            }.map { it.id }.toSet()
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+    fun isProductCatalogLocked(product: Product): Boolean {
+        if (product.isCatalogLocked) return true
+        if (product.partnerId.isBlank()) return false
+        val org = _partnerOrganizations.value.find { it.id == product.partnerId } ?: return false
+        return org.isCatalogLocked ||
+            org.status == PartnerAgreementStatus.SUSPENDED ||
+            org.status == PartnerAgreementStatus.TERMINATED
+    }
+
+    companion object {
+        const val THIRTY_DAYS_MS: Long = 30L * 86_400_000L
+
+        fun parseHostingDurationDays(duration: String): Long {
+            val clean = duration.trim().lowercase()
+            val num = Regex("""(\d+)""").find(clean)?.groupValues?.getOrNull(1)?.toLongOrNull() ?: 6L
+            return when {
+                clean.contains("year") -> num.coerceAtLeast(1L) * 360L
+                clean.contains("week") -> num.coerceAtLeast(1L) * 7L
+                clean.contains("day") -> num.coerceAtLeast(1L)
+                else -> num.coerceAtLeast(1L) * 30L
+            }
+        }
+    }
+
     fun dismissPartnerPaymentAlert() {
         _latestPartnerPaymentAlert.value = null
     }
@@ -2932,6 +3037,116 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val updated = listOf(txn) + _partnerTransactions.value
         _partnerTransactions.value = updated
         persistPartnerTransactions(updated)
+    }
+
+    private fun pushPartnerLedgerAsync(preferLocal: Boolean = true) {
+        if (repository.supabaseSync.isPlaceholderConfig()) return
+        viewModelScope.launch {
+            syncPartnerLedgerWithCloudInternal(preferLocal = preferLocal)
+        }
+    }
+
+    private suspend fun syncPartnerLedgerWithCloudInternal(preferLocal: Boolean = false) {
+        if (repository.supabaseSync.isPlaceholderConfig()) return
+        try {
+            val res = repository.supabaseSync.syncPartnerLedgerWithCloud(
+                localOrgs = _partnerOrganizations.value,
+                localSubs = _partnerSubmissions.value,
+                localTxns = _partnerTransactions.value,
+                preferLocal = preferLocal
+            )
+            val ledger = res.getOrNull() ?: return
+            _partnerOrganizations.value = ledger.organizations
+            persistPartnerOrganizations(ledger.organizations)
+            _partnerSubmissions.value = ledger.submissions
+            persistPartnerSubmissions(ledger.submissions)
+            _partnerTransactions.value = ledger.transactions
+            persistPartnerTransactions(ledger.transactions)
+        } catch (_: Exception) {
+            // keep local ledger intact on offline/transient error
+        }
+    }
+
+    fun runAutomatic30DayHostingBilling(referenceNowMs: Long = System.currentTimeMillis()): Int {
+        val orgs = _partnerOrganizations.value
+        if (orgs.isEmpty()) return 0
+        var totalCyclesAutoDeductedNow = 0
+        val newTxns = mutableListOf<PartnerFolderTransaction>()
+        val targetStoreAccount = _storeProfile.value.opayAccountNumber
+            .ifBlank { _storeProfile.value.moniepointAccountNumber }
+            .ifBlank { "24/7 SHOPPING Account" }
+
+        val updatedOrgs = orgs.map { p ->
+            if (p.status != PartnerAgreementStatus.FINALIZED || p.monthlyHostingPayment <= 0.0) {
+                p
+            } else {
+                val contractStart = p.hostingContractStartAt.takeIf { it > 0L }
+                    ?: p.adminSignedAt.takeIf { it > 0L }
+                    ?: p.createdAt
+                val contractEnd = p.hostingContractEndAt.takeIf { it > 0L }
+                    ?: (contractStart + parseHostingDurationDays(p.hostingDuration) * 86_400_000L)
+                var nextDue = p.nextHostingBillingDueAt.takeIf { it > 0L }
+                    ?: (contractStart + THIRTY_DAYS_MS)
+                var lastBilled = p.lastHostingBillingAt.takeIf { it > 0L } ?: contractStart
+                var cyclesBilled = p.hostingCyclesBilled
+                var totalHostingDeducted = p.totalHostingFeesAutoDeducted
+                var safetyCounter = 0
+
+                while (nextDue <= referenceNowMs && safetyCounter < 24) {
+                    safetyCounter++
+                    cyclesBilled += 1
+                    totalHostingDeducted += p.monthlyHostingPayment
+                    lastBilled = nextDue
+                    nextDue += THIRTY_DAYS_MS
+                    totalCyclesAutoDeductedNow++
+
+                    val partnerAcct = p.opayAccountNumber.ifBlank { p.moniepointAccountNumber }
+                        .ifBlank { "Partner Folder Account" }
+                    newTxns.add(
+                        PartnerFolderTransaction(
+                            partnerId = p.id,
+                            partnerName = p.businessName,
+                            type = PartnerTransactionType.MONTHLY_HOSTING_FEE,
+                            category = p.primaryCategory,
+                            grossAmount = p.monthlyHostingPayment,
+                            commissionProfitAmount = p.monthlyHostingPayment,
+                            partnerNetAmount = 0.0,
+                            paymentMethod = "Automated 30-Day Hosting Debit",
+                            paymentAccount = "$partnerAcct → $targetStoreAccount",
+                            alertSentToAdmin = true,
+                            alertSentToPartner = true,
+                            timestamp = lastBilled,
+                            note = "Auto 30-day hosting cycle #$cyclesBilled deducted from ${p.businessName} to 24/7 SHOPPING account"
+                        )
+                    )
+                }
+
+                if (safetyCounter > 0 || p.hostingContractStartAt == 0L || p.nextHostingBillingDueAt == 0L) {
+                    p.copy(
+                        hostingContractStartAt = contractStart,
+                        hostingContractEndAt = contractEnd,
+                        lastHostingBillingAt = lastBilled,
+                        nextHostingBillingDueAt = nextDue,
+                        hostingCyclesBilled = cyclesBilled,
+                        totalHostingFeesAutoDeducted = totalHostingDeducted
+                    )
+                } else {
+                    p
+                }
+            }
+        }
+
+        if (totalCyclesAutoDeductedNow > 0 || updatedOrgs != orgs) {
+            _partnerOrganizations.value = updatedOrgs
+            persistPartnerOrganizations(updatedOrgs)
+            if (newTxns.isNotEmpty()) {
+                val mergedTxns = (newTxns.sortedByDescending { it.timestamp } + _partnerTransactions.value).take(400)
+                _partnerTransactions.value = mergedTxns
+                persistPartnerTransactions(mergedTxns)
+                pushPartnerLedgerAsync(preferLocal = true)
+            }
+        }
+        return totalCyclesAutoDeductedNow
     }
 
     fun submitPartnerAgreementApplication(
@@ -2978,6 +3193,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val updated = listOf(newPartner) + _partnerOrganizations.value
         _partnerOrganizations.value = updated
         persistPartnerOrganizations(updated)
+        pushPartnerLedgerAsync(preferLocal = true)
         voiceManager.speakText("New Business Partnership & MOU application received from ${newPartner.businessName} for ${newPartner.primaryCategory}.")
         onComplete(newPartner)
     }
@@ -3003,42 +3219,67 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             onComplete(false, "Partner organization not found.")
             return
         }
+        val now = System.currentTimeMillis()
+        val resolvedDuration = hostingDuration.trim().ifBlank { existing.hostingDuration }
+        val durationDays = parseHostingDurationDays(resolvedDuration)
+        val safeHostingFee = monthlyHostingPayment.coerceAtLeast(0.0)
+        val alreadyBilledCycles = existing.hostingCyclesBilled
+        val billInitialCycle = safeHostingFee > 0.0 && alreadyBilledCycles == 0
+
         val finalized = existing.copy(
             adminCounterSignatureName = adminSignatoryName.trim().ifBlank { "24/7 SHOPPING Management" },
             adminCounterSignatureStrokes = adminStrokes,
-            adminSignedAt = System.currentTimeMillis(),
+            adminSignedAt = now,
             stipulatedCommissionPercent = commissionPercent.coerceIn(0.5, 90.0),
             agreedQuantityPerPeriod = agreedQtyPerPeriod.coerceAtLeast(1),
             periodUnit = periodUnit,
-            monthlyHostingPayment = monthlyHostingPayment.coerceAtLeast(0.0),
-            hostingDuration = hostingDuration.trim().ifBlank { existing.hostingDuration },
+            monthlyHostingPayment = safeHostingFee,
+            hostingDuration = resolvedDuration,
             opayAccountNumber = opayNumber.trim(),
             opayAccountName = opayName.trim().ifBlank { existing.businessName },
             moniepointAccountNumber = moniepointNumber.trim(),
             moniepointAccountName = moniepointName.trim().ifBlank { existing.businessName },
-            status = PartnerAgreementStatus.FINALIZED
+            status = PartnerAgreementStatus.FINALIZED,
+            isCatalogLocked = false,
+            catalogLockedAt = 0L,
+            hostingContractStartAt = existing.hostingContractStartAt.takeIf { it > 0L } ?: now,
+            hostingContractEndAt = (existing.hostingContractStartAt.takeIf { it > 0L } ?: now) + (durationDays * 86_400_000L),
+            lastHostingBillingAt = if (billInitialCycle) now else existing.lastHostingBillingAt,
+            nextHostingBillingDueAt = if (billInitialCycle) (now + THIRTY_DAYS_MS) else existing.nextHostingBillingDueAt.takeIf { it > 0L } ?: (now + THIRTY_DAYS_MS),
+            hostingCyclesBilled = if (billInitialCycle) 1 else alreadyBilledCycles,
+            totalHostingFeesAutoDeducted = if (billInitialCycle) existing.totalHostingFeesAutoDeducted + safeHostingFee else existing.totalHostingFeesAutoDeducted
         )
         val updated = current.map { if (it.id == partnerId) finalized else it }
         _partnerOrganizations.value = updated
         persistPartnerOrganizations(updated)
 
-        if (finalized.monthlyHostingPayment > 0.0) {
+        if (billInitialCycle) {
+            val targetStoreAccount = _storeProfile.value.opayAccountNumber
+                .ifBlank { _storeProfile.value.moniepointAccountNumber }
+                .ifBlank { "24/7 SHOPPING Account" }
+            val partnerAcct = finalized.opayAccountNumber.ifBlank { finalized.moniepointAccountNumber }
+                .ifBlank { "Partner Folder Account" }
             appendPartnerTransaction(
                 PartnerFolderTransaction(
                     partnerId = finalized.id,
                     partnerName = finalized.businessName,
                     type = PartnerTransactionType.MONTHLY_HOSTING_FEE,
                     category = finalized.primaryCategory,
-                    grossAmount = finalized.monthlyHostingPayment,
-                    commissionProfitAmount = finalized.monthlyHostingPayment,
+                    grossAmount = safeHostingFee,
+                    commissionProfitAmount = safeHostingFee,
                     partnerNetAmount = 0.0,
-                    paymentAccount = finalized.opayAccountNumber.ifBlank { finalized.moniepointAccountNumber },
-                    note = "Agreement finalized (${finalized.hostingDuration}, ${finalized.agreedQuantityPerPeriod} units ${finalized.periodUnit.label})"
+                    paymentMethod = "Automated 30-Day Hosting Debit (Cycle #1)",
+                    paymentAccount = "$partnerAcct → $targetStoreAccount",
+                    alertSentToAdmin = true,
+                    alertSentToPartner = true,
+                    timestamp = now,
+                    note = "Initial 30-day hosting cycle #1 auto-deducted upon MOU finalization (${finalized.hostingDuration})"
                 )
             )
         }
-        voiceManager.speakText("Partnership agreement finalized for ${finalized.businessName}. Product upload to Admin Control Room is now unlocked.")
-        onComplete(true, "MOU counter-signed & finalized! ${finalized.businessName} can now upload products to Admin Control Room.")
+        pushPartnerLedgerAsync(preferLocal = true)
+        voiceManager.speakText("Partnership agreement finalized for ${finalized.businessName}. Automated percentage split and 30-day hosting schedule are now active.")
+        onComplete(true, "MOU counter-signed & finalized! Automated split + 30-day hosting billing active for ${finalized.businessName}.")
     }
 
     fun updatePartnerEditableTerms(
@@ -3055,12 +3296,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         val updated = _partnerOrganizations.value.map { p ->
             if (p.id == partnerId) {
+                val resolvedDuration = hostingDuration.trim().ifBlank { p.hostingDuration }
+                val startAt = p.hostingContractStartAt.takeIf { it > 0L } ?: p.adminSignedAt.takeIf { it > 0L } ?: p.createdAt
+                val updatedEnd = startAt + parseHostingDurationDays(resolvedDuration) * 86_400_000L
                 p.copy(
                     stipulatedCommissionPercent = commissionPercent.coerceIn(0.5, 90.0),
                     agreedQuantityPerPeriod = agreedQtyPerPeriod.coerceAtLeast(1),
                     periodUnit = periodUnit,
                     monthlyHostingPayment = monthlyHostingPayment.coerceAtLeast(0.0),
-                    hostingDuration = hostingDuration.trim().ifBlank { p.hostingDuration },
+                    hostingDuration = resolvedDuration,
+                    hostingContractEndAt = updatedEnd,
                     opayAccountNumber = opayNumber.trim(),
                     opayAccountName = opayName.trim().ifBlank { p.businessName },
                     moniepointAccountNumber = moniepointNumber.trim(),
@@ -3070,6 +3315,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         _partnerOrganizations.value = updated
         persistPartnerOrganizations(updated)
+        pushPartnerLedgerAsync(preferLocal = true)
     }
 
     fun submitPartnerProductToAdminStaging(
@@ -3093,8 +3339,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             onComplete(false, "Partner organization not found.")
             return
         }
+        if (partner.status == PartnerAgreementStatus.TERMINATED) {
+            onComplete(false, "Contract terminated — new product uploads are permanently closed.")
+            return
+        }
         if (partner.status != PartnerAgreementStatus.FINALIZED) {
             onComplete(false, "MOU must be finalized by 24/7 SHOPPING before uploading products.")
+            return
+        }
+        if (partner.isCatalogLocked) {
+            onComplete(false, "Partner Catalog Lock is active after hosting expiry. Request Admin renewal & unlock first.")
             return
         }
         if (productName.isBlank() || brand.isBlank() || sellingPrice <= 0.0 || quantity <= 0) {
@@ -3151,6 +3405,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     note = "Staged to Admin Control Room (NOT yet on Supabase Cloud)"
                 )
             )
+            pushPartnerLedgerAsync(preferLocal = true)
             voiceManager.speakText("Partner ${partner.businessName} uploaded ${sub.productName} to Admin Control Room for verification.")
             onComplete(true, "'${sub.productName}' uploaded to Admin Control Room Staging (NOT yet on Supabase Cloud) for Admin verification.")
         }
@@ -3187,6 +3442,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         _partnerSubmissions.value = updated
         persistPartnerSubmissions(updated)
+        pushPartnerLedgerAsync(preferLocal = true)
     }
 
     fun verifyStagedPartnerProduct(submissionId: String, approve: Boolean, note: String = "") {
@@ -3232,6 +3488,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
         }
+        pushPartnerLedgerAsync(preferLocal = true)
     }
 
     fun verifyAllPendingForPartner(partnerId: String? = null) {
@@ -3271,6 +3528,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             )
         }
+        pushPartnerLedgerAsync(preferLocal = true)
     }
 
     fun batchUploadPartnerProductsToSupabase(
@@ -3293,6 +3551,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val mappedProducts = verifiedSubs.map { sub ->
                 val sizes = sub.sizesCsv.split(",").map { it.trim() }.filter { it.isNotBlank() }.ifEmpty { listOf("Standard") }
                 val existingProdId = sub.publishedProductId.ifBlank { "part-${sub.id.lowercase()}" }
+                val partnerOrg = _partnerOrganizations.value.find { it.id == sub.partnerId }
                 Product(
                     id = existingProdId,
                     title = sub.productName,
@@ -3320,7 +3579,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     partnerId = sub.partnerId,
                     partnerName = sub.partnerName,
                     partnerCommissionPercent = sub.commissionPercent,
-                    partnerBatchId = sub.batchNumber
+                    partnerBatchId = sub.batchNumber,
+                    isCatalogLocked = partnerOrg?.isCatalogLocked == true
                 )
             }
 
@@ -3367,6 +3627,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             )
                         )
                     }
+                    pushPartnerLedgerAsync(preferLocal = true)
 
                     val msg = if (cloudCount > 0) {
                         "✅ Uploaded batch of $cloudCount verified partner product(s) to Supabase Cloud & live catalog!"
@@ -3395,23 +3656,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun recordPartnerOrderTransactionsAndAlerts(
         order: Order,
         partnerItems: List<CartItem>,
-        eventType: PartnerTransactionType
+        eventType: PartnerTransactionType,
+        discountFactor: Double = 1.0,
+        creditPartnerTotals: Boolean = true
     ) {
         val groupedByPartner = partnerItems.groupBy { it.product.partnerId }
         val naira = java.text.NumberFormat.getCurrencyInstance(java.util.Locale("en", "NG")).apply {
             maximumFractionDigits = 0
         }
+        val storeAcct = _storeProfile.value.opayAccountNumber
+            .ifBlank { _storeProfile.value.moniepointAccountNumber }
+            .ifBlank { "24/7 SHOPPING Account" }
+
         groupedByPartner.forEach { (partnerId, pItems) ->
             val partnerOrg = _partnerOrganizations.value.find { it.id == partnerId }
             val partnerName = partnerOrg?.businessName ?: pItems.firstOrNull()?.product?.partnerName ?: "Partner Business"
             val totalQty = pItems.sumOf { it.quantity }
-            val grossAmt = pItems.sumOf { it.unitPrice * it.quantity }
+            val grossAmt = pItems.sumOf { (it.unitPrice * it.quantity) * discountFactor }
             val commissionProfit = pItems.sumOf {
-                (it.unitPrice * it.quantity) * (it.product.partnerCommissionPercent.coerceIn(0.0, 95.0) / 100.0)
+                ((it.unitPrice * it.quantity) * discountFactor) * (it.product.partnerCommissionPercent.coerceIn(0.0, 95.0) / 100.0)
             }
             val partnerNet = (grossAmt - commissionProfit).coerceAtLeast(0.0)
             val avgPct = if (grossAmt > 0.0) (commissionProfit / grossAmt) * 100.0 else (partnerOrg?.stipulatedCommissionPercent ?: 10.0)
             val itemTitles = pItems.joinToString(", ") { "${it.quantity}x ${it.product.title}" }
+            val partnerAcct = partnerOrg?.opayAccountNumber?.ifBlank { partnerOrg.moniepointAccountNumber }
+                ?.ifBlank { "Partner Settlement Account" } ?: "Partner Settlement Account"
+
             val txn = PartnerFolderTransaction(
                 partnerId = partnerId,
                 partnerName = partnerName,
@@ -3429,15 +3699,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 customerName = order.customerName,
                 customerPhone = order.customerPhone,
                 paymentMethod = order.paymentMethod.title,
-                paymentAccount = order.paymentAccount,
+                paymentAccount = "24/7 ($storeAcct): ${naira.format(commissionProfit)} | Partner ($partnerAcct): ${naira.format(partnerNet)}",
                 paymentReference = order.paymentReference,
                 receiptImageUrl = order.receiptImageUrl,
                 alertSentToAdmin = true,
                 alertSentToPartner = true,
                 timestamp = System.currentTimeMillis(),
-                note = "Automated payment alert issued to 24/7 SHOPPING & $partnerName"
+                note = "Auto-Split: ${String.format(java.util.Locale.US, "%.1f", avgPct)}% (${naira.format(commissionProfit)}) -> 24/7 SHOPPING | Balance (${naira.format(partnerNet)}) -> $partnerName"
             )
             appendPartnerTransaction(txn)
+            if (creditPartnerTotals) {
+                val updatedOrgs = _partnerOrganizations.value.map { org ->
+                    if (org.id == partnerId) {
+                        org.copy(
+                            totalAutoDeducted247Share = org.totalAutoDeducted247Share + commissionProfit,
+                            totalAutoPartnerNetDeposited = org.totalAutoPartnerNetDeposited + partnerNet
+                        )
+                    } else org
+                }
+                _partnerOrganizations.value = updatedOrgs
+                persistPartnerOrganizations(updatedOrgs)
+            }
             _latestPartnerPaymentAlert.value = txn
             ShopNotificationHelper.notifyPartnerPaymentAlert(
                 context = getApplication(),
@@ -3446,8 +3728,384 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 grossAmountText = naira.format(grossAmt),
                 commissionProfitText = naira.format(commissionProfit),
                 partnerPayoutText = naira.format(partnerNet),
-                paymentAccount = order.paymentAccount
+                paymentAccount = txn.paymentAccount
             )
+        }
+        pushPartnerLedgerAsync(preferLocal = true)
+    }
+
+    fun togglePartnerCatalogLock(
+        partnerId: String,
+        lock: Boolean,
+        reason: String = "",
+        onComplete: ((Boolean, String) -> Unit)? = null
+    ) {
+        val partner = _partnerOrganizations.value.find { it.id == partnerId }
+        if (partner == null) {
+            onComplete?.invoke(false, "Partner organization not found.")
+            return
+        }
+        if (partner.status == PartnerAgreementStatus.TERMINATED) {
+            onComplete?.invoke(false, "Contract was terminated and products deleted.")
+            return
+        }
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val updatedOrgs = _partnerOrganizations.value.map { org ->
+                if (org.id == partnerId) {
+                    org.copy(
+                        isCatalogLocked = lock,
+                        catalogLockedAt = if (lock) now else 0L
+                    )
+                } else org
+            }
+            _partnerOrganizations.value = updatedOrgs
+            persistPartnerOrganizations(updatedOrgs)
+
+            // Sync product lock state to Room & Supabase Cloud
+            val lockRes = repository.setPartnerProductsCatalogLocked(partnerId, lock)
+            val affectedCount = lockRes.getOrDefault(0)
+
+            // If locking, also strip any cart items belonging to this partner so customers cannot check out
+            if (lock) {
+                _cartItems.value = _cartItems.value.filterNot { it.product.partnerId == partnerId }
+            }
+
+            appendPartnerTransaction(
+                PartnerFolderTransaction(
+                    partnerId = partner.id,
+                    partnerName = partner.businessName,
+                    type = if (lock) PartnerTransactionType.CATALOG_LOCKED_HOSTING_ENDED else PartnerTransactionType.HOSTING_CONTRACT_RENEWED,
+                    category = partner.primaryCategory,
+                    quantity = affectedCount,
+                    alertSentToAdmin = true,
+                    alertSentToPartner = true,
+                    timestamp = now,
+                    note = reason.trim().ifBlank {
+                        if (lock) "Hosting period ended — Admin activated Catalog Lock (products displayed, Add-to-Cart disabled)"
+                        else "Admin unlocked Catalog Lock — Add-to-Cart re-enabled"
+                    }
+                )
+            )
+            pushPartnerLedgerAsync(preferLocal = true)
+            val msg = if (lock) {
+                "🔒 Catalog Lock enabled for ${partner.businessName} ($affectedCount SKU(s) still displayed; Add-to-Cart disabled)."
+            } else {
+                "🔓 Catalog Unlocked for ${partner.businessName} ($affectedCount SKU(s) active for customer Add-to-Cart)."
+            }
+            voiceManager.speakText(
+                if (lock) "Catalog locked for ${partner.businessName}. Products remain visible with Add to Cart disabled."
+                else "Catalog unlocked for ${partner.businessName}. Customers can now add items to cart."
+            )
+            onComplete?.invoke(true, msg)
+        }
+    }
+
+    fun renewPartnerHostingContract(
+        partnerId: String,
+        newDuration: String,
+        monthlyFeeOverride: Double? = null,
+        onComplete: ((Boolean, String) -> Unit)? = null
+    ) {
+        val partner = _partnerOrganizations.value.find { it.id == partnerId }
+        if (partner == null) {
+            onComplete?.invoke(false, "Partner organization not found.")
+            return
+        }
+        if (partner.status == PartnerAgreementStatus.TERMINATED) {
+            onComplete?.invoke(false, "Cannot renew a permanently terminated contract.")
+            return
+        }
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val cleanDuration = newDuration.trim().ifBlank { partner.hostingDuration }
+            val durationDays = parseHostingDurationDays(cleanDuration)
+            val resolvedFee = (monthlyFeeOverride ?: partner.monthlyHostingPayment).coerceAtLeast(0.0)
+            val renewCycles = partner.hostingCyclesBilled + (if (resolvedFee > 0.0) 1 else 0)
+            val renewFeeTotal = partner.totalHostingFeesAutoDeducted + resolvedFee
+
+            val updatedOrgs = _partnerOrganizations.value.map { org ->
+                if (org.id == partnerId) {
+                    org.copy(
+                        status = PartnerAgreementStatus.FINALIZED,
+                        isCatalogLocked = false,
+                        catalogLockedAt = 0L,
+                        hostingDuration = cleanDuration,
+                        monthlyHostingPayment = resolvedFee,
+                        hostingContractStartAt = now,
+                        hostingContractEndAt = now + durationDays * 86_400_000L,
+                        lastHostingBillingAt = if (resolvedFee > 0.0) now else org.lastHostingBillingAt,
+                        nextHostingBillingDueAt = now + THIRTY_DAYS_MS,
+                        hostingCyclesBilled = renewCycles,
+                        totalHostingFeesAutoDeducted = renewFeeTotal
+                    )
+                } else org
+            }
+            _partnerOrganizations.value = updatedOrgs
+            persistPartnerOrganizations(updatedOrgs)
+
+            val unlockRes = repository.setPartnerProductsCatalogLocked(partnerId, false)
+            val unlockedCount = unlockRes.getOrDefault(0)
+            val targetStoreAccount = _storeProfile.value.opayAccountNumber
+                .ifBlank { _storeProfile.value.moniepointAccountNumber }
+                .ifBlank { "24/7 SHOPPING Account" }
+            val partnerAcct = partner.opayAccountNumber.ifBlank { partner.moniepointAccountNumber }
+                .ifBlank { "Partner Folder Account" }
+
+            appendPartnerTransaction(
+                PartnerFolderTransaction(
+                    partnerId = partner.id,
+                    partnerName = partner.businessName,
+                    type = PartnerTransactionType.HOSTING_CONTRACT_RENEWED,
+                    category = partner.primaryCategory,
+                    quantity = unlockedCount,
+                    grossAmount = resolvedFee,
+                    commissionProfitAmount = resolvedFee,
+                    partnerNetAmount = 0.0,
+                    paymentMethod = "Contract Renewal & 30-Day Hosting Cycle #$renewCycles",
+                    paymentAccount = "$partnerAcct → $targetStoreAccount",
+                    alertSentToAdmin = true,
+                    alertSentToPartner = true,
+                    timestamp = now,
+                    note = "Renewed hosting ($cleanDuration) & unlocked $unlockedCount SKU(s)"
+                )
+            )
+            pushPartnerLedgerAsync(preferLocal = true)
+            val msg = "🔓 Contract renewed for ${partner.businessName} ($cleanDuration)! Catalog unlocked & $unlockedCount SKU(s) reactivated."
+            voiceManager.speakText("Hosting contract renewed and catalog unlocked for ${partner.businessName}.")
+            onComplete?.invoke(true, msg)
+        }
+    }
+
+    fun terminatePartnerContractAndDeleteAll(
+        partnerId: String,
+        reason: String = "Hosting contract terminated at end of period",
+        onComplete: ((Boolean, String) -> Unit)? = null
+    ) {
+        val partner = _partnerOrganizations.value.find { it.id == partnerId }
+        if (partner == null) {
+            onComplete?.invoke(false, "Partner organization not found.")
+            return
+        }
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val extraImages = _partnerSubmissions.value
+                .filter { it.partnerId == partnerId }
+                .map { it.imageUrl }
+                .filter { it.isNotBlank() }
+
+            val deleteRes = repository.deletePartnerProductsAndImages(partnerId, extraImages)
+            val deletedCount = deleteRes.getOrDefault(0)
+
+            _cartItems.value = _cartItems.value.filterNot { it.product.partnerId == partnerId }
+
+            val updatedSubs = _partnerSubmissions.value.map { sub ->
+                if (sub.partnerId == partnerId) {
+                    sub.copy(
+                        status = PartnerSubmissionStatus.REJECTED,
+                        imageUrl = "",
+                        publishedProductId = "",
+                        adminNote = "Deleted outright — Contract Terminated"
+                    )
+                } else sub
+            }
+            _partnerSubmissions.value = updatedSubs
+            persistPartnerSubmissions(updatedSubs)
+
+            val updatedOrgs = _partnerOrganizations.value.map { org ->
+                if (org.id == partnerId) {
+                    org.copy(
+                        status = PartnerAgreementStatus.TERMINATED,
+                        isCatalogLocked = true,
+                        catalogLockedAt = now
+                    )
+                } else org
+            }
+            _partnerOrganizations.value = updatedOrgs
+            persistPartnerOrganizations(updatedOrgs)
+
+            appendPartnerTransaction(
+                PartnerFolderTransaction(
+                    partnerId = partner.id,
+                    partnerName = partner.businessName,
+                    type = PartnerTransactionType.CONTRACT_TERMINATED_DELETED,
+                    category = partner.primaryCategory,
+                    quantity = deletedCount,
+                    alertSentToAdmin = true,
+                    alertSentToPartner = true,
+                    timestamp = now,
+                    note = "${reason.trim().ifBlank { "Contract Terminated" }} • Deleted $deletedCount product(s) & all images outright."
+                )
+            )
+            pushPartnerLedgerAsync(preferLocal = true)
+            val msg = "🗑️ Contract terminated for ${partner.businessName}. Deleted $deletedCount live product(s) & images outright."
+            voiceManager.speakText("Partnership contract terminated for ${partner.businessName}. All product images and records deleted.")
+            onComplete?.invoke(true, msg)
+        }
+    }
+
+    fun authenticatePartnerPortal(identifier: String): PartnerOrganization? {
+        val clean = identifier.trim()
+        if (clean.isBlank()) return null
+        val cleanDigits = clean.filter { it.isDigit() }
+        return _partnerOrganizations.value.firstOrNull { org ->
+            org.id.equals(clean, ignoreCase = true) ||
+                org.businessName.equals(clean, ignoreCase = true) ||
+                (cleanDigits.length >= 6 && org.ownerPhone.filter { it.isDigit() }.endsWith(cleanDigits.takeLast(10)))
+        }
+    }
+
+    fun processPartnerOfflineSaleCart(
+        partnerId: String,
+        quantitiesByProductId: Map<String, Int>,
+        note: String = "",
+        onComplete: (Boolean, String) -> Unit
+    ) {
+        val partner = _partnerOrganizations.value.find { it.id == partnerId }
+        if (partner == null) {
+            onComplete(false, "Partner organization not found.")
+            return
+        }
+        val cleanDeductions = quantitiesByProductId.filterValues { it > 0 }
+        if (cleanDeductions.isEmpty()) {
+            onComplete(false, "Add at least one sold product to the Offline Sale Cart first.")
+            return
+        }
+
+        viewModelScope.launch {
+            val partnerProds = allProducts.value.filter { it.partnerId == partnerId }
+            val matchedMap = mutableMapOf<String, Pair<Product, Int>>()
+            cleanDeductions.forEach { (pid, requestedQty) ->
+                val prod = partnerProds.find { it.id == pid }
+                if (prod != null && prod.stockQuantity > 0) {
+                    val safeQty = requestedQty.coerceIn(1, prod.stockQuantity)
+                    matchedMap[pid] = prod to safeQty
+                }
+            }
+            if (matchedMap.isEmpty()) {
+                onComplete(false, "Selected partner product(s) are out of stock or not found.")
+                return@launch
+            }
+
+            val qtyMap = matchedMap.mapValues { it.value.second }
+            val res = repository.deductPartnerProductsStock(qtyMap)
+            if (res.isFailure) {
+                onComplete(false, res.exceptionOrNull()?.message ?: "Failed updating online inventory.")
+                return@launch
+            }
+
+            val now = System.currentTimeMillis()
+            val totalRemoved = matchedMap.values.sumOf { it.second }
+            val totalRetailValue = matchedMap.values.sumOf { (p, q) -> p.basePrice * q }
+            val summaryNames = matchedMap.values.joinToString(", ") { (p, q) -> "${q}x ${p.title}" }
+            val avgComm = matchedMap.values.firstOrNull()?.first?.partnerCommissionPercent ?: partner.stipulatedCommissionPercent
+
+            // Sync remaining quantities back into partnerSubmissions mirror for clean reporting
+            val updatedSubs = _partnerSubmissions.value.map { sub ->
+                val matchedEntry = matchedMap[sub.publishedProductId]
+                if (matchedEntry != null) {
+                    val newStock = (matchedEntry.first.stockQuantity - matchedEntry.second).coerceAtLeast(0)
+                    sub.copy(quantity = newStock)
+                } else sub
+            }
+            _partnerSubmissions.value = updatedSubs
+            persistPartnerSubmissions(updatedSubs)
+
+            appendPartnerTransaction(
+                PartnerFolderTransaction(
+                    partnerId = partner.id,
+                    partnerName = partner.businessName,
+                    type = PartnerTransactionType.PARTNER_OFFLINE_SALE_REMOVAL,
+                    productId = matchedMap.keys.firstOrNull().orEmpty(),
+                    productName = summaryNames,
+                    category = partner.primaryCategory,
+                    quantity = totalRemoved,
+                    grossAmount = totalRetailValue,
+                    commissionPercent = avgComm,
+                    commissionProfitAmount = 0.0,
+                    partnerNetAmount = totalRetailValue,
+                    paymentMethod = "Partner Offline Sale (Self Add-to-Cart)",
+                    paymentAccount = "Stock Removed: -$totalRemoved units",
+                    alertSentToAdmin = true,
+                    alertSentToPartner = true,
+                    timestamp = now,
+                    note = note.trim().ifBlank { "Partner logged in and removed $totalRemoved offline-sold unit(s): $summaryNames" }
+                )
+            )
+            pushPartnerLedgerAsync(preferLocal = true)
+            voiceManager.speakText("${partner.businessName} logged an offline sale removing $totalRemoved units from online stock.")
+            onComplete(true, "✅ Offline sale recorded! Removed $totalRemoved unit(s) ($summaryNames) from live online catalog & cloud.")
+        }
+    }
+
+    fun collectUnreportedOfflineSalePenalty(
+        partnerId: String,
+        productId: String,
+        unreportedQty: Int,
+        reason: String = "",
+        onComplete: (Boolean, String) -> Unit
+    ) {
+        val partner = _partnerOrganizations.value.find { it.id == partnerId }
+        val product = allProducts.value.find { it.id == productId && it.partnerId == partnerId }
+        if (partner == null || product == null) {
+            onComplete(false, "Partner or product not found.")
+            return
+        }
+        val safeQty = unreportedQty.coerceAtLeast(1)
+        viewModelScope.launch {
+            val pct = product.partnerCommissionPercent.takeIf { it > 0.0 } ?: partner.stipulatedCommissionPercent
+            val grossVal = product.basePrice * safeQty
+            val accruedHostingFee = grossVal * (pct.coerceIn(0.5, 95.0) / 100.0)
+            val now = System.currentTimeMillis()
+
+            // Also remove any remaining unrecorded units from live stock if still present
+            if (product.stockQuantity > 0) {
+                repository.deductPartnerProductsStock(mapOf(product.id to safeQty.coerceAtMost(product.stockQuantity)))
+            }
+
+            val updatedOrgs = _partnerOrganizations.value.map { org ->
+                if (org.id == partnerId) {
+                    org.copy(
+                        totalAccruedOfflinePenalty = org.totalAccruedOfflinePenalty + accruedHostingFee,
+                        totalHostingFeesAutoDeducted = org.totalHostingFeesAutoDeducted + accruedHostingFee
+                    )
+                } else org
+            }
+            _partnerOrganizations.value = updatedOrgs
+            persistPartnerOrganizations(updatedOrgs)
+
+            val storeAcct = _storeProfile.value.opayAccountNumber
+                .ifBlank { _storeProfile.value.moniepointAccountNumber }
+                .ifBlank { "24/7 SHOPPING Account" }
+            val naira = java.text.NumberFormat.getCurrencyInstance(java.util.Locale("en", "NG")).apply {
+                maximumFractionDigits = 0
+            }
+
+            appendPartnerTransaction(
+                PartnerFolderTransaction(
+                    partnerId = partner.id,
+                    partnerName = partner.businessName,
+                    type = PartnerTransactionType.UNREPORTED_OFFLINE_SALE_PENALTY,
+                    productId = product.id,
+                    productName = "${safeQty}x ${product.title}",
+                    category = product.category,
+                    quantity = safeQty,
+                    grossAmount = grossVal,
+                    commissionPercent = pct,
+                    commissionProfitAmount = accruedHostingFee,
+                    partnerNetAmount = 0.0,
+                    paymentMethod = "Accrued Unit Hosting % Penalty Collection",
+                    paymentAccount = "Credited to 24/7 SHOPPING ($storeAcct)",
+                    alertSentToAdmin = true,
+                    alertSentToPartner = true,
+                    timestamp = now,
+                    note = reason.trim().ifBlank {
+                        "Unreported offline sale of $safeQty x ${product.title}: 24/7 SHOPPING exercised MOU right to collect ${String.format(java.util.Locale.US, "%.1f", pct)}% unit cost (${naira.format(accruedHostingFee)})."
+                    }
+                )
+            )
+            pushPartnerLedgerAsync(preferLocal = true)
+            onComplete(true, "⚖️ Collected accrued ${String.format(java.util.Locale.US, "%.1f", pct)}% fee (${naira.format(accruedHostingFee)}) for unreported offline sale of $safeQty x ${product.title}.")
         }
     }
 

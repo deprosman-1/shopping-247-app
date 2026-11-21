@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddShoppingCart
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material3.Card
@@ -84,7 +85,8 @@ fun Product3DCard(
     onAddToCart: (Product) -> Unit,
     modifier: Modifier = Modifier,
     isWishlisted: Boolean = false,
-    onToggleWishlist: () -> Unit = {}
+    onToggleWishlist: () -> Unit = {},
+    isCatalogLocked: Boolean = false
 ) {
     val coroutineScope = rememberCoroutineScope()
     var rotX by remember { mutableFloatStateOf(0f) }
@@ -220,7 +222,25 @@ fun Product3DCard(
                     }
                 }
 
-                // Stock or Expiry Status Badge (Red for Expired and Short-Dated <=3 months)
+                // Catalog Lock or Stock/Expiry Status Badge
+                if (isCatalogLocked) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFF334155),
+                        border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.85f)),
+                        modifier = Modifier
+                            .padding(10.dp)
+                            .align(Alignment.BottomEnd)
+                    ) {
+                        Text(
+                            text = "🔒 DISPLAY ONLY",
+                            color = AccentGold,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                        )
+                    }
+                }
                 if (isOutOfStock || isLowStock || isExpired || isShortDated) {
                     Surface(
                         shape = RoundedCornerShape(10.dp),
@@ -387,9 +407,10 @@ fun Product3DCard(
                         }
                     }
 
-                    // ADD TO CART ICON BUTTON
+                    // ADD TO CART ICON BUTTON (Disabled in Display Only mode)
                     FilledIconButton(
                         onClick = {
+                            if (isCatalogLocked) return@FilledIconButton
                             onAddToCart(product)
                             if (!isOutOfStock) {
                                 addedFeedback = true
@@ -399,21 +420,32 @@ fun Product3DCard(
                                 }
                             }
                         },
+                        enabled = !isCatalogLocked,
                         modifier = Modifier
                             .size(44.dp)
                             .testTag("add_to_cart_button_${product.id}"),
                         colors = IconButtonDefaults.filledIconButtonColors(
                             containerColor = when {
-                                isOutOfStock -> Color(0xFF6B7280).copy(alpha = 0.45f)
+                                isCatalogLocked || isOutOfStock -> Color(0xFF6B7280).copy(alpha = 0.45f)
                                 addedFeedback -> SuccessGreen
                                 else -> MaterialTheme.colorScheme.primary
                             },
-                            contentColor = Color.White
+                            contentColor = Color.White,
+                            disabledContainerColor = Color(0xFF475569).copy(alpha = 0.55f),
+                            disabledContentColor = Color.White.copy(alpha = 0.75f)
                         )
                     ) {
                         Icon(
-                            imageVector = if (addedFeedback) Icons.Default.Check else Icons.Default.AddShoppingCart,
-                            contentDescription = if (isOutOfStock) "Out of Stock" else "Add to Cart",
+                            imageVector = when {
+                                isCatalogLocked -> Icons.Default.Lock
+                                addedFeedback -> Icons.Default.Check
+                                else -> Icons.Default.AddShoppingCart
+                            },
+                            contentDescription = when {
+                                isCatalogLocked -> "Display Only"
+                                isOutOfStock -> "Out of Stock"
+                                else -> "Add to Cart"
+                            },
                             modifier = Modifier.size(20.dp)
                         )
                     }

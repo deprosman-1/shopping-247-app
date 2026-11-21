@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.LocalFireDepartment
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsNone
 import androidx.compose.material.icons.filled.Star
@@ -100,7 +101,8 @@ fun ProductStandardCard(
     promoDiscountPercent: Int = 0,
     onToggleWishlist: () -> Unit = {},
     isRestockWatched: Boolean = false,
-    onToggleRestockWatch: (() -> Unit)? = null
+    onToggleRestockWatch: (() -> Unit)? = null,
+    isCatalogLocked: Boolean = false
 ) {
     val coroutineScope = rememberCoroutineScope()
     var addedFeedback by remember(product.id) { mutableStateOf(false) }
@@ -210,8 +212,36 @@ fun ProductStandardCard(
                     }
                 }
 
-                // SPECIAL APPEARANCE ADMIN PROMO DISCOUNT BADGE "10%- SPECIAL"
-                if (effectiveDiscount > 0) {
+                // DISPLAY ONLY (HOSTING PERIOD ENDED / CATALOG LOCKED BY ADMIN) BADGE
+                if (isCatalogLocked) {
+                    Surface(
+                        shape = RoundedCornerShape(bottomEnd = 10.dp, topStart = 16.dp),
+                        color = Color(0xFF334155),
+                        border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.85f)),
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .testTag("card_display_only_badge_${product.id}")
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = "Display Only",
+                                tint = AccentGold,
+                                modifier = Modifier.size(11.dp)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = "DISPLAY ONLY",
+                                color = Color.White,
+                                fontSize = 8.5.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                    }
+                } else if (effectiveDiscount > 0) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopStart)
@@ -297,17 +327,25 @@ fun ProductStandardCard(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = if (addedFeedback) Icons.Default.Check else Icons.Default.AddShoppingCart,
-                                contentDescription = if (isOutOfStock) "Out of Stock" else "Add to Cart",
+                                imageVector = when {
+                                    isCatalogLocked -> Icons.Default.Lock
+                                    addedFeedback -> Icons.Default.Check
+                                    else -> Icons.Default.AddShoppingCart
+                                },
+                                contentDescription = when {
+                                    isCatalogLocked -> "Display Only"
+                                    isOutOfStock -> "Out of Stock"
+                                    else -> "Add to Cart"
+                                },
                                 tint = when {
-                                    isOutOfStock -> Color(0xFF9CA3AF).copy(alpha = 0.5f)
+                                    isCatalogLocked || isOutOfStock -> Color(0xFF9CA3AF).copy(alpha = 0.65f)
                                     addedFeedback -> SuccessGreen
                                     else -> MaterialTheme.colorScheme.primary
                                 },
                                 modifier = Modifier
                                     .size(18.dp)
                                     .testTag("card_add_to_cart_icon_${product.id}")
-                                    .clickable {
+                                    .clickable(enabled = !isCatalogLocked) {
                                         onAddToCart(product)
                                         if (!isOutOfStock) {
                                             addedFeedback = true
@@ -353,6 +391,7 @@ fun ProductStandardCard(
                         Surface(
                             shape = RoundedCornerShape(4.dp),
                             color = when {
+                                isCatalogLocked -> Color(0xFF475569).copy(alpha = 0.16f)
                                 isOutOfStock -> Color(0xFFDC2626).copy(alpha = 0.15f)
                                 isLowStock -> Color(0xFFEA580C).copy(alpha = 0.15f)
                                 else -> SuccessGreen.copy(alpha = 0.12f)
@@ -360,11 +399,13 @@ fun ProductStandardCard(
                         ) {
                             Text(
                                 text = when {
+                                    isCatalogLocked -> "Display Only (Locked)"
                                     isOutOfStock -> "Out of Stock (0 remaining)"
                                     isLowStock -> "Low Stock: Only ${product.stockQuantity} remaining"
                                     else -> "${product.stockQuantity} in stock"
                                 },
                                 color = when {
+                                    isCatalogLocked -> Color(0xFF94A3B8)
                                     isOutOfStock -> Color(0xFFDC2626)
                                     isLowStock -> Color(0xFFEA580C)
                                     else -> SuccessGreen
@@ -534,9 +575,10 @@ fun ProductStandardCard(
                             }
                         }
 
-                        // Add to Cart Button
+                        // Add to Cart Button (Disabled in Display Only mode)
                         FilledIconButton(
                             onClick = {
+                                if (isCatalogLocked) return@FilledIconButton
                                 onAddToCart(product)
                                 if (!isOutOfStock) {
                                     addedFeedback = true
@@ -546,19 +588,32 @@ fun ProductStandardCard(
                                     }
                                 }
                             },
-                            modifier = Modifier.size(32.dp),
+                            enabled = !isCatalogLocked,
+                            modifier = Modifier
+                                .size(32.dp)
+                                .testTag("card_add_button_${product.id}"),
                             colors = IconButtonDefaults.filledIconButtonColors(
                                 containerColor = when {
-                                    isOutOfStock -> Color(0xFF6B7280).copy(alpha = 0.45f)
+                                    isCatalogLocked || isOutOfStock -> Color(0xFF6B7280).copy(alpha = 0.45f)
                                     addedFeedback -> SuccessGreen
                                     else -> MaterialTheme.colorScheme.primary
                                 },
-                                contentColor = Color.White
+                                contentColor = Color.White,
+                                disabledContainerColor = Color(0xFF475569).copy(alpha = 0.5f),
+                                disabledContentColor = Color.White.copy(alpha = 0.75f)
                             )
                         ) {
                             Icon(
-                                imageVector = if (addedFeedback) Icons.Default.Check else Icons.Default.AddShoppingCart,
-                                contentDescription = if (isOutOfStock) "Out of Stock" else "Add to Cart",
+                                imageVector = when {
+                                    isCatalogLocked -> Icons.Default.Lock
+                                    addedFeedback -> Icons.Default.Check
+                                    else -> Icons.Default.AddShoppingCart
+                                },
+                                contentDescription = when {
+                                    isCatalogLocked -> "Display Only"
+                                    isOutOfStock -> "Out of Stock"
+                                    else -> "Add to Cart"
+                                },
                                 modifier = Modifier.size(16.dp)
                             )
                         }

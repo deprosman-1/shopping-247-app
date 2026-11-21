@@ -28,7 +28,8 @@ data class ProductEntity(
     val partnerName: String = "",
     val partnerCommissionPercent: Double = 0.0,
     val partnerBatchId: String = "",
-    val galleryUrlsJson: String = ""
+    val galleryUrlsJson: String = "",
+    val isCatalogLocked: Boolean = false
 )
 
 @Entity(tableName = "customers")

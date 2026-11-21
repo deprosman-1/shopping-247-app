@@ -3,10 +3,18 @@ package com.example.data.remote
 import android.util.Log
 import com.example.data.model.AppUpdateManifest
 import com.example.data.model.Customer
+import com.example.data.model.HostingPeriodUnit
 import com.example.data.model.Order
+import com.example.data.model.PartnerAgreementStatus
+import com.example.data.model.PartnerFolderTransaction
+import com.example.data.model.PartnerOrganization
+import com.example.data.model.PartnerProductSubmission
+import com.example.data.model.PartnerSubmissionStatus
+import com.example.data.model.PartnerTransactionType
 import com.example.data.model.PreOrderRequest
 import com.example.data.model.PreOrderStatus
 import com.example.data.model.Product
+import com.example.data.model.ProductColor
 import com.example.data.model.SupabaseConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -314,7 +322,11 @@ class SupabaseSyncService(
         }
     }
 
-    private fun productToJson(product: Product, includeExtendedCols: Boolean = true): JSONObject = JSONObject().apply {
+    private fun productToJson(
+        product: Product,
+        includeExtendedCols: Boolean = true,
+        excludedColumns: Set<String> = emptySet()
+    ): JSONObject = JSONObject().apply {
         put("id", product.id)
         put("title", product.title)
         put("category", product.category)
@@ -328,18 +340,22 @@ class SupabaseSyncService(
         put("description", product.description)
         put("sku", product.sku)
         if (includeExtendedCols) {
-            put("cost_price", product.costPrice)
-            put("discount_percent", product.discountPercent)
-            put("available_colors", product.availableColors.joinToString(";") { "${it.name}|${it.hex}" })
-            put("expiry_months_remaining", product.expiryMonthsRemaining)
+            if ("cost_price" !in excludedColumns) put("cost_price", product.costPrice)
+            if ("discount_percent" !in excludedColumns) put("discount_percent", product.discountPercent)
+            if ("available_colors" !in excludedColumns) put("available_colors", product.availableColors.joinToString(";") { "${it.name}|${it.hex}" })
+            if ("expiry_months_remaining" !in excludedColumns) put("expiry_months_remaining", product.expiryMonthsRemaining)
+            if ("is_catalog_locked" !in excludedColumns) put("is_catalog_locked", product.isCatalogLocked)
             if (product.partnerId.isNotBlank()) {
-                put("partner_id", product.partnerId)
-                put("partner_name", product.partnerName)
-                put("partner_commission_percent", product.partnerCommissionPercent)
-                put("partner_batch_id", product.partnerBatchId)
+                if ("partner_id" !in excludedColumns) put("partner_id", product.partnerId)
+                if ("partner_name" !in excludedColumns) put("partner_name", product.partnerName)
+                if ("partner_commission_percent" !in excludedColumns) put("partner_commission_percent", product.partnerCommissionPercent)
+                if ("partner_batch_id" !in excludedColumns) put("partner_batch_id", product.partnerBatchId)
             }
         }
     }
+
+    private fun extractMissingColumnPgrst204(respBody: String): String? =
+        Regex("Could not find the '([^']+)' column").find(respBody)?.groupValues?.getOrNull(1)
 
     private fun formatSyncHttpError(code: Int, respBody: String, fallbackMsg: String): String {
         return when {
@@ -373,11 +389,12 @@ class SupabaseSyncService(
             var syncedCount = 0
             val baseUrl = cleanUrl(config.url)
             var useExtended = true
+            val excludedColumns = mutableSetOf<String>()
             val chunks = products.chunked(50)
             for (chunk in chunks) {
-                fun postBatch(extended: Boolean): Pair<Int, String> {
+                fun postBatch(extended: Boolean, excluded: Set<String>): Pair<Int, String> {
                     val jsonArray = JSONArray()
-                    chunk.forEach { jsonArray.put(productToJson(it, extended)) }
+                    chunk.forEach { jsonArray.put(productToJson(it, extended, excluded)) }
                     val body = jsonArray.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
                     val url = "$baseUrl/rest/v1/products?on_conflict=id"
                     val request = Request.Builder()
@@ -392,13 +409,23 @@ class SupabaseSyncService(
                     }
                 }
 
-                var (code, respBody) = postBatch(useExtended)
-                if (code == 400 && useExtended && respBody.contains("PGRST204")) {
-                    Log.w("SupabaseSyncService", "Extended product column missing in Supabase, retrying core columns: $respBody")
-                    useExtended = false
-                    val retry = postBatch(false)
-                    code = retry.first
-                    respBody = retry.second
+                var (code, respBody) = postBatch(useExtended, excludedColumns)
+                var attempts = 0
+                while (code == 400 && useExtended && respBody.contains("PGRST204") && attempts < 6) {
+                    attempts++
+                    val missingCol = extractMissingColumnPgrst204(respBody)
+                    if (missingCol != null && excludedColumns.add(missingCol)) {
+                        Log.w("SupabaseSyncService", "Stripping missing Supabase product column '$missingCol' and retrying batch sync")
+                        val retry = postBatch(true, excludedColumns)
+                        code = retry.first
+                        respBody = retry.second
+                    } else {
+                        Log.w("SupabaseSyncService", "Extended product column missing in Supabase, retrying core columns: $respBody")
+                        useExtended = false
+                        val retry = postBatch(false, excludedColumns)
+                        code = retry.first
+                        respBody = retry.second
+                    }
                 }
 
                 if (code in 200..299) {
@@ -430,8 +457,8 @@ class SupabaseSyncService(
             if (baseUrl.isBlank()) return@withContext Result.failure(Exception("Supabase URL is empty"))
             val url = "$baseUrl/rest/v1/products?on_conflict=id"
 
-            fun postSingle(extended: Boolean): Pair<Int, String> {
-                val body = productToJson(product, extended).toString()
+            fun postSingle(extended: Boolean, excluded: Set<String> = emptySet()): Pair<Int, String> {
+                val body = productToJson(product, extended, excluded).toString()
                     .toRequestBody("application/json; charset=utf-8".toMediaType())
                 val request = Request.Builder()
                     .url(url)
@@ -445,12 +472,24 @@ class SupabaseSyncService(
                 }
             }
 
-            var (code, respBody) = postSingle(true)
-            if (code == 400 && respBody.contains("PGRST204")) {
-                Log.w("SupabaseSyncService", "Retrying single product sync with core columns: $respBody")
-                val retry = postSingle(false)
-                code = retry.first
-                respBody = retry.second
+            val excluded = mutableSetOf<String>()
+            var (code, respBody) = postSingle(true, excluded)
+            var attempts = 0
+            while (code == 400 && respBody.contains("PGRST204") && attempts < 6) {
+                attempts++
+                val missingCol = extractMissingColumnPgrst204(respBody)
+                if (missingCol != null && excluded.add(missingCol)) {
+                    Log.w("SupabaseSyncService", "Stripping missing product column '$missingCol' and retrying single sync")
+                    val retry = postSingle(true, excluded)
+                    code = retry.first
+                    respBody = retry.second
+                } else {
+                    Log.w("SupabaseSyncService", "Retrying single product sync with core columns: $respBody")
+                    val retry = postSingle(false, excluded)
+                    code = retry.first
+                    respBody = retry.second
+                    break
+                }
             }
 
             if (code in 200..299) {
@@ -485,6 +524,62 @@ class SupabaseSyncService(
                 } else {
                     Result.failure(Exception("Supabase Delete Product HTTP ${response.code}"))
                 }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deletePartnerProductsFromCloud(partnerId: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        if (isPlaceholderConfig() || partnerId.isBlank()) {
+            return@withContext Result.success(false)
+        }
+        try {
+            val baseUrl = cleanUrl(config.url)
+            val encodedPartnerId = java.net.URLEncoder.encode(partnerId, "UTF-8")
+            val url = "$baseUrl/rest/v1/products?partner_id=eq.$encodedPartnerId"
+            val request = Request.Builder()
+                .url(url)
+                .addSupabaseAuthHeaders()
+                .delete()
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful || response.code == 200 || response.code == 204) {
+                    Result.success(true)
+                } else {
+                    Result.failure(Exception("Supabase Delete Partner Products HTTP ${response.code}"))
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteStorageObjectByPublicUrl(publicUrl: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        if (isPlaceholderConfig() || !publicUrl.contains("/storage/v1/object/", ignoreCase = true)) {
+            return@withContext Result.success(false)
+        }
+        try {
+            val baseUrl = cleanUrl(config.url)
+            val markerPublic = "/storage/v1/object/public/"
+            val markerAuth = "/storage/v1/object/"
+            val relativePath = when {
+                publicUrl.contains(markerPublic) -> publicUrl.substringAfter(markerPublic)
+                publicUrl.contains(markerAuth) -> publicUrl.substringAfter(markerAuth)
+                else -> return@withContext Result.success(false)
+            }.substringBefore("?").trimStart('/')
+            if (relativePath.isBlank() || !relativePath.contains("/")) {
+                return@withContext Result.success(false)
+            }
+            val url = "$baseUrl/storage/v1/object/$relativePath"
+            val request = Request.Builder()
+                .url(url)
+                .addSupabaseAuthHeaders()
+                .delete()
+                .build()
+            client.newCall(request).execute().use { response ->
+                Result.success(response.isSuccessful || response.code == 200 || response.code == 204)
             }
         } catch (e: Exception) {
             Result.failure(e)
@@ -941,6 +1036,7 @@ class SupabaseSyncService(
             ALTER TABLE public.products ADD COLUMN IF NOT EXISTS partner_name TEXT DEFAULT '';
             ALTER TABLE public.products ADD COLUMN IF NOT EXISTS partner_commission_percent NUMERIC DEFAULT 0;
             ALTER TABLE public.products ADD COLUMN IF NOT EXISTS partner_batch_id TEXT DEFAULT '';
+            ALTER TABLE public.products ADD COLUMN IF NOT EXISTS is_catalog_locked BOOLEAN DEFAULT FALSE;
             ALTER TABLE public.products ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
 
             CREATE TABLE IF NOT EXISTS public.customers (
@@ -1042,6 +1138,9 @@ class SupabaseSyncService(
             DROP POLICY IF EXISTS "Public Update on shop-receipts" ON storage.objects;
             CREATE POLICY "Public Update on shop-receipts" ON storage.objects FOR UPDATE USING (bucket_id = 'shop-receipts');
 
+            DROP POLICY IF EXISTS "Public Delete on shop-receipts" ON storage.objects;
+            CREATE POLICY "Public Delete on shop-receipts" ON storage.objects FOR DELETE USING (bucket_id = 'shop-receipts');
+
             -- Product Media Bucket Policies
             DROP POLICY IF EXISTS "Public Read on product-media" ON storage.objects;
             CREATE POLICY "Public Read on product-media" ON storage.objects FOR SELECT USING (bucket_id = 'product-media');
@@ -1051,6 +1150,9 @@ class SupabaseSyncService(
 
             DROP POLICY IF EXISTS "Public Update on product-media" ON storage.objects;
             CREATE POLICY "Public Update on product-media" ON storage.objects FOR UPDATE USING (bucket_id = 'product-media');
+
+            DROP POLICY IF EXISTS "Public Delete on product-media" ON storage.objects;
+            CREATE POLICY "Public Delete on product-media" ON storage.objects FOR DELETE USING (bucket_id = 'product-media');
 
             -- Customer Avatars Bucket Policies
             DROP POLICY IF EXISTS "Public Read on customer-avatars" ON storage.objects;
@@ -1126,6 +1228,7 @@ class SupabaseSyncService(
                             val rawCommPct = if (obj.isNull("partner_commission_percent")) 0.0 else obj.optDouble("partner_commission_percent", 0.0)
                             val partnerCommissionPercent = if (rawCommPct.isNaN()) 0.0 else rawCommPct
                             val partnerBatchId = obj.optCleanString("partner_batch_id")
+                            val isCatalogLocked = if (obj.isNull("is_catalog_locked")) false else obj.optBoolean("is_catalog_locked", false)
 
                             val parsedBrands = availableBrandsStr.split(",")
                                 .map { it.trim() }
@@ -1169,7 +1272,8 @@ class SupabaseSyncService(
                                     partnerId = partnerId,
                                     partnerName = partnerName,
                                     partnerCommissionPercent = partnerCommissionPercent,
-                                    partnerBatchId = partnerBatchId
+                                    partnerBatchId = partnerBatchId,
+                                    isCatalogLocked = isCatalogLocked
                                 )
                             )
                         } catch (rowEx: Exception) {
@@ -1708,6 +1812,385 @@ class SupabaseSyncService(
             Result.success(merged)
         } catch (e: Exception) {
             Log.e("SupabaseSyncService", "syncPreOrdersWithCloud failed", e)
+            Result.failure(e)
+        }
+    }
+
+    data class PartnerCloudLedger(
+        val organizations: List<PartnerOrganization> = emptyList(),
+        val submissions: List<PartnerProductSubmission> = emptyList(),
+        val transactions: List<PartnerFolderTransaction> = emptyList()
+    )
+
+    suspend fun syncPartnerLedgerWithCloud(
+        localOrgs: List<PartnerOrganization>,
+        localSubs: List<PartnerProductSubmission>,
+        localTxns: List<PartnerFolderTransaction>,
+        preferLocal: Boolean = false
+    ): Result<PartnerCloudLedger> = withContext(Dispatchers.IO) {
+        val validationErr = validateCredentialsBeforeRequest()
+        if (validationErr != null) {
+            return@withContext Result.failure(Exception(validationErr))
+        }
+        try {
+            val baseUrl = cleanUrl(config.url)
+            val ts = System.currentTimeMillis()
+            val objectPath = "system/partners_ledger.json"
+            val remoteCandidates = listOf(
+                "$baseUrl/storage/v1/object/public/product-media/$objectPath?t=$ts" to false,
+                "$baseUrl/storage/v1/object/public/shop-receipts/$objectPath?t=$ts" to false,
+                "$baseUrl/storage/v1/object/product-media/$objectPath?t=$ts" to true,
+                "$baseUrl/storage/v1/object/shop-receipts/$objectPath?t=$ts" to true
+            )
+
+            var remoteJsonRaw: String? = null
+            var sawNotFoundOrEmpty = false
+            var lastNetworkError: Exception? = null
+
+            for ((url, useAuth) in remoteCandidates) {
+                try {
+                    val reqBuilder = Request.Builder().url(url).get()
+                    if (useAuth) reqBuilder.addSupabaseAuthHeaders()
+                    client.newCall(reqBuilder.build()).execute().use { resp ->
+                        val body = resp.body?.string()?.trim().orEmpty()
+                        if (resp.isSuccessful && body.startsWith("{")) {
+                            remoteJsonRaw = body
+                        } else if (resp.code == 400 || resp.code == 404) {
+                            sawNotFoundOrEmpty = true
+                        }
+                    }
+                    if (remoteJsonRaw != null) break
+                } catch (e: Exception) {
+                    lastNetworkError = e
+                }
+            }
+
+            if (remoteJsonRaw == null && !sawNotFoundOrEmpty && lastNetworkError != null) {
+                return@withContext Result.failure(lastNetworkError!!)
+            }
+
+            val remoteOrgs = mutableListOf<PartnerOrganization>()
+            val remoteSubs = mutableListOf<PartnerProductSubmission>()
+            val remoteTxns = mutableListOf<PartnerFolderTransaction>()
+
+            if (!remoteJsonRaw.isNullOrBlank()) {
+                try {
+                    val root = JSONObject(remoteJsonRaw)
+                    val orgArr = root.optJSONArray("organizations") ?: JSONArray()
+                    for (i in 0 until orgArr.length()) {
+                        val o = orgArr.optJSONObject(i) ?: continue
+                        val id = o.optString("id", "").trim()
+                        if (id.isBlank()) continue
+                        val status = PartnerAgreementStatus.entries.firstOrNull {
+                            it.name == o.optString("status", PartnerAgreementStatus.PENDING_FINALIZATION.name)
+                        } ?: PartnerAgreementStatus.PENDING_FINALIZATION
+                        val pUnit = HostingPeriodUnit.entries.firstOrNull {
+                            it.name == o.optString("periodUnit", HostingPeriodUnit.PER_MONTH.name)
+                        } ?: HostingPeriodUnit.PER_MONTH
+                        remoteOrgs.add(
+                            PartnerOrganization(
+                                id = id,
+                                businessName = o.optString("businessName", ""),
+                                ownerName = o.optString("ownerName", ""),
+                                ownerPhone = o.optString("ownerPhone", ""),
+                                businessAddress = o.optString("businessAddress", ""),
+                                primaryCategory = o.optString("primaryCategory", "Clothes"),
+                                opayAccountNumber = o.optString("opayAccountNumber", ""),
+                                opayAccountName = o.optString("opayAccountName", ""),
+                                moniepointAccountNumber = o.optString("moniepointAccountNumber", ""),
+                                moniepointAccountName = o.optString("moniepointAccountName", ""),
+                                agreementDate = o.optString("agreementDate", ""),
+                                hostingDuration = o.optString("hostingDuration", "6 Months"),
+                                agreedQuantityPerPeriod = o.optInt("agreedQuantityPerPeriod", 20),
+                                periodUnit = pUnit,
+                                monthlyHostingPayment = o.optDouble("monthlyHostingPayment", 15000.0),
+                                stipulatedCommissionPercent = o.optDouble("stipulatedCommissionPercent", 10.0),
+                                partnerSignatureName = o.optString("partnerSignatureName", ""),
+                                partnerSignatureStrokes = o.optString("partnerSignatureStrokes", ""),
+                                adminCounterSignatureName = o.optString("adminCounterSignatureName", ""),
+                                adminCounterSignatureStrokes = o.optString("adminCounterSignatureStrokes", ""),
+                                adminSignedAt = o.optLong("adminSignedAt", 0L),
+                                status = status,
+                                createdAt = o.optLong("createdAt", System.currentTimeMillis()),
+                                isCatalogLocked = o.optBoolean("isCatalogLocked", false),
+                                catalogLockedAt = o.optLong("catalogLockedAt", 0L),
+                                hostingContractStartAt = o.optLong("hostingContractStartAt", 0L),
+                                hostingContractEndAt = o.optLong("hostingContractEndAt", 0L),
+                                lastHostingBillingAt = o.optLong("lastHostingBillingAt", 0L),
+                                nextHostingBillingDueAt = o.optLong("nextHostingBillingDueAt", 0L),
+                                hostingCyclesBilled = o.optInt("hostingCyclesBilled", 0),
+                                totalHostingFeesAutoDeducted = o.optDouble("totalHostingFeesAutoDeducted", 0.0),
+                                totalAutoDeducted247Share = o.optDouble("totalAutoDeducted247Share", 0.0),
+                                totalAutoPartnerNetDeposited = o.optDouble("totalAutoPartnerNetDeposited", 0.0),
+                                totalAccruedOfflinePenalty = o.optDouble("totalAccruedOfflinePenalty", 0.0)
+                            )
+                        )
+                    }
+
+                    val subArr = root.optJSONArray("submissions") ?: JSONArray()
+                    for (i in 0 until subArr.length()) {
+                        val s = subArr.optJSONObject(i) ?: continue
+                        val id = s.optString("id", "").trim()
+                        if (id.isBlank()) continue
+                        val colorsRaw = s.optString("colorsStr", "")
+                        val colors = colorsRaw.split(";").mapNotNull { entry ->
+                            val parts = entry.split("|")
+                            if (parts.size >= 2) ProductColor(parts[0], parts[1]) else null
+                        }.ifEmpty { listOf(ProductColor("Classic", "#111827")) }
+                        val subStatus = PartnerSubmissionStatus.entries.firstOrNull {
+                            it.name == s.optString("status", PartnerSubmissionStatus.PENDING_ADMIN_VERIFICATION.name)
+                        } ?: PartnerSubmissionStatus.PENDING_ADMIN_VERIFICATION
+                        remoteSubs.add(
+                            PartnerProductSubmission(
+                                id = id,
+                                partnerId = s.optString("partnerId", ""),
+                                partnerName = s.optString("partnerName", ""),
+                                category = s.optString("category", "Clothes"),
+                                productName = s.optString("productName", ""),
+                                brand = s.optString("brand", ""),
+                                quantity = s.optInt("quantity", 1),
+                                sizesCsv = s.optString("sizesCsv", "Standard"),
+                                colors = colors,
+                                sellingPrice = s.optDouble("sellingPrice", 0.0),
+                                promoDiscountPercent = s.optInt("promoDiscountPercent", 0),
+                                commissionPercent = s.optDouble("commissionPercent", 10.0),
+                                imageUrl = s.optString("imageUrl", ""),
+                                description = s.optString("description", ""),
+                                batchNumber = s.optString("batchNumber", ""),
+                                status = subStatus,
+                                publishedProductId = s.optString("publishedProductId", ""),
+                                adminNote = s.optString("adminNote", ""),
+                                submittedAt = s.optLong("submittedAt", System.currentTimeMillis()),
+                                verifiedAt = s.optLong("verifiedAt", 0L),
+                                uploadedToCloudAt = s.optLong("uploadedToCloudAt", 0L)
+                            )
+                        )
+                    }
+
+                    val txnArr = root.optJSONArray("transactions") ?: JSONArray()
+                    for (i in 0 until txnArr.length()) {
+                        val t = txnArr.optJSONObject(i) ?: continue
+                        val id = t.optString("id", "").trim()
+                        if (id.isBlank()) continue
+                        val txnType = PartnerTransactionType.entries.firstOrNull {
+                            it.name == t.optString("type", PartnerTransactionType.CUSTOMER_ORDER_PAYMENT_ALERT.name)
+                        } ?: PartnerTransactionType.CUSTOMER_ORDER_PAYMENT_ALERT
+                        remoteTxns.add(
+                            PartnerFolderTransaction(
+                                id = id,
+                                partnerId = t.optString("partnerId", ""),
+                                partnerName = t.optString("partnerName", ""),
+                                type = txnType,
+                                productId = t.optString("productId", ""),
+                                productName = t.optString("productName", ""),
+                                category = t.optString("category", ""),
+                                batchNumber = t.optString("batchNumber", ""),
+                                quantity = t.optInt("quantity", 0),
+                                grossAmount = t.optDouble("grossAmount", 0.0),
+                                commissionPercent = t.optDouble("commissionPercent", 0.0),
+                                commissionProfitAmount = t.optDouble("commissionProfitAmount", 0.0),
+                                partnerNetAmount = t.optDouble("partnerNetAmount", 0.0),
+                                orderId = t.optString("orderId", ""),
+                                customerName = t.optString("customerName", ""),
+                                customerPhone = t.optString("customerPhone", ""),
+                                paymentMethod = t.optString("paymentMethod", ""),
+                                paymentAccount = t.optString("paymentAccount", ""),
+                                paymentReference = t.optString("paymentReference", ""),
+                                receiptImageUrl = t.optString("receiptImageUrl", ""),
+                                alertSentToAdmin = t.optBoolean("alertSentToAdmin", false),
+                                alertSentToPartner = t.optBoolean("alertSentToPartner", false),
+                                timestamp = t.optLong("timestamp", System.currentTimeMillis()),
+                                note = t.optString("note", "")
+                            )
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.w("SupabaseSyncService", "Failed parsing remote partners_ledger.json", e)
+                }
+            }
+
+            // Merge organizations
+            val mergedOrgsMap = linkedMapOf<String, PartnerOrganization>()
+            remoteOrgs.forEach { mergedOrgsMap[it.id] = it }
+            localOrgs.forEach { local ->
+                val remote = mergedOrgsMap[local.id]
+                if (remote == null || preferLocal) {
+                    mergedOrgsMap[local.id] = local
+                } else {
+                    val primary = if (local.hostingCyclesBilled > remote.hostingCyclesBilled ||
+                        local.totalAutoDeducted247Share > remote.totalAutoDeducted247Share ||
+                        local.adminSignedAt > remote.adminSignedAt ||
+                        local.status == PartnerAgreementStatus.TERMINATED
+                    ) local else remote
+                    val secondary = if (primary === local) remote else local
+                    mergedOrgsMap[local.id] = primary.copy(
+                        adminCounterSignatureName = primary.adminCounterSignatureName.ifBlank { secondary.adminCounterSignatureName },
+                        adminCounterSignatureStrokes = primary.adminCounterSignatureStrokes.ifBlank { secondary.adminCounterSignatureStrokes },
+                        adminSignedAt = maxOf(primary.adminSignedAt, secondary.adminSignedAt),
+                        hostingCyclesBilled = maxOf(primary.hostingCyclesBilled, secondary.hostingCyclesBilled),
+                        totalHostingFeesAutoDeducted = maxOf(primary.totalHostingFeesAutoDeducted, secondary.totalHostingFeesAutoDeducted),
+                        totalAutoDeducted247Share = maxOf(primary.totalAutoDeducted247Share, secondary.totalAutoDeducted247Share),
+                        totalAutoPartnerNetDeposited = maxOf(primary.totalAutoPartnerNetDeposited, secondary.totalAutoPartnerNetDeposited),
+                        totalAccruedOfflinePenalty = maxOf(primary.totalAccruedOfflinePenalty, secondary.totalAccruedOfflinePenalty)
+                    )
+                }
+            }
+            val mergedOrgs = mergedOrgsMap.values.sortedByDescending { it.createdAt }
+
+            // Merge submissions
+            val mergedSubsMap = linkedMapOf<String, PartnerProductSubmission>()
+            remoteSubs.forEach { mergedSubsMap[it.id] = it }
+            localSubs.forEach { local ->
+                val remote = mergedSubsMap[local.id]
+                if (remote == null || preferLocal) {
+                    mergedSubsMap[local.id] = local
+                } else {
+                    mergedSubsMap[local.id] = if (local.status.ordinal >= remote.status.ordinal) {
+                        local.copy(
+                            imageUrl = local.imageUrl.ifBlank { remote.imageUrl },
+                            publishedProductId = local.publishedProductId.ifBlank { remote.publishedProductId }
+                        )
+                    } else remote
+                }
+            }
+            val mergedSubs = mergedSubsMap.values.sortedByDescending { it.submittedAt }
+
+            // Merge transactions
+            val mergedTxnsMap = linkedMapOf<String, PartnerFolderTransaction>()
+            remoteTxns.forEach { mergedTxnsMap[it.id] = it }
+            localTxns.forEach { mergedTxnsMap.putIfAbsent(it.id, it) }
+            val mergedTxns = mergedTxnsMap.values.sortedByDescending { it.timestamp }.take(400)
+
+            val shouldUpload = preferLocal ||
+                remoteJsonRaw == null ||
+                mergedOrgs.size != remoteOrgs.size ||
+                mergedSubs.size != remoteSubs.size ||
+                mergedTxns.size != remoteTxns.size ||
+                mergedOrgs != remoteOrgs
+
+            if (shouldUpload) {
+                val rootOut = JSONObject().apply {
+                    put("organizations", JSONArray().apply {
+                        mergedOrgs.forEach { o ->
+                            put(JSONObject().apply {
+                                put("id", o.id)
+                                put("businessName", o.businessName)
+                                put("ownerName", o.ownerName)
+                                put("ownerPhone", o.ownerPhone)
+                                put("businessAddress", o.businessAddress)
+                                put("primaryCategory", o.primaryCategory)
+                                put("opayAccountNumber", o.opayAccountNumber)
+                                put("opayAccountName", o.opayAccountName)
+                                put("moniepointAccountNumber", o.moniepointAccountNumber)
+                                put("moniepointAccountName", o.moniepointAccountName)
+                                put("agreementDate", o.agreementDate)
+                                put("hostingDuration", o.hostingDuration)
+                                put("agreedQuantityPerPeriod", o.agreedQuantityPerPeriod)
+                                put("periodUnit", o.periodUnit.name)
+                                put("monthlyHostingPayment", o.monthlyHostingPayment)
+                                put("stipulatedCommissionPercent", o.stipulatedCommissionPercent)
+                                put("partnerSignatureName", o.partnerSignatureName)
+                                put("partnerSignatureStrokes", o.partnerSignatureStrokes)
+                                put("adminCounterSignatureName", o.adminCounterSignatureName)
+                                put("adminCounterSignatureStrokes", o.adminCounterSignatureStrokes)
+                                put("adminSignedAt", o.adminSignedAt)
+                                put("status", o.status.name)
+                                put("createdAt", o.createdAt)
+                                put("isCatalogLocked", o.isCatalogLocked)
+                                put("catalogLockedAt", o.catalogLockedAt)
+                                put("hostingContractStartAt", o.hostingContractStartAt)
+                                put("hostingContractEndAt", o.hostingContractEndAt)
+                                put("lastHostingBillingAt", o.lastHostingBillingAt)
+                                put("nextHostingBillingDueAt", o.nextHostingBillingDueAt)
+                                put("hostingCyclesBilled", o.hostingCyclesBilled)
+                                put("totalHostingFeesAutoDeducted", o.totalHostingFeesAutoDeducted)
+                                put("totalAutoDeducted247Share", o.totalAutoDeducted247Share)
+                                put("totalAutoPartnerNetDeposited", o.totalAutoPartnerNetDeposited)
+                                put("totalAccruedOfflinePenalty", o.totalAccruedOfflinePenalty)
+                            })
+                        }
+                    })
+                    put("submissions", JSONArray().apply {
+                        mergedSubs.forEach { s ->
+                            put(JSONObject().apply {
+                                put("id", s.id)
+                                put("partnerId", s.partnerId)
+                                put("partnerName", s.partnerName)
+                                put("category", s.category)
+                                put("productName", s.productName)
+                                put("brand", s.brand)
+                                put("quantity", s.quantity)
+                                put("sizesCsv", s.sizesCsv)
+                                put("colorsStr", s.colors.joinToString(";") { "${it.name}|${it.hex}" })
+                                put("sellingPrice", s.sellingPrice)
+                                put("promoDiscountPercent", s.promoDiscountPercent)
+                                put("commissionPercent", s.commissionPercent)
+                                put("imageUrl", s.imageUrl)
+                                put("description", s.description)
+                                put("batchNumber", s.batchNumber)
+                                put("status", s.status.name)
+                                put("publishedProductId", s.publishedProductId)
+                                put("adminNote", s.adminNote)
+                                put("submittedAt", s.submittedAt)
+                                put("verifiedAt", s.verifiedAt)
+                                put("uploadedToCloudAt", s.uploadedToCloudAt)
+                            })
+                        }
+                    })
+                    put("transactions", JSONArray().apply {
+                        mergedTxns.forEach { t ->
+                            put(JSONObject().apply {
+                                put("id", t.id)
+                                put("partnerId", t.partnerId)
+                                put("partnerName", t.partnerName)
+                                put("type", t.type.name)
+                                put("productId", t.productId)
+                                put("productName", t.productName)
+                                put("category", t.category)
+                                put("batchNumber", t.batchNumber)
+                                put("quantity", t.quantity)
+                                put("grossAmount", t.grossAmount)
+                                put("commissionPercent", t.commissionPercent)
+                                put("commissionProfitAmount", t.commissionProfitAmount)
+                                put("partnerNetAmount", t.partnerNetAmount)
+                                put("orderId", t.orderId)
+                                put("customerName", t.customerName)
+                                put("customerPhone", t.customerPhone)
+                                put("paymentMethod", t.paymentMethod)
+                                put("paymentAccount", t.paymentAccount)
+                                put("paymentReference", t.paymentReference)
+                                put("receiptImageUrl", t.receiptImageUrl)
+                                put("alertSentToAdmin", t.alertSentToAdmin)
+                                put("alertSentToPartner", t.alertSentToPartner)
+                                put("timestamp", t.timestamp)
+                                put("note", t.note)
+                            })
+                        }
+                    })
+                }
+                val bytes = rootOut.toString().toByteArray(Charsets.UTF_8)
+                val mediaType = "application/json".toMediaType()
+                suspend fun uploadToBucket(bucketId: String): Boolean {
+                    val url = "$baseUrl/storage/v1/object/$bucketId/$objectPath"
+                    val request = Request.Builder()
+                        .url(url)
+                        .addSupabaseAuthHeaders()
+                        .header("Content-Type", "application/json")
+                        .header("x-upsert", "true")
+                        .post(bytes.toRequestBody(mediaType))
+                        .build()
+                    return client.newCall(request).execute().use { resp ->
+                        resp.isSuccessful || resp.code in 200..201
+                    }
+                }
+                if (!uploadToBucket("product-media")) {
+                    uploadToBucket("shop-receipts")
+                }
+            }
+
+            Result.success(PartnerCloudLedger(mergedOrgs, mergedSubs, mergedTxns))
+        } catch (e: Exception) {
+            Log.e("SupabaseSyncService", "syncPartnerLedgerWithCloud failed", e)
             Result.failure(e)
         }
     }

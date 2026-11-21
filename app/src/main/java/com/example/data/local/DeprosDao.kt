@@ -32,6 +32,12 @@ interface DeprosDao {
     @Query("DELETE FROM products WHERE id = :id")
     suspend fun deleteProduct(id: String)
 
+    @Query("SELECT * FROM products WHERE partnerId = :partnerId")
+    suspend fun getProductsByPartnerId(partnerId: String): List<ProductEntity>
+
+    @Query("DELETE FROM products WHERE partnerId = :partnerId")
+    suspend fun deleteProductsByPartner(partnerId: String)
+
     // Orders
     @Query("SELECT * FROM orders ORDER BY createdAt DESC")
     fun getAllOrders(): Flow<List<OrderEntity>>

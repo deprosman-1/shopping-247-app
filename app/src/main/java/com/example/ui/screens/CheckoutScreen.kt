@@ -2398,20 +2398,75 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold
         )
-        if (partnerFolder != null) {
+        val partnerCartItems = remember(cartItems) { cartItems.filter { it.product.partnerId.isNotBlank() } }
+        val partnerSplitBreakdown = remember(partnerCartItems, subtotal, effectivePayableTotal, appliedBargainPrice, deliveryFee, couponDiscountAmount, loyaltyDiscountAmount) {
+            if (partnerCartItems.isEmpty()) null
+            else {
+                val effMerch = appliedBargainPrice?.let { (it - deliveryFee).coerceAtLeast(0.0) }
+                    ?: (subtotal - couponDiscountAmount - loyaltyDiscountAmount).coerceAtLeast(0.0)
+                val factor = if (subtotal > 0.0) (effMerch / subtotal).coerceIn(0.0, 1.0) else 1.0
+                var gross = 0.0
+                var share247 = 0.0
+                var partnerNet = 0.0
+                partnerCartItems.forEach { item ->
+                    val itemGross = (item.unitPrice * item.quantity) * factor
+                    val pct = item.product.partnerCommissionPercent.coerceIn(0.0, 95.0)
+                    val cut = itemGross * (pct / 100.0)
+                    gross += itemGross
+                    share247 += cut
+                    partnerNet += (itemGross - cut).coerceAtLeast(0.0)
+                }
+                Triple(gross, share247, partnerNet)
+            }
+        }
+        if (partnerFolder != null || partnerSplitBreakdown != null) {
+            val hostStoreAcct = storeProfile.opayAccountNumber.ifBlank { storeProfile.moniepointAccountNumber }.ifBlank { storeProfile.storeName }
+            val partnerDestAcct = partnerFolder?.let {
+                it.opayAccountNumber.ifBlank { it.moniepointAccountNumber }.ifBlank { it.businessName }
+            } ?: (partnerCartItems.firstOrNull()?.product?.partnerName ?: "Partner Account")
             Surface(
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(12.dp),
                 color = AccentGold.copy(alpha = 0.14f),
-                border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.5f)),
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                border = BorderStroke(1.2.dp, AccentGold.copy(alpha = 0.6f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp)
+                    .testTag("checkout_partner_mou_split_card")
             ) {
-                Text(
-                    text = "Partner Folder Settlement: ${partnerFolder.businessName} (${partnerFolder.primaryCategory}) — Automated payment alerts notify both ${storeProfile.storeName} & ${partnerFolder.businessName}.",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = AccentGold,
-                    modifier = Modifier.padding(10.dp)
-                )
+                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(
+                        text = "AUTOMATED MOU SPLIT SETTLEMENT (${partnerFolder?.businessName ?: partnerCartItems.firstOrNull()?.product?.partnerName ?: "Partner"})",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Black,
+                        color = AccentGold
+                    )
+                    if (partnerSplitBreakdown != null) {
+                        val (pGross, pShare247, pNet) = partnerSplitBreakdown
+                        Text(
+                            text = "Partner Items Gross: ${nairaFormat.format(pGross)}",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "• Auto-Deducted to ${storeProfile.storeName} Account ($hostStoreAcct): ${nairaFormat.format(pShare247)}",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = SuccessGreen
+                        )
+                        Text(
+                            text = "• Remaining Balance to Partner Account ($partnerDestAcct): ${nairaFormat.format(pNet)}",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = CyberCyan
+                        )
+                    }
+                    Text(
+                        text = "Automated payment alerts notify both ${storeProfile.storeName} & the Partner upon payment.",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
         Text(

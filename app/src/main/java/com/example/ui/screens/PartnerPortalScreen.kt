@@ -33,11 +33,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FolderShared
@@ -45,11 +47,15 @@ import androidx.compose.material.icons.filled.Handshake
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.OpenWith
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -75,6 +81,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -98,6 +105,7 @@ import com.example.data.model.HostingPeriodUnit
 import com.example.data.model.PartnerAgreementStatus
 import com.example.data.model.PartnerOrganization
 import com.example.data.model.PartnerSubmissionStatus
+import com.example.data.model.PartnerTransactionType
 import com.example.data.model.ProductCategory
 import com.example.data.model.ProductColor
 import com.example.ui.components.DualAxisScrollContainer
@@ -126,11 +134,14 @@ fun PartnerPortalScreen(
     val context = LocalContext.current
     val partners by viewModel.partnerOrganizations.collectAsState()
     val submissions by viewModel.partnerSubmissions.collectAsState()
+    val allProducts by viewModel.allProducts.collectAsState()
+    val transactions by viewModel.partnerTransactions.collectAsState()
     val storeProfile by viewModel.storeProfile.collectAsState()
     val isWideDualAxisMode by viewModel.isWideDualAxisMode.collectAsState()
 
-    var selectedTab by rememberSaveable { mutableIntStateOf(0) } // 0 = MOU Form, 1 = Upload Products to Admin Control Room
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) } // 0 = MOU Form, 1 = Upload Products, 2 = Partner Offline Sale Login
     var selectedPartnerId by rememberSaveable { mutableStateOf("") }
+    var loggedInPartnerId by rememberSaveable { mutableStateOf("") }
 
     val activePartner = remember(partners, selectedPartnerId) {
         partners.find { it.id == selectedPartnerId } ?: partners.firstOrNull()
@@ -232,16 +243,23 @@ fun PartnerPortalScreen(
                     Tab(
                         selected = selectedTab == 0,
                         onClick = { selectedTab = 0 },
-                        text = { Text("1. MOU & Partnership Form", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
-                        icon = { Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        text = { Text("1. MOU Form", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1) },
+                        icon = { Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(17.dp)) },
                         modifier = Modifier.testTag("partner_tab_mou")
                     )
                     Tab(
                         selected = selectedTab == 1,
                         onClick = { selectedTab = 1 },
-                        text = { Text("2. Upload to Admin Room", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
-                        icon = { Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        text = { Text("2. Upload", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1) },
+                        icon = { Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(17.dp)) },
                         modifier = Modifier.testTag("partner_tab_upload")
+                    )
+                    Tab(
+                        selected = selectedTab == 2,
+                        onClick = { selectedTab = 2 },
+                        text = { Text("3. Offline Sale", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1) },
+                        icon = { Icon(Icons.Default.ShoppingCart, contentDescription = null, modifier = Modifier.size(17.dp)) },
+                        modifier = Modifier.testTag("partner_tab_offline_sale")
                     )
                 }
 
@@ -737,9 +755,10 @@ fun PartnerPortalScreen(
                                             THIS MEMORANDUM OF UNDERSTANDING is entered on $agreementDate between ${storeProfile.storeName} ("Host Platform") and ${businessName.ifBlank { "[Partner Business]" }} ("Partner").
                                             
                                             1. Category & Supply: Partner supplies authentic '$primaryCategory' items at ${agreedQtyPerPeriod.ifBlank { "20" }} units ${periodUnit.label} for a hosting duration of $hostingDuration.
-                                            2. Commission & Hosting Fee: ${storeProfile.storeName} earns $commVal% stipulated commission per unit sold (editable per product), plus Monthly Hosting Payment of ${nairaFormat.format(feeAmt)}.
-                                            3. Staging & Verification: Once finalized by both signatories, Partner uploads products & images strictly to 24/7 SHOPPING Admin Control Room (not Supabase Cloud). Admin verifies & batch-uploads approved products to Supabase Cloud under Partner's dedicated Folder.
-                                            4. Automated Alerts & Reporting: Customer payments trigger automated alerts to both ${storeProfile.storeName} & Partner, with Daily / Weekly / Monthly sales & stock balance reports.
+                                            2. Automated Per-Product MOU % Split: When a customer pays for a Partner product, $commVal% is automatically deducted to ${storeProfile.storeName}'s account and the remaining balance is deposited to the Partner's account.
+                                            3. Automated 30-Day Hosting Deduction: Monthly Hosting Payment of ${nairaFormat.format(feeAmt)} is automatically deducted every 30-day cycle from the Partner's account to ${storeProfile.storeName}'s account.
+                                            4. End-of-Period Catalog Lock, Renewal & Termination: At the end of each hosting period, Admin clicks Catalog Lock to pause customer Add-to-Cart while keeping products displayed. On renewal, Admin unlocks the Catalog Lock. On contract termination, Admin permanently deletes all Partner product images and information.
+                                            5. Offline Sale Add-to-Cart Rule & Accrued Fee Right: Whenever a Partner sells any hosted product offline, Partner must log into this app (Tab 3: Offline Sale) and Add-to-Cart the sold product to remove the exact quantity sold. If Partner fails to do so, ${storeProfile.storeName} reserves the right to collect the accrued hosting unit cost percentage ($commVal%) from that product.
                                         """.trimIndent(),
                                         fontSize = 11.sp,
                                         lineHeight = 16.sp,
@@ -836,7 +855,7 @@ fun PartnerPortalScreen(
 
                         Spacer(modifier = Modifier.height(24.dp))
                     }
-                } else {
+                } else if (selectedTab == 1) {
                     // =============================================================
                     // TAB 1: UPLOAD PRODUCTS & IMAGE TO ADMIN CONTROL ROOM STAGING
                     // (Gated strictly until Agreement is FINALIZED; NEVER pushes directly to Supabase Cloud)
@@ -916,30 +935,62 @@ fun PartnerPortalScreen(
                             }
 
                             val partner = activePartner!!
+                            val isTerminated = partner.status == PartnerAgreementStatus.TERMINATED
                             val isFinalized = partner.status == PartnerAgreementStatus.FINALIZED
 
                             // Agreement Status Gate Card
                             Card(
                                 shape = RoundedCornerShape(16.dp),
                                 colors = CardDefaults.cardColors(
-                                    containerColor = if (isFinalized) SuccessGreen.copy(alpha = 0.12f) else AccentGold.copy(alpha = 0.14f)
+                                    containerColor = when {
+                                        isTerminated -> Color(0xFFEF4444).copy(alpha = 0.14f)
+                                        partner.isCatalogLocked -> Color(0xFF334155).copy(alpha = 0.25f)
+                                        isFinalized -> SuccessGreen.copy(alpha = 0.12f)
+                                        else -> AccentGold.copy(alpha = 0.14f)
+                                    }
                                 ),
-                                border = BorderStroke(1.5.dp, if (isFinalized) SuccessGreen else AccentGold),
+                                border = BorderStroke(
+                                    1.5.dp,
+                                    when {
+                                        isTerminated -> Color(0xFFEF4444)
+                                        partner.isCatalogLocked -> AccentGold
+                                        isFinalized -> SuccessGreen
+                                        else -> AccentGold
+                                    }
+                                ),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Icon(
-                                            imageVector = if (isFinalized) Icons.Default.Verified else Icons.Default.Lock,
+                                            imageVector = when {
+                                                isTerminated -> Icons.Default.DeleteForever
+                                                isFinalized -> Icons.Default.Verified
+                                                else -> Icons.Default.Lock
+                                            },
                                             contentDescription = null,
-                                            tint = if (isFinalized) SuccessGreen else AccentGold
+                                            tint = when {
+                                                isTerminated -> Color(0xFFEF4444)
+                                                isFinalized -> SuccessGreen
+                                                else -> AccentGold
+                                            }
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text(
-                                            text = if (isFinalized) "MOU FINALIZED — ADMIN CONTROL ROOM UPLOAD ACTIVE" else "LOCKED: AWAITING 24/7 SHOPPING COUNTER-SIGNATURE",
+                                            text = when {
+                                                isTerminated -> "CONTRACT TERMINATED — PRODUCT IMAGES & RECORDS DELETED"
+                                                partner.isCatalogLocked -> "CATALOG LOCKED BY ADMIN — DISPLAY ONLY UNTIL RENEWAL"
+                                                isFinalized -> "MOU FINALIZED — ADMIN CONTROL ROOM UPLOAD ACTIVE"
+                                                else -> "LOCKED: AWAITING 24/7 SHOPPING COUNTER-SIGNATURE"
+                                            },
                                             fontWeight = FontWeight.Black,
                                             fontSize = 12.sp,
-                                            color = if (isFinalized) SuccessGreen else AccentGold
+                                            color = when {
+                                                isTerminated -> Color(0xFFEF4444)
+                                                partner.isCatalogLocked -> AccentGold
+                                                isFinalized -> SuccessGreen
+                                                else -> AccentGold
+                                            }
                                         )
                                     }
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -960,7 +1011,7 @@ fun PartnerPortalScreen(
                                             Text("Share MOU PDF", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                         }
                                         Text(
-                                            text = "Stipulated Fee: ${partner.stipulatedCommissionPercent}% • Quota: ${partner.agreedQuantityPerPeriod} ${partner.periodUnit.label}",
+                                            text = "Stipulated Fee: ${partner.stipulatedCommissionPercent}% • 30d Fee: ${nairaFormat.format(partner.monthlyHostingPayment)}",
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.SemiBold,
                                             modifier = Modifier.align(Alignment.CenterVertically)
@@ -969,7 +1020,7 @@ fun PartnerPortalScreen(
                                 }
                             }
 
-                            if (isFinalized) {
+                            if (isFinalized && !partner.isCatalogLocked && !isTerminated) {
                                 // Product Upload Form -> Admin Staging Only
                                 Card(
                                     shape = RoundedCornerShape(16.dp),
@@ -1228,6 +1279,364 @@ fun PartnerPortalScreen(
                                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                                     )
                                                 }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(24.dp))
+                    }
+                } else {
+                    // =============================================================
+                    // TAB 2: PARTNER PORTAL LOGIN & OFFLINE-SALE ADD-TO-CART STOCK REMOVAL
+                    // =============================================================
+                    var loginIdentifier by rememberSaveable { mutableStateOf("") }
+                    var offlineSaleNote by rememberSaveable { mutableStateOf("") }
+                    val offlineCart = remember { mutableStateMapOf<String, Int>() }
+                    val loggedPartner = remember(partners, loggedInPartnerId) {
+                        partners.find { it.id == loggedInPartnerId }
+                    }
+                    val dateTimeFmt = remember { SimpleDateFormat("dd MMM yyyy • hh:mm a", Locale.getDefault()) }
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Card(
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                            border = BorderStroke(1.2.dp, CyberCyan.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.LockOpen, contentDescription = null, tint = AccentGold, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Partner Login — Offline Sale Stock Removal",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Black,
+                                        color = AccentGold
+                                    )
+                                }
+                                Text(
+                                    text = "MOU Rule: Whenever a hosted product is sold offline, Partner must log in and Add-to-Cart the sold item(s) to remove the exact sold quantity from online stock. Unreported offline sales accrue the MOU hosting unit cost %.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                if (loggedPartner == null) {
+                                    OutlinedTextField(
+                                        value = loginIdentifier,
+                                        onValueChange = { loginIdentifier = it },
+                                        label = { Text("Enter Partner ID, Business Name, or Owner Phone") },
+                                        placeholder = { Text("e.g. PTR-... or 080...") },
+                                        singleLine = true,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("partner_offline_login_input")
+                                    )
+                                    if (partners.isNotEmpty()) {
+                                        Row(
+                                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            partners.forEach { p ->
+                                                AssistChip(
+                                                    onClick = { loginIdentifier = p.id },
+                                                    label = { Text("${p.businessName} (${p.id})", fontSize = 10.5.sp) }
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Button(
+                                        onClick = {
+                                            val found = viewModel.authenticatePartnerPortal(loginIdentifier)
+                                            if (found == null) {
+                                                Toast.makeText(context, "Partner not found. Check Partner ID, Business Name, or Phone.", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                loggedInPartnerId = found.id
+                                                selectedPartnerId = found.id
+                                                offlineCart.clear()
+                                                Toast.makeText(context, "Logged in as ${found.businessName}", Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = Color.Black),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(48.dp)
+                                            .testTag("partner_offline_login_button")
+                                    ) {
+                                        Text("Log In to Partner Inventory", fontWeight = FontWeight.Black)
+                                    }
+                                } else {
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = SuccessGreen.copy(alpha = 0.14f),
+                                        border = BorderStroke(1.dp, SuccessGreen),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(10.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text("Signed In: ${loggedPartner.businessName}", fontWeight = FontWeight.Black, fontSize = 13.sp, color = SuccessGreen)
+                                                Text(
+                                                    "${loggedPartner.id} • Fee: ${loggedPartner.stipulatedCommissionPercent}% • Penalty Accrued: ${nairaFormat.format(loggedPartner.totalAccruedOfflinePenalty)}",
+                                                    fontSize = 10.5.sp,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                            }
+                                            OutlinedButton(
+                                                onClick = {
+                                                    loggedInPartnerId = ""
+                                                    offlineCart.clear()
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                                modifier = Modifier.height(34.dp)
+                                            ) {
+                                                Text("Log Out", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (loggedPartner != null) {
+                            val partnerProducts = remember(allProducts, loggedPartner.id) {
+                                allProducts.filter { it.partnerId == loggedPartner.id }
+                            }
+
+                            if (loggedPartner.status == PartnerAgreementStatus.TERMINATED) {
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color(0xFFEF4444).copy(alpha = 0.14f),
+                                    border = BorderStroke(1.dp, Color(0xFFEF4444)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFEF4444))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            "Contract Terminated: All hosted product listings and images have been removed.",
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFFEF4444)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Offline Sale Cart Checkout Card
+                            if (offlineCart.isNotEmpty()) {
+                                val cartTotalUnits = offlineCart.values.sum()
+                                val cartTotalRetail = offlineCart.entries.sumOf { (pid, qty) ->
+                                    val p = partnerProducts.find { it.id == pid }
+                                    (p?.basePrice ?: 0.0) * qty
+                                }
+                                Card(
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = CardDefaults.cardColors(containerColor = AccentGold.copy(alpha = 0.12f)),
+                                    border = BorderStroke(1.5.dp, AccentGold),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("partner_offline_cart_card")
+                                ) {
+                                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text(
+                                            text = "OFFLINE SALE REMOVAL CART ($cartTotalUnits units • ${nairaFormat.format(cartTotalRetail)})",
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 12.sp,
+                                            color = AccentGold
+                                        )
+                                        offlineCart.entries.toList().forEach { (pid, qty) ->
+                                            val prod = partnerProducts.find { it.id == pid }
+                                            if (prod != null) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text(prod.title, fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                        Text("Online Stock: ${prod.stockQuantity} → After: ${(prod.stockQuantity - qty).coerceAtLeast(0)}", fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    }
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        IconButton(
+                                                            onClick = {
+                                                                if (qty <= 1) offlineCart.remove(pid) else offlineCart[pid] = qty - 1
+                                                            },
+                                                            modifier = Modifier.size(36.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.Remove, contentDescription = "Decrease offline qty", modifier = Modifier.size(16.dp))
+                                                        }
+                                                        Text("$qty", fontWeight = FontWeight.Black, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 4.dp))
+                                                        IconButton(
+                                                            onClick = {
+                                                                if (qty < prod.stockQuantity) offlineCart[pid] = qty + 1
+                                                            },
+                                                            modifier = Modifier.size(36.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.Add, contentDescription = "Increase offline qty", modifier = Modifier.size(16.dp))
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        OutlinedTextField(
+                                            value = offlineSaleNote,
+                                            onValueChange = { offlineSaleNote = it },
+                                            label = { Text("Offline Sale Reference / Receipt Note (Optional)") },
+                                            singleLine = true,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .testTag("partner_offline_note_input")
+                                        )
+                                        Button(
+                                            onClick = {
+                                                viewModel.processPartnerOfflineSaleCart(
+                                                    partnerId = loggedPartner.id,
+                                                    quantitiesByProductId = offlineCart.toMap(),
+                                                    note = offlineSaleNote
+                                                ) { ok, msg ->
+                                                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                                    if (ok) {
+                                                        offlineCart.clear()
+                                                        offlineSaleNote = ""
+                                                    }
+                                                }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = Color.Black),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(48.dp)
+                                                .testTag("partner_offline_confirm_button")
+                                        ) {
+                                            Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Confirm Offline Sale & Remove Qty Online", fontWeight = FontWeight.Black, fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                            }
+
+                            Text(
+                                text = "Hosted Online SKUs for ${loggedPartner.businessName} (${partnerProducts.size})",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Black
+                            )
+                            if (partnerProducts.isEmpty()) {
+                                Text(
+                                    text = "No live products hosted online for this partner yet.",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            } else {
+                                partnerProducts.forEach { prod ->
+                                    val inOfflineCart = offlineCart[prod.id] ?: 0
+                                    Card(
+                                        shape = RoundedCornerShape(14.dp),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                        border = BorderStroke(1.dp, if (inOfflineCart > 0) AccentGold else MaterialTheme.colorScheme.outlineVariant),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(10.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            AsyncImage(
+                                                model = ProductImageHelper.buildImageRequest(context, prod.imageUrl, prod.category, prod.title),
+                                                contentDescription = prod.title,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier
+                                                    .size(56.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(Color.Black.copy(alpha = 0.08f))
+                                            )
+                                            Spacer(modifier = Modifier.width(10.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(prod.title, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                Text(
+                                                    "${prod.category} • Stock: ${prod.stockQuantity} • ${nairaFormat.format(prod.basePrice)}",
+                                                    fontSize = 11.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                                Text(
+                                                    "MOU Fee: ${prod.partnerCommissionPercent}%" + if (prod.isCatalogLocked || loggedPartner.isCatalogLocked) " • Display Only" else "",
+                                                    fontSize = 10.5.sp,
+                                                    color = if (prod.isCatalogLocked || loggedPartner.isCatalogLocked) AccentGold else CyberCyan,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                            }
+                                            Button(
+                                                enabled = prod.stockQuantity > inOfflineCart,
+                                                onClick = {
+                                                    offlineCart[prod.id] = (inOfflineCart + 1).coerceAtMost(prod.stockQuantity)
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = Color.Black),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                                modifier = Modifier
+                                                    .height(40.dp)
+                                                    .testTag("partner_offline_add_${prod.id}")
+                                            ) {
+                                                Icon(Icons.Default.ShoppingCart, contentDescription = "Add offline sold item", modifier = Modifier.size(14.dp))
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = if (inOfflineCart > 0) "+1 ($inOfflineCart)" else "Offline +1",
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Black
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            val offlineLogs = remember(transactions, loggedPartner.id) {
+                                transactions.filter {
+                                    it.partnerId == loggedPartner.id &&
+                                        (it.type == PartnerTransactionType.PARTNER_OFFLINE_SALE_REMOVAL ||
+                                            it.type == PartnerTransactionType.UNREPORTED_OFFLINE_SALE_PENALTY)
+                                }
+                            }
+                            if (offlineLogs.isNotEmpty()) {
+                                Text(
+                                    text = "Offline Sale & Compliance Log (${offlineLogs.size})",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Black
+                                )
+                                offlineLogs.take(15).forEach { log ->
+                                    val isPenalty = log.type == PartnerTransactionType.UNREPORTED_OFFLINE_SALE_PENALTY
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (isPenalty) Color(0xFFEF4444).copy(alpha = 0.1f) else SuccessGreen.copy(alpha = 0.1f),
+                                        border = BorderStroke(1.dp, if (isPenalty) Color(0xFFEF4444).copy(alpha = 0.4f) else SuccessGreen.copy(alpha = 0.4f)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                Text(log.type.label, fontSize = 11.sp, fontWeight = FontWeight.Black, color = if (isPenalty) Color(0xFFEF4444) else SuccessGreen)
+                                                Text(dateTimeFmt.format(Date(log.timestamp)), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                            Text("${log.productName} • Qty: ${log.quantity}", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                                            if (isPenalty) {
+                                                Text(
+                                                    "Accrued Hosting Unit % Fee Collected: ${nairaFormat.format(log.commissionProfitAmount)}",
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color(0xFFEF4444)
+                                                )
+                                            }
+                                            if (log.note.isNotBlank()) {
+                                                Text(log.note, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                             }
                                         }
                                     }

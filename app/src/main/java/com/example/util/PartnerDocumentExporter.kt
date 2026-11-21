@@ -144,19 +144,22 @@ object PartnerDocumentExporter {
         drawRow("Moniepoint Account:", "${partner.moniepointAccountNumber.ifBlank { "Pending" }} (${partner.moniepointAccountName.ifBlank { partner.businessName }})")
 
         y += 8f; canvas.drawLine(36f, y, 559f, y, linePaint); y += 22f
-        canvas.drawText("4. WORKFLOW & VERIFICATION CLAUSE", 36f, y, sectionPaint); y += 18f
+        canvas.drawText("4. WORKFLOW, AUTOMATED SPLIT & CONTRACT LIFECYCLE CLAUSES", 36f, y, sectionPaint); y += 16f
+        val clausePaint = Paint().apply { color = Color.parseColor("#111827"); textSize = 9.5f; isAntiAlias = true }
         val clauses = listOf(
-            "a) Partner uploads products & images strictly to 24/7 SHOPPING Admin Control Room for verification.",
-            "b) Upon Admin verification, products batch-sync live to Supabase Cloud under ${partner.businessName}'s folder.",
-            "c) Every customer payment triggers automated alerts to both ${storeProfile.storeName} and ${partner.businessName}.",
-            "d) ${storeProfile.storeName} provides Daily, Weekly & Monthly sales and stock balance reports."
+            "a) Partner uploads products & images strictly to Admin Control Room; verified items sync to Cloud.",
+            "b) Automated Split: On customer payment, 24/7 SHOPPING % deducts automatically; balance credits Partner.",
+            "c) Monthly Hosting Fee deducts automatically every 30-day cycle from Partner to 24/7 SHOPPING account.",
+            "d) End of Hosting Period: Admin activates Catalog Lock (display-only; customer Add-to-Cart disabled).",
+            "e) Renewal unlocks Catalog Lock; Termination authorizes Admin to delete all product images & info outright.",
+            "f) Offline Sales: Partner must log in & use Offline Add-to-Cart to remove sold qty, else 24/7 collects unit % fee."
         )
         clauses.forEach { clause ->
-            canvas.drawText(clause.take(94), 36f, y, valuePaint)
-            y += 17f
+            canvas.drawText(clause.take(98), 36f, y, clausePaint)
+            y += 14.5f
         }
 
-        y += 18f
+        y += 12f
         val boxPaint = Paint().apply {
             color = Color.parseColor("#E2E8F0")
             style = Paint.Style.STROKE
@@ -220,15 +223,25 @@ object PartnerDocumentExporter {
         val naira = nairaFormatter()
         val nowMs = System.currentTimeMillis()
         val cutoffMs = nowMs - (period.lookbackDays * 24L * 60L * 60L * 1000L)
-        val periodSales = transactions.filter {
-            (it.type == PartnerTransactionType.ORDER_CONFIRMED_SALE ||
-                it.type == PartnerTransactionType.CUSTOMER_ORDER_PAYMENT_ALERT) &&
-                it.timestamp >= cutoffMs
+        val periodSales = transactions
+            .filter {
+                (it.type == PartnerTransactionType.ORDER_CONFIRMED_SALE ||
+                    it.type == PartnerTransactionType.CUSTOMER_ORDER_PAYMENT_ALERT) &&
+                    it.timestamp >= cutoffMs
+            }
+            .groupBy { it.orderId.ifBlank { it.id } }
+            .values
+            .map { group ->
+                group.firstOrNull { it.type == PartnerTransactionType.ORDER_CONFIRMED_SALE } ?: group.first()
+            }
+        val offlineSales = transactions.filter {
+            it.type == PartnerTransactionType.PARTNER_OFFLINE_SALE_REMOVAL && it.timestamp >= cutoffMs
         }
         val grossRevenue = periodSales.sumOf { it.grossAmount }
         val totalCommissionProfit = periodSales.sumOf { it.commissionProfitAmount }
         val totalPartnerNet = periodSales.sumOf { it.partnerNetAmount }
         val totalUnitsSold = periodSales.sumOf { it.quantity }
+        val totalOfflineUnits = offlineSales.sumOf { it.quantity }
         val totalStockRemaining = partnerProducts.sumOf { it.stockQuantity }
         val generatedDate = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date(nowMs))
 
@@ -236,22 +249,29 @@ object PartnerDocumentExporter {
         sb.appendLine("*${storeProfile.storeName.uppercase()} — ${period.label.uppercase()}*")
         sb.appendLine("*Partner Folder:* ${partner.businessName} (${partner.id})")
         sb.appendLine("*Generated:* $generatedDate")
-        sb.appendLine("*Category:* ${partner.primaryCategory}")
+        sb.appendLine("*Category:* ${partner.primaryCategory} | *Catalog Lock:* ${if (partner.isCatalogLocked) "LOCKED (Display Only)" else "ACTIVE"}")
         sb.appendLine("")
         sb.appendLine("*FINANCIAL SUMMARY (${period.shortLabel})*")
         sb.appendLine("• Transactions / Alerts: ${periodSales.size}")
-        sb.appendLine("• Total Units Sold: $totalUnitsSold")
+        sb.appendLine("• Online Units Sold: $totalUnitsSold | Offline Removals: $totalOfflineUnits")
         sb.appendLine("• Gross Sales Volume: ${naira.format(grossRevenue)}")
-        sb.appendLine("• 24/7 SHOPPING Profit (${String.format(Locale.US, "%.1f", partner.stipulatedCommissionPercent)}%): ${naira.format(totalCommissionProfit)}")
-        sb.appendLine("• Partner Net Payout: ${naira.format(totalPartnerNet)}")
-        sb.appendLine("• Monthly Hosting Payment: ${naira.format(partner.monthlyHostingPayment)}")
+        sb.appendLine("• 24/7 SHOPPING Auto-Deducted % Share: ${naira.format(totalCommissionProfit)}")
+        sb.appendLine("• Partner Net Credited: ${naira.format(totalPartnerNet)}")
+        sb.appendLine("• Hosting Plan (30-Day Auto-Debit): ${naira.format(partner.monthlyHostingPayment)} (${partner.hostingCyclesBilled} cycles billed | Total: ${naira.format(partner.totalHostingFeesAutoDeducted)})")
+        if (partner.totalAccruedOfflinePenalty > 0.0) {
+            sb.appendLine("• Accrued Unreported Offline Hosting Penalty: ${naira.format(partner.totalAccruedOfflinePenalty)}")
+        }
         sb.appendLine("")
         sb.appendLine("*STOCK BALANCE (${partnerProducts.size} SKUs | $totalStockRemaining units total)*")
         if (partnerProducts.isEmpty()) {
             sb.appendLine("• No live partner SKUs published yet.")
         } else {
             partnerProducts.forEach { p ->
-                val flag = if (p.stockQuantity <= 0) "OUT OF STOCK" else "${p.stockQuantity} left"
+                val flag = when {
+                    p.isCatalogLocked || partner.isCatalogLocked -> "LOCKED (${p.stockQuantity} left)"
+                    p.stockQuantity <= 0 -> "OUT OF STOCK"
+                    else -> "${p.stockQuantity} left"
+                }
                 sb.appendLine("• ${p.title} (${p.brand}) — $flag @ ${naira.format(p.basePrice)} (${String.format(Locale.US, "%.1f", p.partnerCommissionPercent)}% fee)")
             }
         }
@@ -273,11 +293,17 @@ object PartnerDocumentExporter {
         val dateFmt = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault())
 
         val cutoffMs = System.currentTimeMillis() - (period.lookbackDays * 24L * 60L * 60L * 1000L)
-        val periodSales = transactions.filter {
-            (it.type == PartnerTransactionType.ORDER_CONFIRMED_SALE ||
-                it.type == PartnerTransactionType.CUSTOMER_ORDER_PAYMENT_ALERT) &&
-                it.timestamp >= cutoffMs
-        }
+        val periodSales = transactions
+            .filter {
+                (it.type == PartnerTransactionType.ORDER_CONFIRMED_SALE ||
+                    it.type == PartnerTransactionType.CUSTOMER_ORDER_PAYMENT_ALERT) &&
+                    it.timestamp >= cutoffMs
+            }
+            .groupBy { it.orderId.ifBlank { it.id } }
+            .values
+            .map { group ->
+                group.firstOrNull { it.type == PartnerTransactionType.ORDER_CONFIRMED_SALE } ?: group.first()
+            }
 
         val headerPaint = Paint().apply { color = Color.parseColor("#065F46") }
         canvas.drawRect(0f, 0f, 595f, 102f, headerPaint)
@@ -290,7 +316,7 @@ object PartnerDocumentExporter {
         val whitePaint = Paint().apply { color = Color.WHITE; textSize = 11f; isAntiAlias = true }
         canvas.drawText("${storeProfile.storeName.uppercase()} • PARTNER SALES & STOCK REPORT", 32f, 38f, goldPaint)
         canvas.drawText("${period.label}  |  Folder: ${partner.businessName} (${partner.id})", 32f, 60f, whitePaint)
-        canvas.drawText("Generated: ${dateFmt.format(Date())}", 32f, 80f, whitePaint)
+        canvas.drawText("Generated: ${dateFmt.format(Date())}  |  Lock: ${if (partner.isCatalogLocked) "LOCKED" else "ACTIVE"}", 32f, 80f, whitePaint)
 
         val secPaint = Paint().apply {
             color = Color.parseColor("#065F46")
@@ -309,8 +335,8 @@ object PartnerDocumentExporter {
 
         canvas.drawText("FINANCIAL & STOCK SUMMARY", 32f, y, secPaint); y += 20f
         canvas.drawText("Sales Orders (${period.shortLabel}): ${periodSales.size}  |  Units Sold: ${periodSales.sumOf { it.quantity }}", 32f, y, bodyPaint); y += 17f
-        canvas.drawText("Gross Sales: ${naira.format(gross)}  |  24/7 Commission Profit: ${naira.format(profit)}  |  Partner Net: ${naira.format(net)}", 32f, y, bodyPaint); y += 17f
-        canvas.drawText("Monthly Hosting Fee: ${naira.format(partner.monthlyHostingPayment)}  |  Live SKUs: ${partnerProducts.size}  |  Total Stock Balance: $remainingStock units", 32f, y, bodyPaint); y += 24f
+        canvas.drawText("Gross Sales: ${naira.format(gross)}  |  24/7 Auto-Split: ${naira.format(profit)}  |  Partner Net: ${naira.format(net)}", 32f, y, bodyPaint); y += 17f
+        canvas.drawText("30-Day Hosting: ${naira.format(partner.monthlyHostingPayment)} (${partner.hostingCyclesBilled} cycles billed: ${naira.format(partner.totalHostingFeesAutoDeducted)})  |  Stock: $remainingStock", 32f, y, bodyPaint); y += 24f
 
         canvas.drawText("RECENT SALES TRANSACTIONS (NO CUSTOMER EMAIL)", 32f, y, secPaint); y += 18f
         if (periodSales.isEmpty()) {

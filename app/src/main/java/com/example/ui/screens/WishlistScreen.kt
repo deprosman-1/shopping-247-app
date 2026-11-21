@@ -84,6 +84,10 @@ fun WishlistScreen(
     val wishlistIds by viewModel.wishlistIds.collectAsState()
     val currentCustomer by viewModel.currentCustomer.collectAsState()
     val isWideDualAxisMode by viewModel.isWideDualAxisMode.collectAsState()
+    val lockedPartnerIds by viewModel.lockedPartnerIds.collectAsState()
+    val unlockedWishlistProducts = remember(wishlistProducts, lockedPartnerIds) {
+        wishlistProducts.filter { !it.isCatalogLocked && (it.partnerId.isBlank() || it.partnerId !in lockedPartnerIds) }
+    }
 
     val nairaFormat = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "NG")).apply {
@@ -190,11 +194,18 @@ fun WishlistScreen(
                         }
 
                         Button(
+                            enabled = unlockedWishlistProducts.isNotEmpty(),
                             onClick = {
-                                wishlistProducts.forEach { p ->
+                                unlockedWishlistProducts.forEach { p ->
                                     viewModel.addToCart(p)
                                 }
-                                Toast.makeText(context, "Added all ${wishlistProducts.size} items to Cart!", Toast.LENGTH_SHORT).show()
+                                val skipped = wishlistProducts.size - unlockedWishlistProducts.size
+                                val msg = if (skipped > 0) {
+                                    "Added ${unlockedWishlistProducts.size} available items ($skipped Display-Only skipped)"
+                                } else {
+                                    "Added all ${unlockedWishlistProducts.size} items to Cart!"
+                                }
+                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                                 viewModel.navigateTo(AppScreen.CART)
                             },
                             shape = RoundedCornerShape(14.dp),
@@ -205,7 +216,10 @@ fun WishlistScreen(
                         ) {
                             Icon(Icons.Default.AddShoppingCart, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Move All to Cart", fontWeight = FontWeight.Bold)
+                            Text(
+                                text = if (unlockedWishlistProducts.isEmpty()) "Display Only" else "Move All to Cart",
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
@@ -330,16 +344,19 @@ fun WishlistScreen(
                     contentType = { "product_card" }
                 ) { product ->
                     val effectiveDiscount = viewModel.getEffectiveDiscountPercent(product.category)
+                    val isLocked = product.isCatalogLocked || (product.partnerId.isNotBlank() && product.partnerId in lockedPartnerIds)
                     ProductStandardCard(
                         product = product,
                         promoDiscountPercent = effectiveDiscount,
                         onClick = { viewModel.openProductDetails(product) },
-                        onAddToCart = {
-                            viewModel.addToCart(it)
-                            Toast.makeText(context, "'${it.title}' added to cart!", Toast.LENGTH_SHORT).show()
+                        onAddToCart = { item ->
+                            viewModel.addToCart(item) { _, msg ->
+                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                            }
                         },
                         isWishlisted = wishlistIds.contains(product.id),
-                        onToggleWishlist = { viewModel.toggleWishlist(product.id) }
+                        onToggleWishlist = { viewModel.toggleWishlist(product.id) },
+                        isCatalogLocked = isLocked
                     )
                 }
             }

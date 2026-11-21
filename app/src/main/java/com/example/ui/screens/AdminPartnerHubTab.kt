@@ -35,14 +35,19 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Handshake
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -327,6 +332,35 @@ fun AdminPartnerHubTab(
                         onSaveReportPdf = { period ->
                             pendingReportForSave = activeFolder to period
                             saveReportPdfLauncher.launch("${activeFolder.id}_${period.shortLabel}_Sales_Stock_Report.pdf")
+                        },
+                        onToggleCatalogLock = { lock, reason ->
+                            viewModel.togglePartnerCatalogLock(activeFolder.id, lock, reason) { _, msg ->
+                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        onRenewContract = { newDur, feeOverride ->
+                            viewModel.renewPartnerHostingContract(activeFolder.id, newDur, feeOverride) { _, msg ->
+                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        onTerminateAndDelete = { reason ->
+                            viewModel.terminatePartnerContractAndDeleteAll(activeFolder.id, reason) { _, msg ->
+                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        onBillNextHostingCycleNow = {
+                            val targetRefNow = maxOf(System.currentTimeMillis(), activeFolder.nextHostingBillingDueAt.takeIf { it > 0L } ?: System.currentTimeMillis())
+                            val cycles = viewModel.runAutomatic30DayHostingBilling(targetRefNow)
+                            Toast.makeText(
+                                context,
+                                if (cycles > 0) "✅ Processed $cycles 30-day hosting cycle deduction(s)!" else "No hosting fee configured or contract inactive.",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        },
+                        onCollectOfflinePenalty = { prodId, qty, reason ->
+                            viewModel.collectUnreportedOfflineSalePenalty(activeFolder.id, prodId, qty, reason) { _, msg ->
+                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                            }
                         }
                     )
                 }
@@ -370,6 +404,7 @@ private fun AdminPartnerAgreementsSection(
 
     partners.forEach { partner ->
         val isPending = partner.status == PartnerAgreementStatus.PENDING_FINALIZATION
+        val isTerminated = partner.status == PartnerAgreementStatus.TERMINATED
         val isExpanded = expandedPartnerId == partner.id
 
         var editCommission by remember(partner.id, partner.stipulatedCommissionPercent) { mutableStateOf(partner.stipulatedCommissionPercent.toString()) }
@@ -387,7 +422,15 @@ private fun AdminPartnerAgreementsSection(
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = BorderStroke(1.5.dp, if (isPending) AccentGold else SuccessGreen.copy(alpha = 0.65f)),
+            border = BorderStroke(
+                1.5.dp,
+                when {
+                    isTerminated -> Color(0xFFEF4444)
+                    partner.isCatalogLocked -> Color(0xFF64748B)
+                    isPending -> AccentGold
+                    else -> SuccessGreen.copy(alpha = 0.65f)
+                }
+            ),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -414,11 +457,26 @@ private fun AdminPartnerAgreementsSection(
                     }
                     Surface(
                         shape = RoundedCornerShape(8.dp),
-                        color = if (isPending) AccentGold.copy(alpha = 0.2f) else SuccessGreen.copy(alpha = 0.16f)
+                        color = when {
+                            isTerminated -> Color(0xFFEF4444).copy(alpha = 0.18f)
+                            partner.isCatalogLocked -> AccentGold.copy(alpha = 0.2f)
+                            isPending -> AccentGold.copy(alpha = 0.2f)
+                            else -> SuccessGreen.copy(alpha = 0.16f)
+                        }
                     ) {
                         Text(
-                            text = if (isPending) "SIGN & FINALIZE" else "FINALIZED",
-                            color = if (isPending) AccentGold else SuccessGreen,
+                            text = when {
+                                isTerminated -> "TERMINATED"
+                                partner.isCatalogLocked -> "CATALOG LOCKED"
+                                isPending -> "SIGN & FINALIZE"
+                                else -> "FINALIZED"
+                            },
+                            color = when {
+                                isTerminated -> Color(0xFFEF4444)
+                                partner.isCatalogLocked -> AccentGold
+                                isPending -> AccentGold
+                                else -> SuccessGreen
+                            },
                             fontWeight = FontWeight.Black,
                             fontSize = 10.sp,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -904,21 +962,35 @@ private fun AdminPartnerFolderListSection(
         return
     }
 
+    val nowMs = System.currentTimeMillis()
     partners.forEach { folder ->
         val fProds = allProducts.filter { it.partnerId == folder.id }
         val fTxns = transactions.filter { it.partnerId == folder.id }
-        val fSales = fTxns.filter {
-            it.type == PartnerTransactionType.CUSTOMER_ORDER_PAYMENT_ALERT ||
-                it.type == PartnerTransactionType.ORDER_CONFIRMED_SALE
-        }
+        val fSales = fTxns
+            .filter {
+                it.type == PartnerTransactionType.CUSTOMER_ORDER_PAYMENT_ALERT ||
+                    it.type == PartnerTransactionType.ORDER_CONFIRMED_SALE
+            }
+            .groupBy { it.orderId.ifBlank { it.id } }
+            .values
+            .map { group -> group.firstOrNull { it.type == PartnerTransactionType.ORDER_CONFIRMED_SALE } ?: group.first() }
         val gross = fSales.sumOf { it.grossAmount }
         val profit = fSales.sumOf { it.commissionProfitAmount }
         val stockTotal = fProds.sumOf { it.stockQuantity }
+        val isPeriodEnded = folder.status == PartnerAgreementStatus.FINALIZED &&
+            folder.hostingContractEndAt > 0L && nowMs >= folder.hostingContractEndAt
 
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = BorderStroke(1.5.dp, AccentGold.copy(alpha = 0.55f)),
+            border = BorderStroke(
+                1.5.dp,
+                when {
+                    folder.status == PartnerAgreementStatus.TERMINATED -> Color(0xFFEF4444)
+                    folder.isCatalogLocked -> AccentGold
+                    else -> AccentGold.copy(alpha = 0.55f)
+                }
+            ),
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { onOpenFolder(folder) }
@@ -936,15 +1008,24 @@ private fun AdminPartnerFolderListSection(
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(folder.businessName, fontWeight = FontWeight.Black, fontSize = 15.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(folder.businessName, fontWeight = FontWeight.Black, fontSize = 15.sp, modifier = Modifier.weight(1f, fill = false))
+                        if (folder.status == PartnerAgreementStatus.TERMINATED) {
+                            Text("TERMINATED", fontSize = 9.sp, fontWeight = FontWeight.Black, color = Color(0xFFEF4444))
+                        } else if (folder.isCatalogLocked) {
+                            Text("🔒 LOCKED", fontSize = 9.sp, fontWeight = FontWeight.Black, color = AccentGold)
+                        } else if (isPeriodEnded) {
+                            Text("⏰ PERIOD ENDED", fontSize = 9.sp, fontWeight = FontWeight.Black, color = Color(0xFFEF4444))
+                        }
+                    }
                     Text(
                         "${folder.primaryCategory} • ${fProds.size} Live SKUs ($stockTotal units) • ${submissions.count { it.partnerId == folder.id }} Submissions",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        "Gross: ${nairaFormat.format(gross)} • 24/7 Profit: ${nairaFormat.format(profit)}",
-                        fontSize = 11.5.sp,
+                        "Gross: ${nairaFormat.format(gross)} • 24/7 Split: ${nairaFormat.format(profit)} • 30d Hosted: ${nairaFormat.format(folder.totalHostingFeesAutoDeducted)}",
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = SuccessGreen
                     )
@@ -955,6 +1036,7 @@ private fun AdminPartnerFolderListSection(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AdminSinglePartnerFolderAnalytics(
     folder: PartnerOrganization,
@@ -966,7 +1048,12 @@ private fun AdminSinglePartnerFolderAnalytics(
     dateTimeFmt: SimpleDateFormat,
     onBackToFolders: () -> Unit,
     onUpdateAccounts: (String, String, String, String) -> Unit,
-    onSaveReportPdf: (SalesReportPeriod) -> Unit
+    onSaveReportPdf: (SalesReportPeriod) -> Unit,
+    onToggleCatalogLock: (Boolean, String) -> Unit,
+    onRenewContract: (String, Double?) -> Unit,
+    onTerminateAndDelete: (String) -> Unit,
+    onBillNextHostingCycleNow: () -> Unit,
+    onCollectOfflinePenalty: (String, Int, String) -> Unit
 ) {
     val context = LocalContext.current
     var reportPeriod by remember { mutableStateOf(SalesReportPeriod.DAILY) }
@@ -976,17 +1063,34 @@ private fun AdminSinglePartnerFolderAnalytics(
     var monieNm by remember(folder.id) { mutableStateOf(folder.moniepointAccountName) }
     var zoomReceipt by remember { mutableStateOf<String?>(null) }
 
+    var renewDuration by remember(folder.id, folder.hostingDuration) { mutableStateOf(folder.hostingDuration) }
+    var renewMonthlyFee by remember(folder.id, folder.monthlyHostingPayment) { mutableStateOf(folder.monthlyHostingPayment.toInt().toString()) }
+    var showTerminateDialog by remember { mutableStateOf(false) }
+
+    var auditProductId by remember(folder.id, folderProducts.size) { mutableStateOf(folderProducts.firstOrNull()?.id ?: "") }
+    var auditUnreportedQty by remember(folder.id) { mutableStateOf("1") }
+    var auditReason by remember(folder.id) { mutableStateOf("") }
+
     val saleTxns = remember(folderTransactions) {
-        folderTransactions.filter {
-            it.type == PartnerTransactionType.CUSTOMER_ORDER_PAYMENT_ALERT ||
-                it.type == PartnerTransactionType.ORDER_CONFIRMED_SALE
-        }
+        folderTransactions
+            .filter {
+                it.type == PartnerTransactionType.CUSTOMER_ORDER_PAYMENT_ALERT ||
+                    it.type == PartnerTransactionType.ORDER_CONFIRMED_SALE
+            }
+            .groupBy { it.orderId.ifBlank { it.id } }
+            .values
+            .map { group -> group.firstOrNull { it.type == PartnerTransactionType.ORDER_CONFIRMED_SALE } ?: group.first() }
     }
     val grossSales = saleTxns.sumOf { it.grossAmount }
     val profitEarned = saleTxns.sumOf { it.commissionProfitAmount }
     val partnerNet = saleTxns.sumOf { it.partnerNetAmount }
     val unitsSold = saleTxns.sumOf { it.quantity }
     val liveStockBalance = folderProducts.sumOf { it.stockQuantity }
+    val nowMs = System.currentTimeMillis()
+    val isTerminated = folder.status == PartnerAgreementStatus.TERMINATED
+    val isHostingPeriodEnded = folder.status == PartnerAgreementStatus.FINALIZED &&
+        folder.hostingContractEndAt > 0L && nowMs >= folder.hostingContractEndAt
+    val shortDateFmt = remember { SimpleDateFormat("dd MMM yyyy", Locale.getDefault()) }
 
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
         IconButton(onClick = onBackToFolders) {
@@ -1006,19 +1110,29 @@ private fun AdminSinglePartnerFolderAnalytics(
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("FOLDER ANALYTICS DASHBOARD", fontWeight = FontWeight.Black, color = AccentGold, fontSize = 12.sp)
+            Text("FOLDER ANALYTICS & AUTOMATED SPLIT LEDGER", fontWeight = FontWeight.Black, color = AccentGold, fontSize = 12.sp)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column {
                     Text("Gross Sales", fontSize = 10.5.sp, color = Color.White.copy(alpha = 0.7f))
                     Text(nairaFormat.format(grossSales), fontWeight = FontWeight.Black, color = Color.White, fontSize = 15.sp)
                 }
                 Column {
-                    Text("24/7 SHOPPING Profit", fontSize = 10.5.sp, color = Color.White.copy(alpha = 0.7f))
-                    Text(nairaFormat.format(profitEarned), fontWeight = FontWeight.Black, color = SuccessGreen, fontSize = 15.sp)
+                    Text("24/7 Auto-Deduct %", fontSize = 10.5.sp, color = Color.White.copy(alpha = 0.7f))
+                    Text(
+                        nairaFormat.format(maxOf(profitEarned, folder.totalAutoDeducted247Share)),
+                        fontWeight = FontWeight.Black,
+                        color = SuccessGreen,
+                        fontSize = 15.sp
+                    )
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("Partner Net Payout", fontSize = 10.5.sp, color = Color.White.copy(alpha = 0.7f))
-                    Text(nairaFormat.format(partnerNet), fontWeight = FontWeight.Black, color = CyberCyan, fontSize = 15.sp)
+                    Text("Partner Net Deposit", fontSize = 10.5.sp, color = Color.White.copy(alpha = 0.7f))
+                    Text(
+                        nairaFormat.format(maxOf(partnerNet, folder.totalAutoPartnerNetDeposited)),
+                        fontWeight = FontWeight.Black,
+                        color = CyberCyan,
+                        fontSize = 15.sp
+                    )
                 }
             }
             HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
@@ -1027,7 +1141,329 @@ private fun AdminSinglePartnerFolderAnalytics(
                 Text("Units Sold: $unitsSold", fontSize = 11.sp, color = AccentGold, fontWeight = FontWeight.Bold)
                 Text("Stock Balance: $liveStockBalance", fontSize = 11.sp, color = CyberCyan, fontWeight = FontWeight.Bold)
             }
+            Text(
+                text = "30-Day Hosting Cycles Billed: ${folder.hostingCyclesBilled} (${nairaFormat.format(folder.totalHostingFeesAutoDeducted)}) • Accrued Offline Penalties: ${nairaFormat.format(folder.totalAccruedOfflinePenalty)}",
+                fontSize = 10.5.sp,
+                color = Color.White.copy(alpha = 0.85f),
+                fontWeight = FontWeight.SemiBold
+            )
         }
+    }
+
+    // Contract Lifecycle, 30-Day Hosting Billing, Catalog Lock, Renewal & Termination Control Card
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(
+            1.5.dp,
+            when {
+                isTerminated -> Color(0xFFEF4444)
+                folder.isCatalogLocked -> AccentGold
+                isHostingPeriodEnded -> Color(0xFFEF4444)
+                else -> SuccessGreen.copy(alpha = 0.65f)
+            }
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("admin_lifecycle_control_card")
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "CONTRACT LIFECYCLE & CATALOG CONTROL",
+                    fontWeight = FontWeight.Black,
+                    fontSize = 12.sp,
+                    color = AccentGold
+                )
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = when {
+                        isTerminated -> Color(0xFFEF4444).copy(alpha = 0.18f)
+                        folder.isCatalogLocked -> AccentGold.copy(alpha = 0.2f)
+                        isHostingPeriodEnded -> Color(0xFFEF4444).copy(alpha = 0.18f)
+                        else -> SuccessGreen.copy(alpha = 0.18f)
+                    }
+                ) {
+                    Text(
+                        text = when {
+                            isTerminated -> "TERMINATED"
+                            folder.isCatalogLocked -> "CATALOG LOCKED"
+                            isHostingPeriodEnded -> "HOSTING ENDED"
+                            else -> "ACTIVE"
+                        },
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Black,
+                        color = when {
+                            isTerminated -> Color(0xFFEF4444)
+                            folder.isCatalogLocked -> AccentGold
+                            isHostingPeriodEnded -> Color(0xFFEF4444)
+                            else -> SuccessGreen
+                        },
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+            }
+
+            if (folder.hostingContractStartAt > 0L) {
+                Text(
+                    text = "Contract: ${shortDateFmt.format(Date(folder.hostingContractStartAt))} → ${shortDateFmt.format(Date(folder.hostingContractEndAt))} • Next 30-Day Billing: ${if (folder.nextHostingBillingDueAt > 0L) shortDateFmt.format(Date(folder.nextHostingBillingDueAt)) else "Pending Finalization"}",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            if (isHostingPeriodEnded && !folder.isCatalogLocked && !isTerminated) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color(0xFFEF4444).copy(alpha = 0.14f),
+                    border = BorderStroke(1.dp, Color(0xFFEF4444)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Hosting Period Ended — Click Catalog Lock below to disable Add-to-Cart while keeping products displayed.",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFEF4444)
+                        )
+                    }
+                }
+            }
+
+            if (!isTerminated) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            onToggleCatalogLock(
+                                !folder.isCatalogLocked,
+                                if (!folder.isCatalogLocked) "Hosting period ended — Catalog Lock activated by Admin" else "Catalog Lock lifted by Admin"
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (folder.isCatalogLocked) SuccessGreen else AccentGold,
+                            contentColor = Color.Black
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("admin_catalog_lock_button_${folder.id}")
+                    ) {
+                        Icon(
+                            imageVector = if (folder.isCatalogLocked) Icons.Default.LockOpen else Icons.Default.Lock,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = if (folder.isCatalogLocked) "Unlock Catalog" else "Catalog Lock",
+                            fontWeight = FontWeight.Black,
+                            fontSize = 11.5.sp
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = onBillNextHostingCycleNow,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("admin_bill_hosting_cycle_button")
+                    ) {
+                        Text("Deduct 30d Fee Now", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+                }
+
+                HorizontalDivider()
+                Text("Renew Hosting Contract (Unlocks Catalog Lock)", fontSize = 11.5.sp, fontWeight = FontWeight.Black, color = CyberCyan)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = renewDuration,
+                        onValueChange = { renewDuration = it },
+                        label = { Text("Renewal Duration") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = renewMonthlyFee,
+                        onValueChange = { renewMonthlyFee = it.filter { c -> c.isDigit() || c == '.' } },
+                        label = { Text("Monthly Fee ₦") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            onRenewContract(
+                                renewDuration,
+                                renewMonthlyFee.toDoubleOrNull()
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = Color.Black),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("admin_renew_contract_button_${folder.id}")
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text("Renew & Unlock Catalog", fontWeight = FontWeight.Black, fontSize = 11.5.sp)
+                    }
+
+                    Button(
+                        onClick = { showTerminateDialog = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626), contentColor = Color.White),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("admin_terminate_contract_button_${folder.id}")
+                    ) {
+                        Icon(Icons.Default.DeleteForever, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text("Terminate & Delete", fontWeight = FontWeight.Black, fontSize = 11.5.sp)
+                    }
+                }
+            }
+
+            OutlinedButton(
+                onClick = {
+                    val noticeTitle = when {
+                        isTerminated -> "HOSTING CONTRACT TERMINATED & PRODUCTS DELETED"
+                        folder.isCatalogLocked -> "HOSTING PERIOD ENDED — CATALOG LOCKED (DISPLAY ONLY)"
+                        else -> "HOSTING CONTRACT STATUS & AUTOMATED BILLING UPDATE"
+                    }
+                    val noticeBody = when {
+                        isTerminated -> "Your hosting contract has been terminated and all product images/information removed from catalog & cloud."
+                        folder.isCatalogLocked -> "Your hosting period ended. Admin clicked Catalog Lock: products remain displayed with Add-to-Cart paused until contract renewal."
+                        else -> "Contract active (${folder.hostingDuration}). Monthly hosting fee (${nairaFormat.format(folder.monthlyHostingPayment)}) is auto-deducted every 30 days."
+                    }
+                    WhatsAppHelper.sendPartnerLifecycleNotice(
+                        context = context,
+                        recipientPhone = folder.ownerPhone,
+                        partnerName = folder.businessName,
+                        headline = noticeTitle,
+                        details = noticeBody,
+                        storeProfile = storeProfile
+                    )
+                },
+                modifier = Modifier.fillMaxWidth().height(42.dp)
+            ) {
+                Icon(Icons.Default.Chat, contentDescription = null, modifier = Modifier.size(15.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Send WhatsApp Contract Lifecycle Notice", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+
+    // Offline Sale Compliance Audit & Accrued Hosting Unit Cost % Collection
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+        border = BorderStroke(1.2.dp, Color(0xFFEF4444).copy(alpha = 0.55f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("admin_offline_audit_card")
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "OFFLINE SALE AUDIT & ACCRUED HOSTING % COLLECTION",
+                fontWeight = FontWeight.Black,
+                fontSize = 12.sp,
+                color = Color(0xFFEF4444)
+            )
+            Text(
+                text = "If a Partner fails to log into the app and Add-to-Cart an offline-sold product, 24/7 SHOPPING reserves the MOU right to collect the accrued hosting unit cost % from that product.",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (folderProducts.isEmpty()) {
+                Text("No active live partner SKUs available to audit.", fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    folderProducts.forEach { prod ->
+                        FilterChip(
+                            selected = auditProductId == prod.id,
+                            onClick = { auditProductId = prod.id },
+                            label = { Text("${prod.title} (Stock:${prod.stockQuantity})", fontSize = 10.5.sp) }
+                        )
+                    }
+                }
+                val selectedAuditProd = folderProducts.find { it.id == auditProductId } ?: folderProducts.first()
+                val safeAuditQty = (auditUnreportedQty.toIntOrNull() ?: 1).coerceAtLeast(1)
+                val unitPct = selectedAuditProd.partnerCommissionPercent.takeIf { it > 0.0 } ?: folder.stipulatedCommissionPercent
+                val previewPenalty = (selectedAuditProd.basePrice * safeAuditQty) * (unitPct.coerceIn(0.5, 95.0) / 100.0)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = auditUnreportedQty,
+                        onValueChange = { auditUnreportedQty = it.filter { c -> c.isDigit() } },
+                        label = { Text("Unreported Sold Qty") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.weight(0.75f).testTag("admin_audit_qty_input")
+                    )
+                    OutlinedTextField(
+                        value = auditReason,
+                        onValueChange = { auditReason = it },
+                        label = { Text("Audit Note (Optional)") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1.25f)
+                    )
+                }
+                Text(
+                    text = "Accrued Unit Cost (${unitPct}% of ${safeAuditQty}x ${nairaFormat.format(selectedAuditProd.basePrice)}): ${nairaFormat.format(previewPenalty)}",
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Black,
+                    color = AccentGold
+                )
+                Button(
+                    onClick = {
+                        onCollectOfflinePenalty(selectedAuditProd.id, safeAuditQty, auditReason)
+                        auditReason = ""
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626), contentColor = Color.White),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("admin_collect_offline_penalty_button")
+                ) {
+                    Text("Collect Accrued Hosting Unit % Fee (${nairaFormat.format(previewPenalty)})", fontWeight = FontWeight.Black, fontSize = 11.5.sp)
+                }
+            }
+        }
+    }
+
+    if (showTerminateDialog) {
+        AlertDialog(
+            onDismissRequest = { showTerminateDialog = false },
+            title = { Text("Terminate Contract & Delete Outright?", fontWeight = FontWeight.Black) },
+            text = {
+                Text(
+                    "This permanently terminates ${folder.businessName}'s hosting contract and deletes ALL product images and records from the local catalog and Supabase Cloud. This action cannot be undone.",
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showTerminateDialog = false
+                        onTerminateAndDelete("Partner decided to terminate hosting contract at period end — deleted outright by Admin")
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626), contentColor = Color.White),
+                    modifier = Modifier.testTag("confirm_terminate_partner_button")
+                ) {
+                    Text("Delete Images & Terminate", fontWeight = FontWeight.Black)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTerminateDialog = false }) { Text("Cancel") }
+            }
+        )
     }
 
     // Separate Folder Payment Accounts (OPay & Moniepoint) + Auto Alert Status

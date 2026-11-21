@@ -44,7 +44,8 @@ data class Product(
     val partnerId: String = "",
     val partnerName: String = "",
     val partnerCommissionPercent: Double = 0.0,
-    val partnerBatchId: String = ""
+    val partnerBatchId: String = "",
+    val isCatalogLocked: Boolean = false
 ) {
     val allImageUrls: List<String>
         get() = buildList {

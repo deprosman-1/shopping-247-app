@@ -179,6 +179,7 @@ fun HomeScreen(
     val loyaltyAccount by viewModel.loyaltyAccount.collectAsState()
     val isOnline by viewModel.isOnline.collectAsState()
     val offlineQueue by viewModel.offlineQueue.collectAsState()
+    val lockedPartnerIds by viewModel.lockedPartnerIds.collectAsState()
 
     LaunchedEffect(products) {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -972,6 +973,7 @@ fun HomeScreen(
                                                 contentType = { "product_card" }
                                             ) { product ->
                                                 val effectiveDiscount = viewModel.getEffectiveDiscountPercent(product.category)
+                                                val isLocked = product.isCatalogLocked || (product.partnerId.isNotBlank() && product.partnerId in lockedPartnerIds)
                                                 ProductStandardCard(
                                                     product = product,
                                                     promoDiscountPercent = effectiveDiscount,
@@ -984,6 +986,7 @@ fun HomeScreen(
                                                         val watching = viewModel.toggleBackInStockWatch(product)
                                                         Toast.makeText(context, if (watching) "Restock alert set!" else "Restock alert removed", Toast.LENGTH_SHORT).show()
                                                     },
+                                                    isCatalogLocked = isLocked,
                                                     modifier = Modifier.width(168.dp)
                                                 )
                                             }
@@ -1208,6 +1211,7 @@ fun HomeScreen(
                                             contentType = { "product_card" }
                                         ) { product ->
                                             val effectiveDiscount = viewModel.getEffectiveDiscountPercent(product.category)
+                                            val isLocked = product.isCatalogLocked || (product.partnerId.isNotBlank() && product.partnerId in lockedPartnerIds)
                                             ProductStandardCard(
                                                 product = product,
                                                 promoDiscountPercent = effectiveDiscount,
@@ -1220,6 +1224,7 @@ fun HomeScreen(
                                                     val watching = viewModel.toggleBackInStockWatch(product)
                                                     Toast.makeText(context, if (watching) "Restock alert set!" else "Restock alert removed", Toast.LENGTH_SHORT).show()
                                                 },
+                                                isCatalogLocked = isLocked,
                                                 modifier = Modifier.width(166.dp)
                                             )
                                         }
@@ -1297,6 +1302,7 @@ fun HomeScreen(
                             contentType = { "product_card" }
                         ) { product ->
                             val effectiveDiscount = viewModel.getEffectiveDiscountPercent(product.category)
+                            val isLocked = product.isCatalogLocked || (product.partnerId.isNotBlank() && product.partnerId in lockedPartnerIds)
                             ProductStandardCard(
                                 product = product,
                                 promoDiscountPercent = effectiveDiscount,
@@ -1308,7 +1314,8 @@ fun HomeScreen(
                                 onToggleRestockWatch = {
                                     val watching = viewModel.toggleBackInStockWatch(product)
                                     Toast.makeText(context, if (watching) "Restock alert set!" else "Restock alert removed", Toast.LENGTH_SHORT).show()
-                                }
+                                },
+                                isCatalogLocked = isLocked
                             )
                         }
                     }
