@@ -17,6 +17,7 @@ import com.example.data.model.PaymentMethod
 import com.example.data.model.Product
 import com.example.data.model.ProductCategory
 import com.example.data.model.ProductColor
+import com.example.data.model.ProductVariantPrice
 import com.example.data.model.StatusUpdate
 import com.example.data.model.SupabaseConfig
 import com.example.data.remote.SupabaseSyncService
@@ -1241,7 +1242,8 @@ class EcommerceRepository(
             partnerName = partnerName,
             partnerCommissionPercent = partnerCommissionPercent,
             partnerBatchId = partnerBatchId,
-            isCatalogLocked = isCatalogLocked
+            isCatalogLocked = isCatalogLocked,
+            variantPrices = ProductVariantPrice.decodeListFromJson(variantPricesJson)
         )
     }
 
@@ -1272,7 +1274,8 @@ class EcommerceRepository(
             partnerCommissionPercent = partnerCommissionPercent,
             partnerBatchId = partnerBatchId,
             galleryUrlsJson = galleryUrls.filter { it.isNotBlank() }.distinct().joinToString("|"),
-            isCatalogLocked = isCatalogLocked
+            isCatalogLocked = isCatalogLocked,
+            variantPricesJson = ProductVariantPrice.encodeListToJson(variantPrices)
         )
     }
 

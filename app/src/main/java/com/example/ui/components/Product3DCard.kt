@@ -414,6 +414,16 @@ fun Product3DCard(
                                 textDecoration = TextDecoration.LineThrough,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                             )
+                        } else if (product.variantPrices.map { it.amount }.distinct().size > 1) {
+                            val minV = product.minVariantAmount() ?: displayPrice
+                            val maxV = product.maxVariantAmount() ?: displayPrice
+                            Text(
+                                text = "${nairaFormat.format(minV)} – ${nairaFormat.format(maxV)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = CyberCyan
+                            )
                         }
                     }
 

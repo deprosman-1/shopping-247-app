@@ -36,6 +36,85 @@ data class ProductColor(
 )
 
 @Immutable
+data class ProductVariantPrice(
+    val brand: String,
+    val size: String,
+    val colorName: String,
+    val amount: Double,
+    val colorHex: String = "#111827"
+) {
+    companion object {
+        fun encodeListToJson(list: List<ProductVariantPrice>): String {
+            if (list.isEmpty()) return ""
+            val arr = org.json.JSONArray()
+            list.forEach { item ->
+                arr.put(
+                    org.json.JSONObject().apply {
+                        put("b", item.brand.trim())
+                        put("s", item.size.trim())
+                        put("c", item.colorName.trim())
+                        put("a", item.amount)
+                        put("h", item.colorHex.trim().ifBlank { "#111827" })
+                    }
+                )
+            }
+            return arr.toString()
+        }
+
+        fun decodeListFromJson(raw: String?): List<ProductVariantPrice> {
+            val clean = raw?.trim().orEmpty()
+            if (clean.isBlank() || clean == "null" || clean == "[]") return emptyList()
+            return try {
+                val arr = org.json.JSONArray(clean)
+                buildList {
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.optJSONObject(i) ?: continue
+                        val brand = obj.optString("b", obj.optString("brand", "")).trim()
+                        val size = obj.optString("s", obj.optString("size", "")).trim()
+                        val color = obj.optString("c", obj.optString("colorName", "")).trim()
+                        val amt = if (obj.has("a")) obj.optDouble("a", 0.0) else obj.optDouble("amount", 0.0)
+                        val hex = obj.optString("h", obj.optString("colorHex", "#111827")).trim().ifBlank { "#111827" }
+                        if (!amt.isNaN() && amt > 0.0 && (brand.isNotBlank() || size.isNotBlank() || color.isNotBlank())) {
+                            add(
+                                ProductVariantPrice(
+                                    brand = brand.ifBlank { "Standard" },
+                                    size = size.ifBlank { "Standard" },
+                                    colorName = color.ifBlank { "Default" },
+                                    amount = amt,
+                                    colorHex = hex
+                                )
+                            )
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
+    }
+}
+
+private fun variantTokenMatches(candidate: String, selected: String, isSizeField: Boolean = false): Boolean {
+    val a = candidate.trim()
+    val b = selected.trim()
+    if (a.equals(b, ignoreCase = true)) return true
+    if (a.equals("Any", ignoreCase = true) || a == "*" || b.equals("Any", ignoreCase = true)) return true
+    if (isSizeField) {
+        // Normalize shoe/size strings like "42", "EU 42", "Size 42 (EU) (Size 42 (US 12.75)...)"
+        fun extractShoeOrPlainNumber(raw: String): String? {
+            val lower = raw.lowercase().trim()
+            if (lower.all { it.isDigit() }) return lower
+            val m = Regex("""^(?:size|eu|us|uk|no\.?|#)\s*(\d+(?:\.\d+)?)\b""").find(lower)
+            return m?.groupValues?.getOrNull(1)
+        }
+        val nA = extractShoeOrPlainNumber(a)
+        val nB = extractShoeOrPlainNumber(b)
+        if (nA != null && nB != null && nA == nB) return true
+    }
+    return false
+}
+
+@Immutable
 data class Product(
     val id: String = UUID.randomUUID().toString(),
     val title: String,
@@ -61,7 +140,8 @@ data class Product(
     val partnerName: String = "",
     val partnerCommissionPercent: Double = 0.0,
     val partnerBatchId: String = "",
-    val isCatalogLocked: Boolean = false
+    val isCatalogLocked: Boolean = false,
+    val variantPrices: List<ProductVariantPrice> = emptyList()
 ) {
     val allImageUrls: List<String>
         get() = buildList {
@@ -71,11 +151,65 @@ data class Product(
                 if (clean.isNotBlank() && !contains(clean)) add(clean)
             }
         }
+
+    fun resolveVariantPriceEntry(
+        selectedBrand: String = brand,
+        selectedSize: String = availableSizes.firstOrNull() ?: "",
+        selectedColor: String = availableColors.firstOrNull()?.name ?: ""
+    ): ProductVariantPrice? {
+        if (variantPrices.isEmpty()) return null
+        val cleanBrand = selectedBrand.trim().ifBlank { brand }
+        val cleanSize = selectedSize.trim().ifBlank { availableSizes.firstOrNull() ?: "Standard" }
+        val cleanColor = selectedColor.trim().ifBlank { availableColors.firstOrNull()?.name ?: "Default" }
+
+        // 1. Exact Brand + Size + Color
+        variantPrices.firstOrNull {
+            variantTokenMatches(it.brand, cleanBrand) &&
+                variantTokenMatches(it.size, cleanSize, isSizeField = true) &&
+                variantTokenMatches(it.colorName, cleanColor)
+        }?.let { return it }
+
+        // 2. Brand + Size (any color fallback if exact color isn't listed for that size)
+        variantPrices.firstOrNull {
+            variantTokenMatches(it.brand, cleanBrand) &&
+                variantTokenMatches(it.size, cleanSize, isSizeField = true)
+        }?.let { return it }
+
+        // 3. Brand + Color (for products differing primarily by Brand & Color)
+        variantPrices.firstOrNull {
+            variantTokenMatches(it.brand, cleanBrand) &&
+                variantTokenMatches(it.colorName, cleanColor)
+        }?.let { return it }
+
+        // 4. Size + Color
+        variantPrices.firstOrNull {
+            variantTokenMatches(it.size, cleanSize, isSizeField = true) &&
+                variantTokenMatches(it.colorName, cleanColor)
+        }?.let { return it }
+
+        // 5. Same Brand
+        return variantPrices.firstOrNull { variantTokenMatches(it.brand, cleanBrand) }
+    }
+
+    fun minVariantAmount(): Double? = variantPrices.minOfOrNull { it.amount }
+    fun maxVariantAmount(): Double? = variantPrices.maxOfOrNull { it.amount }
+
     fun calculatePrice(
         selectedBrand: String = brand,
         selectedSize: String = availableSizes.firstOrNull() ?: "",
-        promoDiscountPercent: Int = 0
+        promoDiscountPercent: Int = 0,
+        selectedColor: String = availableColors.firstOrNull()?.name ?: ""
     ): Double {
+        val effectiveDiscount = if (promoDiscountPercent > 0) promoDiscountPercent else discountPercent
+        val matchedVariant = resolveVariantPriceEntry(selectedBrand, selectedSize, selectedColor)
+        if (matchedVariant != null && matchedVariant.amount > 0.0) {
+            return if (effectiveDiscount > 0) {
+                matchedVariant.amount * (1.0 - (effectiveDiscount / 100.0))
+            } else {
+                matchedVariant.amount
+            }
+        }
+
         var multiplier = 1.0
         // Brand multiplier
         if (selectedBrand.contains("Pro", ignoreCase = true) || selectedBrand.contains("Luxury", ignoreCase = true) || selectedBrand.contains("Apple", ignoreCase = true) || selectedBrand.contains("Gucci", ignoreCase = true)) {
@@ -104,7 +238,6 @@ data class Product(
         }
 
         val calculated = basePrice * multiplier
-        val effectiveDiscount = if (promoDiscountPercent > 0) promoDiscountPercent else discountPercent
         return if (effectiveDiscount > 0) {
             calculated * (1.0 - (effectiveDiscount / 100.0))
         } else {

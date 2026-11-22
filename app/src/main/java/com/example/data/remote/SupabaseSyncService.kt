@@ -345,6 +345,9 @@ class SupabaseSyncService(
             if ("available_colors" !in excludedColumns) put("available_colors", product.availableColors.joinToString(";") { "${it.name}|${it.hex}" })
             if ("expiry_months_remaining" !in excludedColumns) put("expiry_months_remaining", product.expiryMonthsRemaining)
             if ("is_catalog_locked" !in excludedColumns) put("is_catalog_locked", product.isCatalogLocked)
+            if ("variant_prices_json" !in excludedColumns && product.variantPrices.isNotEmpty()) {
+                put("variant_prices_json", com.example.data.model.ProductVariantPrice.encodeListToJson(product.variantPrices))
+            }
             if (product.partnerId.isNotBlank()) {
                 if ("partner_id" !in excludedColumns) put("partner_id", product.partnerId)
                 if ("partner_name" !in excludedColumns) put("partner_name", product.partnerName)
@@ -1037,6 +1040,7 @@ class SupabaseSyncService(
             ALTER TABLE public.products ADD COLUMN IF NOT EXISTS partner_commission_percent NUMERIC DEFAULT 0;
             ALTER TABLE public.products ADD COLUMN IF NOT EXISTS partner_batch_id TEXT DEFAULT '';
             ALTER TABLE public.products ADD COLUMN IF NOT EXISTS is_catalog_locked BOOLEAN DEFAULT FALSE;
+            ALTER TABLE public.products ADD COLUMN IF NOT EXISTS variant_prices_json TEXT DEFAULT '';
             ALTER TABLE public.products ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
 
             CREATE TABLE IF NOT EXISTS public.customers (
@@ -1229,6 +1233,7 @@ class SupabaseSyncService(
                             val partnerCommissionPercent = if (rawCommPct.isNaN()) 0.0 else rawCommPct
                             val partnerBatchId = obj.optCleanString("partner_batch_id")
                             val isCatalogLocked = if (obj.isNull("is_catalog_locked")) false else obj.optBoolean("is_catalog_locked", false)
+                            val variantPricesJson = obj.optCleanString("variant_prices_json")
 
                             val parsedBrands = availableBrandsStr.split(",")
                                 .map { it.trim() }
@@ -1273,7 +1278,8 @@ class SupabaseSyncService(
                                     partnerName = partnerName,
                                     partnerCommissionPercent = partnerCommissionPercent,
                                     partnerBatchId = partnerBatchId,
-                                    isCatalogLocked = isCatalogLocked
+                                    isCatalogLocked = isCatalogLocked,
+                                    variantPrices = com.example.data.model.ProductVariantPrice.decodeListFromJson(variantPricesJson)
                                 )
                             )
                         } catch (rowEx: Exception) {

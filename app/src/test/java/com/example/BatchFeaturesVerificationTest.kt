@@ -9,7 +9,10 @@ import com.example.data.model.OfflineActionType
 import com.example.data.model.Order
 import com.example.data.model.OrderStatus
 import com.example.data.model.PaymentMethod
+import com.example.data.model.Product
 import com.example.data.model.ProductCategory
+import com.example.data.model.ProductColor
+import com.example.data.model.ProductVariantPrice
 import com.example.data.remote.LiveCallMode
 import com.example.data.remote.LiveCallPhase
 import com.example.data.repository.CatalogDataSeeder
@@ -364,5 +367,99 @@ class BatchFeaturesVerificationTest {
         assertTrue(viewModel.liveCallState.value.chatMessages.any { it.isFromAdmin && it.text.contains("official accounts") })
         viewModel.endLiveCall()
         pumpLooper()
+    }
+
+    @Test
+    fun brandSizeAmountColourPricing_variesBySizeAndColorAndNormalizesShoeTokens() {
+        val variants = listOf(
+            ProductVariantPrice(brand = "Brand A", size = "42", colorName = "Black", amount = 50.0, colorHex = "#111827"),
+            ProductVariantPrice(brand = "Brand A", size = "43", colorName = "Black", amount = 60.0, colorHex = "#111827"),
+            ProductVariantPrice(brand = "Brand A", size = "42", colorName = "Red", amount = 75.0, colorHex = "#DC2626"),
+            ProductVariantPrice(brand = "Brand B", size = "42", colorName = "Black", amount = 90.0, colorHex = "#111827")
+        )
+        val product = Product(
+            id = "variant-test-shoe",
+            title = "Classic Runner Pro",
+            category = "Shoes",
+            brand = "Brand A",
+            availableBrands = listOf("Brand A", "Brand B"),
+            availableSizes = listOf("42", "43"),
+            availableColors = listOf(ProductColor("Black", "#111827"), ProductColor("Red", "#DC2626")),
+            basePrice = 50.0,
+            stockQuantity = 20,
+            imageUrl = "",
+            description = "Variant matrix test product",
+            variantPrices = variants
+        )
+
+        assertEquals(50.0, product.calculatePrice("Brand A", "42", selectedColor = "Black"), 0.01)
+        assertEquals(60.0, product.calculatePrice("Brand A", "43", selectedColor = "Black"), 0.01)
+        assertEquals(75.0, product.calculatePrice("Brand A", "42", selectedColor = "Red"), 0.01)
+        assertEquals(90.0, product.calculatePrice("Brand B", "42", selectedColor = "Black"), 0.01)
+        // Normalized shoe token ("EU 42" -> "42")
+        assertEquals(50.0, product.calculatePrice("Brand A", "EU 42", selectedColor = "Black"), 0.01)
+
+        // JSON encode/decode round-trip
+        val json = ProductVariantPrice.encodeListToJson(variants)
+        val decoded = ProductVariantPrice.decodeListFromJson(json)
+        assertEquals(4, decoded.size)
+        assertEquals(60.0, decoded[1].amount, 0.01)
+        assertEquals("Red", decoded[2].colorName)
+    }
+
+    @Test
+    fun brandSizeAmountColourProduct_persistsInRoomV8AndUpdatesDetailAndCartPrice() = runBlocking {
+        val variants = listOf(
+            ProductVariantPrice(brand = "Brand A", size = "42", colorName = "Black", amount = 50.0, colorHex = "#111827"),
+            ProductVariantPrice(brand = "Brand A", size = "43", colorName = "Black", amount = 60.0, colorHex = "#111827"),
+            ProductVariantPrice(brand = "Brand A", size = "42", colorName = "Red", amount = 75.0, colorHex = "#DC2626")
+        )
+        val customProduct = Product(
+            id = "room-variant-item-1",
+            title = "Heritage Oxford Shoe",
+            category = "Shoes",
+            brand = "Brand A",
+            availableBrands = listOf("Brand A"),
+            availableSizes = listOf("42", "43"),
+            availableColors = listOf(ProductColor("Black", "#111827"), ProductColor("Red", "#DC2626")),
+            basePrice = 50.0,
+            stockQuantity = 15,
+            imageUrl = "",
+            description = "Admin entered variant product",
+            variantPrices = variants
+        )
+
+        viewModel.repository.saveProduct(customProduct)
+        val reloaded = viewModel.repository.getProductById("room-variant-item-1")
+        assertNotNull(reloaded)
+        assertEquals(3, reloaded!!.variantPrices.size)
+
+        viewModel.openProductDetails(reloaded)
+        assertEquals("Brand A", viewModel.detailBrand.value)
+        assertEquals("42", viewModel.detailSize.value)
+        assertEquals("Black", viewModel.detailColor.value.name)
+
+        // Select Size 43 Black -> 60 Naira in Cart
+        viewModel.setDetailSize("43")
+        viewModel.addToCart(
+            product = reloaded,
+            brand = viewModel.detailBrand.value,
+            size = viewModel.detailSize.value,
+            color = viewModel.detailColor.value
+        )
+        val size43Item = viewModel.cartItems.value.first { it.product.id == reloaded.id && it.selectedSize == "43" }
+        assertEquals(60.0, size43Item.unitPrice, 0.01)
+
+        // Select Size 42 Red -> 75 Naira in Cart
+        viewModel.setDetailSize("42")
+        viewModel.setDetailColor(ProductColor("Red", "#DC2626"))
+        viewModel.addToCart(
+            product = reloaded,
+            brand = viewModel.detailBrand.value,
+            size = viewModel.detailSize.value,
+            color = viewModel.detailColor.value
+        )
+        val redItem = viewModel.cartItems.value.first { it.product.id == reloaded.id && it.selectedSize == "42" && it.selectedColor.name == "Red" }
+        assertEquals(75.0, redItem.unitPrice, 0.01)
     }
 }

@@ -178,7 +178,7 @@ fun ProductDetailScreen(
 
     val promoDiscountPercent = viewModel.getEffectiveDiscountPercent(product.category)
     val effectiveDiscount = if (promoDiscountPercent > 0) promoDiscountPercent else product.discountPercent
-    val calculatedUnitPrice = product.calculatePrice(selectedBrand, selectedSize, effectiveDiscount)
+    val calculatedUnitPrice = product.calculatePrice(selectedBrand, selectedSize, effectiveDiscount, selectedColor.name)
     val adminPromo by viewModel.adminPromo.collectAsState()
     val backInStockIds by viewModel.backInStockProductIds.collectAsState()
     val isRestockWatched = backInStockIds.contains(product.id)
@@ -848,6 +848,21 @@ fun ProductDetailScreen(
                                         fontSize = 11.sp
                                     )
                                 }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
+                                    modifier = Modifier.testTag("detail_selected_variant_format")
+                                ) {
+                                    Text(
+                                        text = "$selectedBrand / $selectedSize / ${nairaFormat.format(currentUnitPrice)} / ${selectedColor.name}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
                             }
 
                             // Stock status
@@ -915,6 +930,40 @@ fun ProductDetailScreen(
                         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
                         Spacer(modifier = Modifier.height(10.dp))
 
+                        val hasVariantPricing = product.variantPrices.isNotEmpty()
+                        val displayBrands = remember(product.id, product.availableBrands, product.variantPrices) {
+                            (product.availableBrands + product.variantPrices.map { it.brand })
+                                .map { it.trim() }
+                                .filter { it.isNotBlank() }
+                                .distinctBy { it.lowercase() }
+                                .ifEmpty { listOf(product.brand) }
+                        }
+                        val displaySizes = remember(product.id, product.availableSizes, product.variantPrices) {
+                            (product.availableSizes + product.variantPrices.map { it.size })
+                                .map { it.trim() }
+                                .filter { it.isNotBlank() }
+                                .distinctBy { it.lowercase() }
+                                .ifEmpty { listOf("Standard") }
+                        }
+                        val displayColors = remember(product.id, product.availableColors, product.variantPrices) {
+                            val combined = product.availableColors.toMutableList()
+                            product.variantPrices.forEach { vp ->
+                                if (vp.colorName.isNotBlank() && combined.none { it.name.equals(vp.colorName, ignoreCase = true) }) {
+                                    combined.add(com.example.data.model.ProductColor(vp.colorName.trim(), vp.colorHex.ifBlank { "#111827" }))
+                                }
+                            }
+                            combined
+                        }
+                        val brandPricesVary = remember(product.id, displayBrands, selectedSize, selectedColor, effectiveDiscount) {
+                            displayBrands.map { product.calculatePrice(it, selectedSize, effectiveDiscount, selectedColor.name) }.distinct().size > 1
+                        }
+                        val sizePricesVary = remember(product.id, displaySizes, selectedBrand, selectedColor, effectiveDiscount) {
+                            displaySizes.map { product.calculatePrice(selectedBrand, it, effectiveDiscount, selectedColor.name) }.distinct().size > 1
+                        }
+                        val colorPricesVary = remember(product.id, displayColors, selectedBrand, selectedSize, effectiveDiscount) {
+                            displayColors.map { product.calculatePrice(selectedBrand, selectedSize, effectiveDiscount, it.name) }.distinct().size > 1
+                        }
+
                         // BRANDS SELECTION
                         Text(
                             text = "Brand: $selectedBrand",
@@ -928,7 +977,9 @@ fun ProductDetailScreen(
                                 .horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            product.availableBrands.forEach { b ->
+                            displayBrands.forEach { b ->
+                                val brandPrice = product.calculatePrice(b, selectedSize, effectiveDiscount, selectedColor.name)
+                                val chipText = if (hasVariantPricing && brandPricesVary) "$b • ${nairaFormat.format(brandPrice)}" else b
                                 FilterChip(
                                     selected = selectedBrand.equals(b, ignoreCase = true),
                                     onClick = { 
@@ -936,11 +987,12 @@ fun ProductDetailScreen(
                                         appliedBargainPrice = null
                                         bargainResultMsg = ""
                                     },
-                                    label = { Text(b, fontSize = 11.sp) },
+                                    label = { Text(chipText, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = CyberCyan.copy(alpha = 0.2f),
                                         selectedLabelColor = MaterialTheme.colorScheme.primary
-                                    )
+                                    ),
+                                    modifier = Modifier.testTag("detail_brand_chip_$b")
                                 )
                             }
                         }
@@ -960,7 +1012,9 @@ fun ProductDetailScreen(
                                 .horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            product.availableSizes.forEach { sz ->
+                            displaySizes.forEach { sz ->
+                                val sizePrice = product.calculatePrice(selectedBrand, sz, effectiveDiscount, selectedColor.name)
+                                val sizeLabel = if (hasVariantPricing || sizePricesVary) "$sz • ${nairaFormat.format(sizePrice)}" else sz
                                 FilterChip(
                                     selected = selectedSize.equals(sz, ignoreCase = true),
                                     onClick = { 
@@ -968,11 +1022,12 @@ fun ProductDetailScreen(
                                         appliedBargainPrice = null
                                         bargainResultMsg = ""
                                     },
-                                    label = { Text(sz, fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
+                                    label = { Text(sizeLabel, fontSize = 11.5.sp, fontWeight = FontWeight.Bold) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = MaterialTheme.colorScheme.primary,
                                         selectedLabelColor = Color.White
-                                    )
+                                    ),
+                                    modifier = Modifier.testTag("detail_size_chip_$sz")
                                 )
                             }
                         }
@@ -981,43 +1036,82 @@ fun ProductDetailScreen(
 
                         // COLORS SELECTION
                         Text(
-                            text = "Color: ${selectedColor.name}",
+                            text = "Colour: ${selectedColor.name}",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            product.availableColors.forEach { c ->
+                            displayColors.forEach { c ->
                                 val parsedColor = try {
                                     Color(android.graphics.Color.parseColor(c.hex))
                                 } catch (e: Exception) {
                                     Color.Gray
                                 }
                                 val isSelected = selectedColor.name.equals(c.name, ignoreCase = true)
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clip(CircleShape)
-                                        .background(parsedColor)
-                                        .border(
-                                            width = if (isSelected) 2.5.dp else 1.dp,
-                                            color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = 0.3f),
-                                            shape = CircleShape
-                                        )
-                                        .clickable { viewModel.setDetailColor(c) }
+                                val colorPrice = product.calculatePrice(selectedBrand, selectedSize, effectiveDiscount, c.name)
+                                Surface(
+                                    onClick = {
+                                        viewModel.setDetailColor(c)
+                                        appliedBargainPrice = null
+                                        bargainResultMsg = ""
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                                    border = BorderStroke(
+                                        width = if (isSelected) 1.5.dp else 1.dp,
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                                    ),
+                                    modifier = Modifier.testTag("detail_color_chip_${c.name}")
                                 ) {
-                                    if (isSelected) {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = null,
-                                            tint = if (c.hex.equals("#FFFFFF", ignoreCase = true) || c.hex.equals("#F3F4F6", ignoreCase = true)) Color.Black else Color.White,
-                                            modifier = Modifier.size(16.dp)
-                                        )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                                    ) {
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier
+                                                .size(22.dp)
+                                                .clip(CircleShape)
+                                                .background(parsedColor)
+                                                .border(
+                                                    width = if (isSelected) 2.dp else 1.dp,
+                                                    color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = 0.3f),
+                                                    shape = CircleShape
+                                                )
+                                        ) {
+                                            if (isSelected) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    tint = if (c.hex.equals("#FFFFFF", ignoreCase = true) || c.hex.equals("#F3F4F6", ignoreCase = true)) Color.Black else Color.White,
+                                                    modifier = Modifier.size(13.dp)
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Column {
+                                            Text(
+                                                text = c.name,
+                                                fontSize = 11.5.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                            )
+                                            if (hasVariantPricing || colorPricesVary) {
+                                                Text(
+                                                    text = nairaFormat.format(colorPrice),
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }

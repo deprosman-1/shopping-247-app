@@ -2124,9 +2124,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             com.example.util.ProductImageHelper.preloadSingleProductGallery(getApplication(), product)
         }
         _selectedProduct.value = product
-        _detailBrand.value = product.availableBrands.firstOrNull() ?: product.brand
-        _detailSize.value = product.availableSizes.firstOrNull() ?: "Standard"
-        _detailColor.value = product.availableColors.firstOrNull() ?: ProductColor("Default", "#1E40AF")
+        val firstVariant = product.variantPrices.firstOrNull()
+        _detailBrand.value = firstVariant?.brand?.takeIf { it.isNotBlank() }
+            ?: product.availableBrands.firstOrNull() ?: product.brand
+        _detailSize.value = firstVariant?.size?.takeIf { it.isNotBlank() }
+            ?: product.availableSizes.firstOrNull() ?: "Standard"
+        _detailColor.value = if (firstVariant != null && firstVariant.colorName.isNotBlank()) {
+            product.availableColors.find { it.name.equals(firstVariant.colorName, ignoreCase = true) }
+                ?: ProductColor(firstVariant.colorName, firstVariant.colorHex.ifBlank { "#1E40AF" })
+        } else {
+            product.availableColors.firstOrNull() ?: ProductColor("Default", "#1E40AF")
+        }
         navigateTo(AppScreen.PRODUCT_DETAIL)
     }
 
@@ -2176,7 +2184,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         val allowedQuantity = quantity.coerceIn(1, remainingStock)
         val promoDisc = getEffectiveDiscountPercent(product.category)
-        val catalogPrice = product.calculatePrice(brand, size, promoDisc)
+        val catalogPrice = product.calculatePrice(brand, size, promoDisc, color.name)
         val finalUnitPrice = customBargainPrice ?: catalogPrice
         val isBargained = customBargainPrice != null && customBargainPrice < catalogPrice
 

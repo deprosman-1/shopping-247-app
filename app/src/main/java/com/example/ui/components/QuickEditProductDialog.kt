@@ -28,9 +28,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -42,6 +45,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -61,6 +65,8 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.Product
 import com.example.data.model.ProductCategory
 import com.example.data.model.ProductColor
+import com.example.data.model.ProductVariantPrice
+import com.example.ui.theme.AccentGold
 import com.example.util.ProductImageHelper
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -86,6 +92,7 @@ fun QuickEditProductDialog(
     var discountPercent by remember { mutableStateOf(product.discountPercent.toString()) }
     var imageUrl by remember { mutableStateOf(product.imageUrl) }
     var galleryUrls by remember { mutableStateOf(product.galleryUrls) }
+    var variantPrices by remember { mutableStateOf(product.variantPrices) }
     var model3dType by remember { mutableStateOf(product.model3dType) }
     var model3dExpanded by remember { mutableStateOf(false) }
     var description by remember { mutableStateOf(product.description) }
@@ -164,7 +171,7 @@ fun QuickEditProductDialog(
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    // Category Dropdown
+                    // Category Dropdown (High-Contrast Emerald & Gold with Large Bold Typography)
                     ExposedDropdownMenuBox(
                         expanded = categoryExpanded,
                         onExpandedChange = { categoryExpanded = !categoryExpanded }
@@ -173,19 +180,68 @@ fun QuickEditProductDialog(
                             value = category,
                             onValueChange = {},
                             readOnly = true,
-                            label = { Text("Product Category") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryExpanded) },
+                            label = {
+                                Text(
+                                    "Product Category",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color(0xFFFDE68A)
+                                )
+                            },
+                            textStyle = MaterialTheme.typography.titleMedium.copy(
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Black,
+                                color = Color.White
+                            ),
+                            trailingIcon = {
+                                Icon(
+                                    imageVector = if (categoryExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                    contentDescription = "Expand Category List",
+                                    tint = AccentGold
+                                )
+                            },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = Color(0xFF064E3B),
+                                unfocusedContainerColor = Color(0xFF052E16),
+                                focusedBorderColor = AccentGold,
+                                unfocusedBorderColor = Color(0xFF10B981),
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(14.dp),
                             modifier = Modifier
                                 .menuAnchor()
                                 .fillMaxWidth()
                         )
                         ExposedDropdownMenu(
                             expanded = categoryExpanded,
-                            onDismissRequest = { categoryExpanded = false }
+                            onDismissRequest = { categoryExpanded = false },
+                            modifier = Modifier
+                                .background(Color(0xFF052E16))
                         ) {
                             ProductCategory.values().forEach { cat ->
+                                val isCatSelected = cat.displayName.equals(category, ignoreCase = true)
                                 DropdownMenuItem(
-                                    text = { Text(cat.displayName) },
+                                    text = {
+                                        Text(
+                                            text = cat.displayName,
+                                            fontSize = 17.sp,
+                                            fontWeight = if (isCatSelected) FontWeight.Black else FontWeight.Bold,
+                                            color = if (isCatSelected) AccentGold else Color(0xFFF8FAFC)
+                                        )
+                                    },
+                                    trailingIcon = if (isCatSelected) {
+                                        {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = "Selected Category",
+                                                tint = AccentGold
+                                            )
+                                        }
+                                    } else null,
+                                    modifier = Modifier.background(
+                                        if (isCatSelected) Color(0xFF065F46) else Color(0xFF052E16)
+                                    ),
                                     onClick = {
                                         category = cat.displayName
                                         categoryExpanded = false
@@ -305,6 +361,32 @@ fun QuickEditProductDialog(
                     TickableColourPicker(
                         selectedColors = selectedColors,
                         onColorsChanged = { selectedColors = it }
+                    )
+
+                    VariantPriceMatrixEditor(
+                        primaryBrand = brand,
+                        availableBrandsCsv = availableBrands,
+                        availableSizesCsv = availableSizes,
+                        selectedColors = selectedColors,
+                        basePriceText = basePrice,
+                        variantPrices = variantPrices,
+                        onVariantPricesChanged = { variantPrices = it },
+                        onSyncVariantCatalogOptions = { addedBrand, addedSize, addedColor ->
+                            if (brand.isBlank()) brand = addedBrand
+                            val curBrands = availableBrands.split(",").map { it.trim() }.filter { it.isNotBlank() }.toMutableList()
+                            if (addedBrand.isNotBlank() && curBrands.none { it.equals(addedBrand, true) }) {
+                                curBrands.add(addedBrand)
+                                availableBrands = curBrands.joinToString(", ")
+                            }
+                            val curSizes = availableSizes.split(",").map { it.trim() }.filter { it.isNotBlank() }.toMutableList()
+                            if (addedSize.isNotBlank() && curSizes.none { it.equals(addedSize, true) }) {
+                                curSizes.add(addedSize)
+                                availableSizes = curSizes.joinToString(", ")
+                            }
+                            if (selectedColors.none { it.name.equals(addedColor.name, true) }) {
+                                selectedColors = selectedColors + addedColor
+                            }
+                        }
                     )
 
                     // Image URL / File Selector
@@ -503,13 +585,43 @@ fun QuickEditProductDialog(
                             val discVal = discountPercent.toIntOrNull() ?: product.discountPercent
                             val expVal = expiryMonthsRemaining.toIntOrNull() ?: product.expiryMonthsRemaining
 
+                            val mergedBrands = buildList {
+                                if (availableBrands.isNotBlank()) {
+                                    availableBrands.split(",").map { it.trim() }.filter { it.isNotBlank() }.forEach { add(it) }
+                                } else {
+                                    add(brand.trim())
+                                }
+                                variantPrices.forEach { vp ->
+                                    if (vp.brand.isNotBlank() && none { it.equals(vp.brand, true) }) add(vp.brand)
+                                }
+                            }
+                            val mergedSizes = buildList {
+                                if (availableSizes.isNotBlank()) {
+                                    availableSizes.split(",").map { it.trim() }.filter { it.isNotBlank() }.forEach { add(it) }
+                                } else if (variantPrices.isEmpty()) {
+                                    add("Standard")
+                                }
+                                variantPrices.forEach { vp ->
+                                    if (vp.size.isNotBlank() && none { it.equals(vp.size, true) }) add(vp.size)
+                                }
+                            }.ifEmpty { listOf("Standard") }
+                            val mergedColors = buildList {
+                                val baseColors = if (selectedColors.isNotEmpty()) selectedColors else product.availableColors
+                                baseColors.forEach { add(it) }
+                                variantPrices.forEach { vp ->
+                                    if (vp.colorName.isNotBlank() && none { it.name.equals(vp.colorName, true) }) {
+                                        add(ProductColor(vp.colorName, vp.colorHex))
+                                    }
+                                }
+                            }
+
                             val updatedProd = product.copy(
                                 title = title.trim(),
                                 category = category,
                                 brand = brand.trim(),
-                                availableBrands = if (availableBrands.isNotBlank()) availableBrands.split(",").map { it.trim() } else listOf(brand.trim()),
-                                availableSizes = if (availableSizes.isNotBlank()) availableSizes.split(",").map { it.trim() } else listOf("Standard"),
-                                availableColors = if (selectedColors.isNotEmpty()) selectedColors else product.availableColors,
+                                availableBrands = mergedBrands,
+                                availableSizes = mergedSizes,
+                                availableColors = mergedColors,
                                 basePrice = priceVal,
                                 costPrice = costVal,
                                 discountPercent = discVal,
@@ -518,7 +630,8 @@ fun QuickEditProductDialog(
                                 imageUrl = if (imageUrl.isNotBlank()) imageUrl.trim() else product.imageUrl,
                                 galleryUrls = galleryUrls.map { it.trim() }.filter { it.isNotBlank() && it != imageUrl.trim() }.distinct(),
                                 model3dType = model3dType,
-                                description = description.ifBlank { product.description }
+                                description = description.ifBlank { product.description },
+                                variantPrices = variantPrices
                             )
 
                             onSave(updatedProd)

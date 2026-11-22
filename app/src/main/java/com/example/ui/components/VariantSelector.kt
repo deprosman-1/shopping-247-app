@@ -112,7 +112,7 @@ fun VariantSelector(
         }
     }
 
-    val dynamicPrice = product.calculatePrice(selectedBrand, selectedSize)
+    val dynamicPrice = product.calculatePrice(selectedBrand, selectedSize, selectedColor = selectedColor.name)
 
     val isShoeProduct = product.category.contains("Shoe", ignoreCase = true) ||
             product.category.contains("Footwear", ignoreCase = true) ||
@@ -214,7 +214,7 @@ fun VariantSelector(
                         selected = isSelected,
                         onClick = {
                             onBrandSelected(brandName)
-                            val updatedPrice = product.calculatePrice(brandName, selectedSize)
+                            val updatedPrice = product.calculatePrice(brandName, selectedSize, selectedColor = selectedColor.name)
                             Toast.makeText(context, "Brand '$brandName' selected • Price: ${nairaFormat.format(updatedPrice)}", Toast.LENGTH_SHORT).show()
                         },
                         label = { Text(brandName) },
@@ -357,8 +357,8 @@ fun VariantSelector(
                         onClick = {
                             val targetSelected = if (isShoeProduct) fullUniversalLabel else rawSizeName
                             onSizeSelected(targetSelected)
-                            val updatedPrice = product.calculatePrice(selectedBrand, rawSizeName)
-                            Toast.makeText(context, "Shoe Size '$displayLabel' selected • Price: ${nairaFormat.format(updatedPrice)}", Toast.LENGTH_SHORT).show()
+                            val updatedPrice = product.calculatePrice(selectedBrand, rawSizeName, selectedColor = selectedColor.name)
+                            Toast.makeText(context, "Size '$displayLabel' selected • Price: ${nairaFormat.format(updatedPrice)}", Toast.LENGTH_SHORT).show()
                         },
                         label = { Text(displayLabel, fontWeight = FontWeight.Bold) },
                         shape = RoundedCornerShape(10.dp),
@@ -402,7 +402,8 @@ fun VariantSelector(
                             .clip(RoundedCornerShape(12.dp))
                             .clickable {
                                 onColorSelected(colorItem)
-                                Toast.makeText(context, "Colour '${colorItem.name}' selected", Toast.LENGTH_SHORT).show()
+                                val updatedPrice = product.calculatePrice(selectedBrand, selectedSize, selectedColor = colorItem.name)
+                                Toast.makeText(context, "Colour '${colorItem.name}' selected • Price: ${nairaFormat.format(updatedPrice)}", Toast.LENGTH_SHORT).show()
                             }
                             .padding(4.dp)
                             .testTag("color_chip_${colorItem.name}")

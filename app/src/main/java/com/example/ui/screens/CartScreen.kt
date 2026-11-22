@@ -409,7 +409,7 @@ private fun CartItemCard(
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "${item.selectedBrand} • ${item.selectedSize}",
+                        text = "${item.selectedBrand} / ${item.selectedSize} / ${item.selectedColor.name}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

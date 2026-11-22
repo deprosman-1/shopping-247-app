@@ -116,6 +116,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChipDefaults
 import com.example.ui.components.QuickEditProductDialog
 import com.example.ui.components.SizeSelectionBox
+import com.example.ui.components.VariantPriceMatrixEditor
 import com.example.util.WhatsAppHelper
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -130,6 +131,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -1828,6 +1830,7 @@ private fun ProductManagementTab(
     var discountPercent by remember { mutableStateOf("0") }
     var imageUrl by remember { mutableStateOf("") }
     var galleryUrls by remember { mutableStateOf<List<String>>(emptyList()) }
+    var variantPrices by remember { mutableStateOf<List<com.example.data.model.ProductVariantPrice>>(emptyList()) }
     var model3dType by remember { mutableStateOf("SNEAKER") }
     var description by remember { mutableStateOf("") }
 
@@ -1868,6 +1871,7 @@ private fun ProductManagementTab(
         discountPercent = "0"
         imageUrl = ""
         galleryUrls = emptyList()
+        variantPrices = emptyList()
         description = ""
     }
 
@@ -2057,7 +2061,7 @@ private fun ProductManagementTab(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Category Selector Dropdown
+                    // Category Selector Dropdown (High-Contrast Emerald & Gold with Large Bold Typography)
                     ExposedDropdownMenuBox(
                         expanded = categoryDropdownExpanded,
                         onExpandedChange = { categoryDropdownExpanded = !categoryDropdownExpanded }
@@ -2066,19 +2070,70 @@ private fun ProductManagementTab(
                             value = category,
                             onValueChange = {},
                             readOnly = true,
-                            label = { Text("Product Category (${ProductCategory.entries.size} Available)") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryDropdownExpanded) },
+                            label = {
+                                Text(
+                                    "Product Category (${ProductCategory.entries.size} Available)",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color(0xFFFDE68A)
+                                )
+                            },
+                            textStyle = MaterialTheme.typography.titleMedium.copy(
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Black,
+                                color = Color.White
+                            ),
+                            trailingIcon = {
+                                Icon(
+                                    imageVector = if (categoryDropdownExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                    contentDescription = "Expand Category List",
+                                    tint = AccentGold
+                                )
+                            },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = Color(0xFF064E3B),
+                                unfocusedContainerColor = Color(0xFF052E16),
+                                focusedBorderColor = AccentGold,
+                                unfocusedBorderColor = Color(0xFF10B981),
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(14.dp),
                             modifier = Modifier
                                 .menuAnchor()
                                 .fillMaxWidth()
+                                .testTag("admin_category_dropdown_field")
                         )
                         ExposedDropdownMenu(
                             expanded = categoryDropdownExpanded,
-                            onDismissRequest = { categoryDropdownExpanded = false }
+                            onDismissRequest = { categoryDropdownExpanded = false },
+                            modifier = Modifier
+                                .background(Color(0xFF052E16))
+                                .border(1.5.dp, AccentGold, RoundedCornerShape(12.dp))
                         ) {
                             ProductCategory.values().forEach { cat ->
+                                val isCatSelected = cat.displayName.equals(category, ignoreCase = true)
                                 DropdownMenuItem(
-                                    text = { Text(cat.displayName) },
+                                    text = {
+                                        Text(
+                                            text = cat.displayName,
+                                            fontSize = 17.sp,
+                                            fontWeight = if (isCatSelected) FontWeight.Black else FontWeight.Bold,
+                                            color = if (isCatSelected) AccentGold else Color(0xFFF8FAFC)
+                                        )
+                                    },
+                                    trailingIcon = if (isCatSelected) {
+                                        {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = "Selected Category",
+                                                tint = AccentGold
+                                            )
+                                        }
+                                    } else null,
+                                    modifier = Modifier.background(
+                                        if (isCatSelected) Color(0xFF065F46) else Color(0xFF052E16)
+                                    ),
                                     onClick = {
                                         category = cat.displayName
                                         categoryDropdownExpanded = false
@@ -2252,6 +2307,37 @@ private fun ProductManagementTab(
                     TickableColourPicker(
                         selectedColors = selectedColors,
                         onColorsChanged = { selectedColors = it }
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    VariantPriceMatrixEditor(
+                        primaryBrand = brand,
+                        availableBrandsCsv = availableBrands,
+                        availableSizesCsv = availableSizes,
+                        selectedColors = selectedColors,
+                        basePriceText = basePrice,
+                        variantPrices = variantPrices,
+                        onVariantPricesChanged = { variantPrices = it },
+                        onSyncVariantCatalogOptions = { addedBrand, addedSize, addedColor ->
+                            if (brand.isBlank()) brand = addedBrand
+                            val curBrands = availableBrands.split(",").map { it.trim() }.filter { it.isNotBlank() }.toMutableList()
+                            if (addedBrand.isNotBlank() && curBrands.none { it.equals(addedBrand, true) }) {
+                                curBrands.add(addedBrand)
+                                availableBrands = curBrands.joinToString(", ")
+                            }
+                            val curSizes = availableSizes.split(",").map { it.trim() }.filter { it.isNotBlank() }.toMutableList()
+                            if (addedSize.isNotBlank() && curSizes.none { it.equals(addedSize, true) }) {
+                                curSizes.add(addedSize)
+                                availableSizes = curSizes.joinToString(", ")
+                            }
+                            if (selectedColors.none { it.name.equals(addedColor.name, true) }) {
+                                selectedColors = selectedColors + addedColor
+                            }
+                            if (basePrice.isBlank() && variantPrices.isNotEmpty()) {
+                                basePrice = variantPrices.minOf { it.amount }.toInt().toString()
+                            }
+                        }
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -2581,15 +2667,21 @@ private fun ProductManagementTab(
 
                     Button(
                         onClick = {
-                            if (title.isBlank() || brand.isBlank() || basePrice.isBlank()) {
-                                Toast.makeText(context, "Please enter title, brand, and price", Toast.LENGTH_SHORT).show()
+                            val fallbackBrand = brand.trim().ifBlank {
+                                variantPrices.firstOrNull()?.brand.orEmpty()
+                            }
+                            val effectiveBasePriceVal = basePrice.toDoubleOrNull()?.takeIf { it > 0.0 }
+                                ?: variantPrices.minOfOrNull { it.amount }
+                                ?: 0.0
+                            if (title.isBlank() || fallbackBrand.isBlank() || effectiveBasePriceVal <= 0.0) {
+                                Toast.makeText(context, "Please enter title, brand, and price (or add variant prices)", Toast.LENGTH_SHORT).show()
                                 return@Button
                             }
                             if (imageUrl.isBlank()) {
                                 Toast.makeText(context, "Please pick the product photo from gallery or paste an image URL", Toast.LENGTH_LONG).show()
                                 return@Button
                             }
-                            val priceVal = basePrice.toDoubleOrNull() ?: 0.0
+                            val priceVal = effectiveBasePriceVal
                             val costVal = costPrice.toDoubleOrNull() ?: (priceVal * 0.70)
                             val qtyVal = quantity.toIntOrNull() ?: 10
                             val cleanMainImage = imageUrl.trim()
@@ -2597,14 +2689,44 @@ private fun ProductManagementTab(
                                 .filter { it.isNotBlank() && it != cleanMainImage }
                                 .distinct()
 
+                            val mergedBrands = buildList {
+                                if (availableBrands.isNotBlank()) {
+                                    availableBrands.split(",").map { it.trim() }.filter { it.isNotBlank() }.forEach { add(it) }
+                                } else {
+                                    add(fallbackBrand)
+                                }
+                                variantPrices.forEach { vp ->
+                                    if (vp.brand.isNotBlank() && none { it.equals(vp.brand, true) }) add(vp.brand)
+                                }
+                            }
+                            val mergedSizes = buildList {
+                                if (availableSizes.isNotBlank()) {
+                                    availableSizes.split(",").map { it.trim() }.filter { it.isNotBlank() }.forEach { add(it) }
+                                } else if (variantPrices.isEmpty()) {
+                                    add("Standard")
+                                }
+                                variantPrices.forEach { vp ->
+                                    if (vp.size.isNotBlank() && none { it.equals(vp.size, true) }) add(vp.size)
+                                }
+                            }.ifEmpty { listOf("Standard") }
+                            val mergedColors = buildList {
+                                val baseColors = if (selectedColors.isNotEmpty()) selectedColors else listOf(ProductColor("Black", "#000000"))
+                                baseColors.forEach { add(it) }
+                                variantPrices.forEach { vp ->
+                                    if (vp.colorName.isNotBlank() && none { it.name.equals(vp.colorName, true) }) {
+                                        add(ProductColor(vp.colorName, vp.colorHex))
+                                    }
+                                }
+                            }
+
                             val newProd = Product(
                                 id = if (isEditing && editingId.isNotBlank()) editingId else UUID.randomUUID().toString(),
                                 title = title.trim(),
                                 category = category,
-                                brand = brand.trim(),
-                                availableBrands = if (availableBrands.isNotBlank()) availableBrands.split(",").map { it.trim() } else listOf(brand.trim()),
-                                availableSizes = if (availableSizes.isNotBlank()) availableSizes.split(",").map { it.trim() } else listOf("Standard"),
-                                availableColors = if (selectedColors.isNotEmpty()) selectedColors else listOf(ProductColor("Black", "#000000")),
+                                brand = fallbackBrand,
+                                availableBrands = mergedBrands,
+                                availableSizes = mergedSizes,
+                                availableColors = mergedColors,
                                 basePrice = priceVal,
                                 costPrice = costVal,
                                 discountPercent = discountPercent.toIntOrNull() ?: 0,
@@ -2613,7 +2735,8 @@ private fun ProductManagementTab(
                                 galleryUrls = cleanGallery,
                                 model3dType = model3dType,
                                 description = description.ifBlank { "High-end product with full 3D interactive preview." },
-                                createdAt = System.currentTimeMillis()
+                                createdAt = System.currentTimeMillis(),
+                                variantPrices = variantPrices
                             )
 
                             val wasEditing = isEditing
@@ -3174,6 +3297,7 @@ private fun ProductManagementTab(
                         discountPercent = item.discountPercent.toString()
                         imageUrl = item.imageUrl
                         galleryUrls = item.galleryUrls
+                        variantPrices = item.variantPrices
                         description = item.description
                         coroutineScope.launch { listState.animateScrollToItem(0) }
                         Toast.makeText(context, "Loaded '${item.title}' into Edit Form at top", Toast.LENGTH_SHORT).show()
@@ -3207,7 +3331,7 @@ private fun ProductManagementTab(
                         fontWeight = FontWeight.Black
                     )
                     Text(
-                        text = "Across 7 product categories",
+                        text = "Across ${ProductCategory.entries.size} product categories",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -3270,6 +3394,7 @@ private fun ProductManagementTab(
                         discountPercent = item.discountPercent.toString()
                         imageUrl = item.imageUrl
                         galleryUrls = item.galleryUrls
+                        variantPrices = item.variantPrices
                         description = item.description
 
                         // Smooth scroll to top form
@@ -3332,6 +3457,7 @@ private fun ProductManagementTab(
                         discountPercent = item.discountPercent.toString()
                         imageUrl = item.imageUrl
                         galleryUrls = item.galleryUrls
+                        variantPrices = item.variantPrices
                         description = item.description
 
                         coroutineScope.launch {

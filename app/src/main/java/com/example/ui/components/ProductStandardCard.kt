@@ -109,8 +109,11 @@ fun ProductStandardCard(
     var addedFeedback by remember(product.id) { mutableStateOf(false) }
 
     val effectiveDiscount = if (promoDiscountPercent > 0) promoDiscountPercent else product.discountPercent
-    val displayPrice = remember(product.id, product.basePrice, product.brand, product.availableSizes, effectiveDiscount) {
+    val displayPrice = remember(product.id, product.basePrice, product.brand, product.availableSizes, product.variantPrices, effectiveDiscount) {
         product.calculatePrice(promoDiscountPercent = effectiveDiscount)
+    }
+    val hasDistinctVariantPrices = remember(product.variantPrices) {
+        product.variantPrices.map { it.amount }.distinct().size > 1
     }
     val formattedDisplayPrice = remember(displayPrice) { formatNairaCompact(displayPrice) }
     val formattedOriginalPrice = remember(product.basePrice) { formatNairaCompact(product.basePrice) }
@@ -582,6 +585,16 @@ fun ProductStandardCard(
                                     fontSize = 10.sp,
                                     textDecoration = TextDecoration.LineThrough,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                )
+                            } else if (hasDistinctVariantPrices) {
+                                val minV = product.minVariantAmount() ?: displayPrice
+                                val maxV = product.maxVariantAmount() ?: displayPrice
+                                Text(
+                                    text = "${formatNairaCompact(minV)}–${formatNairaCompact(maxV)}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 9.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = CyberCyan
                                 )
                             }
                         }
