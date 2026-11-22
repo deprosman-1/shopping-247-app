@@ -10741,6 +10741,77 @@ private fun LiveCallsAdminTab(viewModel: MainViewModel) {
                 }
             }
         }
+
+        // Admin Live Audio & Video Quick Operating Guide
+        var showAdminCallGuide by remember { mutableStateOf(true) }
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF052E16)),
+            border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.45f)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("admin_live_call_guide_card")
+        ) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showAdminCallGuide = !showAdminCallGuide },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.SupportAgent,
+                            contentDescription = "Admin Call Guide",
+                            tint = AccentGold,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "How Admin Operates Audio & Video Calls",
+                            color = AccentGold,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 13.5.sp
+                        )
+                    }
+                    Icon(
+                        imageVector = if (showAdminCallGuide) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (showAdminCallGuide) "Hide Guide" else "Show Guide",
+                        tint = AccentGold
+                    )
+                }
+
+                if (showAdminCallGuide) {
+                    HorizontalDivider(color = AccentGold.copy(alpha = 0.25f))
+                    val adminSteps = listOf(
+                        "1. Go Online" to "Turn ON the switch above so customers see Admin Online. Connect Store Cloud Sync for cross-device calls.",
+                        "2. Answer Rings" to "Tap Answer Audio or Answer Video in the queue above—or on the floating alert banner from any Admin tab.",
+                        "3. Switch Mid-Call" to "Inside the call, tap To Video / To Audio anytime without disconnecting, and toggle Mic, Speaker, or Flip Camera.",
+                        "4. Live Chat & Orders" to "Open Chat to answer text queries or inspect the customer's latest order ID, and allow Mic/Camera when prompted."
+                    )
+                    adminSteps.forEach { (stepTitle, stepDesc) ->
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = stepTitle,
+                                color = Color(0xFF6EE7B7),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                            Text(
+                                text = stepDesc,
+                                color = Color.White.copy(alpha = 0.88f),
+                                fontSize = 11.5.sp,
+                                lineHeight = 16.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

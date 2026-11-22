@@ -52,7 +52,10 @@ import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.HeadsetMic
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.PhoneInTalk
@@ -433,6 +436,22 @@ fun LiveCallScreen(
                                             }
                                         }
                                     }
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = DeepEmerald.copy(alpha = 0.72f),
+                                        border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.3f)),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("admin_studio_quick_guide_strip")
+                                    ) {
+                                        Text(
+                                            text = "Admin Guide: Switch Desk ON -> Tap Audio or Video when a customer rings -> Switch Audio/Video, Mute, Speaker, Flip Camera, or Chat anytime during the call.",
+                                            color = AccentGold.copy(alpha = 0.95f),
+                                            fontSize = 11.sp,
+                                            lineHeight = 15.sp,
+                                            modifier = Modifier.padding(10.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -674,6 +693,87 @@ fun LiveCallScreen(
                                         Icon(Icons.Default.Call, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(Modifier.width(6.dp))
                                         Text("Direct Dial", fontSize = 12.sp)
+                                    }
+                                }
+                            }
+                        }
+
+                        // Customer Quick Operating Guide Card
+                        var showCustomerGuide by remember { mutableStateOf(true) }
+                        Card(
+                            shape = RoundedCornerShape(20.dp),
+                            colors = CardDefaults.cardColors(containerColor = EmeraldSurface.copy(alpha = 0.85f)),
+                            border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.45f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("customer_live_call_guide_card")
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { showCustomerGuide = !showCustomerGuide },
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.HelpOutline,
+                                            contentDescription = "How to Use Guide",
+                                            tint = AccentGold,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            text = "How to Use Live Audio & Video Call",
+                                            color = AccentGold,
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 14.sp
+                                        )
+                                    }
+                                    Icon(
+                                        imageVector = if (showCustomerGuide) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                        contentDescription = if (showCustomerGuide) "Hide Guide" else "Show Guide",
+                                        tint = AccentGold
+                                    )
+                                }
+
+                                AnimatedVisibility(visible = showCustomerGuide) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        val customerSteps = listOf(
+                                            "1. Pick Mode & Topic" to "Choose Audio Talk or Video Call above, pick a topic (e.g. Order & Payment), and add an optional quick note.",
+                                            "2. Connect Live" to "Tap Start Live Audio Call or Start Live Video Call and allow Microphone (plus Camera for video) permission.",
+                                            "3. Switch & Chat Mid-Call" to "Tap To Video / To Audio anytime without hanging up. Use Mic, Speaker, Flip Camera, Interactive Chat, or quick prompt buttons.",
+                                            "4. Direct Backup" to "If Admin is offline, tap WhatsApp Admin or Direct Dial right above to reach support immediately."
+                                        )
+                                        customerSteps.forEach { (stepTitle, stepBody) ->
+                                            Surface(
+                                                shape = RoundedCornerShape(12.dp),
+                                                color = DeepEmerald.copy(alpha = 0.65f),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Column(
+                                                    modifier = Modifier.padding(10.dp),
+                                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                                ) {
+                                                    Text(
+                                                        text = stepTitle,
+                                                        color = Color(0xFF6EE7B7),
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 12.sp
+                                                    )
+                                                    Text(
+                                                        text = stepBody,
+                                                        color = Color.White.copy(alpha = 0.88f),
+                                                        fontSize = 11.5.sp,
+                                                        lineHeight = 16.sp
+                                                    )
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
