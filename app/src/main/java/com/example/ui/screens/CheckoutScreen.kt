@@ -114,8 +114,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import com.example.R
 import com.example.AppScreen
 import com.example.MainViewModel
+import com.example.data.model.CreditVerificationStatus
 import com.example.data.model.Customer
 import com.example.data.model.CustomerDeliveryInfo
 import com.example.data.model.DeliveryZoneOption
@@ -135,11 +139,16 @@ import com.example.util.DeliveryZoneHelper
 import com.example.util.PdfInvoiceExporter
 import com.example.util.ProductImageHelper
 import com.example.util.WhatsAppHelper
+import com.example.util.WordInvoiceExporter
+import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Switch
 import androidx.compose.ui.graphics.FilterQuality
 import com.example.ui.theme.MoniepointBlue
 import com.example.ui.theme.OPayGreen
+import com.example.ui.theme.PalmPayPurple
 import com.example.ui.theme.PosPurple
 import com.example.ui.theme.SuccessGreen
 import java.text.NumberFormat
@@ -243,6 +252,7 @@ fun CheckoutScreen(
     }
     var isPlacingOrder by remember { mutableStateOf(false) }
     var showNoReceiptDialog by remember { mutableStateOf(false) }
+    var activeDirectPortalMethod by remember { mutableStateOf<PaymentMethod?>(null) }
     var appliedCheckoutBargainPrice by remember { mutableStateOf<Double?>(null) }
     var proposedCheckoutBargainInput by remember { mutableStateOf("") }
     var couponCodeInput by rememberSaveable { mutableStateOf("") }
@@ -453,11 +463,14 @@ fun CheckoutScreen(
                                     ?: storeProfile.moniepointAccountNumber.ifBlank { "Contact Store for Account" }
                                 val monieName = activePartnerFolder?.moniepointAccountName?.takeIf { it.isNotBlank() }
                                     ?: storeProfile.moniepointAccountName.ifBlank { storeProfile.storeName }
+                                val palmpayNum = storeProfile.palmpayAccountNumber.ifBlank { storeProfile.opayAccountNumber.ifBlank { "Contact Store for Account" } }
+                                val palmpayName = storeProfile.palmpayAccountName.ifBlank { storeProfile.storeName }
                                 val posId = storeProfile.posTerminalId.ifBlank { storeProfile.storeName }
                                 val folderTag = if (activePartnerFolder != null) " [Folder: ${activePartnerFolder.businessName}]" else ""
                                 val accountOrTerminal = when (selectedPaymentMethod) {
                                     PaymentMethod.OPAY -> "OPay: $opayNum ($opayName)$folderTag"
                                     PaymentMethod.MONIEPOINT -> "Moniepoint: $monieNum ($monieName)$folderTag"
+                                    PaymentMethod.PALMPAY -> "PalmPay: $palmpayNum ($palmpayName)$folderTag"
                                     PaymentMethod.POS_TRANSFER -> "POS Terminal: $posId"
                                     PaymentMethod.CASH_ON_DELIVERY -> "Cash / Card at Doorstep"
                                 }
@@ -575,6 +588,10 @@ fun CheckoutScreen(
                             },
                             storeProfile = storeProfile,
                             partnerFolder = activePartnerFolder,
+                            onOpenDirectPortal = { portalMethod ->
+                                selectedPaymentMethod = portalMethod
+                                activeDirectPortalMethod = portalMethod
+                            },
                             viewModel = viewModel
                         )
                     }
@@ -626,6 +643,85 @@ fun CheckoutScreen(
             },
             shape = RoundedCornerShape(16.dp),
             containerColor = Color.White
+        )
+    }
+
+    activeDirectPortalMethod?.let { portalMethod ->
+        val payableNow = appliedCheckoutBargainPrice ?: (total - couponDiscountAmount - loyaltyDiscountAmount).coerceAtLeast(0.0)
+        val portalAcctNum = when (portalMethod) {
+            PaymentMethod.OPAY -> activePartnerFolder?.opayAccountNumber?.takeIf { it.isNotBlank() } ?: storeProfile.opayAccountNumber.ifBlank { "9012345678" }
+            PaymentMethod.MONIEPOINT -> activePartnerFolder?.moniepointAccountNumber?.takeIf { it.isNotBlank() } ?: storeProfile.moniepointAccountNumber.ifBlank { "5012345678" }
+            PaymentMethod.PALMPAY -> storeProfile.palmpayAccountNumber.ifBlank { "8012345678" }
+            else -> storeProfile.opayAccountNumber.ifBlank { "9012345678" }
+        }
+        val portalAcctName = when (portalMethod) {
+            PaymentMethod.OPAY -> activePartnerFolder?.opayAccountName?.takeIf { it.isNotBlank() } ?: storeProfile.opayAccountName.ifBlank { storeProfile.storeName }
+            PaymentMethod.MONIEPOINT -> activePartnerFolder?.moniepointAccountName?.takeIf { it.isNotBlank() } ?: storeProfile.moniepointAccountName.ifBlank { storeProfile.storeName }
+            PaymentMethod.PALMPAY -> storeProfile.palmpayAccountName.ifBlank { storeProfile.storeName }
+            else -> storeProfile.storeName
+        }
+        DirectPortalCheckoutDialog(
+            paymentMethod = portalMethod,
+            accountNumber = portalAcctNum,
+            accountName = portalAcctName,
+            storeName = storeProfile.storeName,
+            payableAmount = payableNow,
+            nairaFormat = nairaFormat,
+            customerName = fullName,
+            customerPhone = phone,
+            customerAddress = address,
+            isProcessing = isPlacingOrder,
+            onDismiss = { activeDirectPortalMethod = null },
+            onPayNow = { simulateCredited, simulateNetDelay ->
+                if (fullName.isBlank() || phone.isBlank() || address.isBlank()) {
+                    Toast.makeText(context, "Please fill Customer Delivery Information below first!", Toast.LENGTH_LONG).show()
+                    return@DirectPortalCheckoutDialog
+                }
+                if (cartItems.isEmpty() && liveOrder == null) {
+                    Toast.makeText(context, "Your cart is empty", Toast.LENGTH_SHORT).show()
+                    return@DirectPortalCheckoutDialog
+                }
+                isPlacingOrder = true
+                viewModel.processDirectPortalPayment(
+                    customerName = fullName,
+                    customerEmail = "",
+                    customerPhone = phone,
+                    deliveryAddress = address,
+                    paymentMethod = portalMethod,
+                    portalAccountNumber = portalAcctNum,
+                    portalAccountName = portalAcctName,
+                    senderName = senderName.ifBlank { fullName },
+                    deliveryConditionTitle = "${selectedDeliveryOption?.title ?: "Standard Delivery"} (${selectedDeliveryZone.zoneName} • ${selectedDeliveryZone.etaLabel})",
+                    deliveryFeeAmount = deliveryFee,
+                    simulateCreditAlertReceived = simulateCredited,
+                    simulateNetworkDelay = simulateNetDelay,
+                    customBargainTotal = appliedCheckoutBargainPrice,
+                    appliedCouponCode = appliedCouponCode,
+                    couponDiscountAmount = couponDiscountAmount,
+                    loyaltyPointsRedeemed = appliedLoyaltyPoints,
+                    loyaltyDiscountAmount = loyaltyDiscountAmount,
+                    onSuccess = { order ->
+                        isPlacingOrder = false
+                        activeDirectPortalMethod = null
+                        placedOrderSnapshot = order
+                        placedOrderId = order.orderId
+                        currentStepName = CheckoutStep.PAYMENT_CONFIRMED_STATUS.name
+                        val statusMsg = when (order.creditVerificationStatus) {
+                            CreditVerificationStatus.CONFIRMED_CREDITED ->
+                                "✅ ORDER & PAYMENT CONFIRMATION RECEIPT generated! Exact amount debited & 24/7 SHOPPING credited."
+                            CreditVerificationStatus.NETWORK_DELAYED_PENDING ->
+                                "⏳ Network delay queued — transfer will push & confirm automatically when network restores."
+                            else ->
+                                "⚠️ ORDER & PAYMENT FAILED: 24/7 SHOPPING has not received credit alert yet."
+                        }
+                        Toast.makeText(context, statusMsg, Toast.LENGTH_LONG).show()
+                    },
+                    onFailure = { err ->
+                        isPlacingOrder = false
+                        Toast.makeText(context, "Portal error: $err", Toast.LENGTH_LONG).show()
+                    }
+                )
+            }
         )
     }
 }
@@ -992,7 +1088,26 @@ private fun PaymentReceiptUploadStep(
 
     Spacer(modifier = Modifier.height(10.dp))
 
-    // Payment Option 3: POS TRANSFER
+    // Payment Option 3: PALMPAY
+    PaymentOptionCard(
+        title = "PalmPay Wallet / Transfer",
+        subtitle = "Direct settlement via PalmPay Account",
+        brandColor = PalmPayPurple,
+        icon = Icons.Default.AccountBalanceWallet,
+        isSelected = selectedPaymentMethod == PaymentMethod.PALMPAY,
+        onSelect = { onSelectPaymentMethod(PaymentMethod.PALMPAY) }
+    ) {
+        BankTransferDetailsBox(
+            bankName = "PalmPay Digital Bank",
+            accountNumber = storeProfile.palmpayAccountNumber.ifBlank { storeProfile.opayAccountNumber.ifBlank { "Contact Store for Account" } },
+            accountName = storeProfile.palmpayAccountName.ifBlank { storeProfile.storeName },
+            brandColor = PalmPayPurple
+        )
+    }
+
+    Spacer(modifier = Modifier.height(10.dp))
+
+    // Payment Option 4: POS TRANSFER
     PaymentOptionCard(
         title = "POS Terminal Transfer",
         subtitle = "Terminal debit swipe or agent slip transfer",
@@ -1159,13 +1274,24 @@ private fun PaymentConfirmedStatusStep(
     var viewingSlipZoom by remember { mutableStateOf(false) }
     val slipModel = receiptImageUri ?: order?.receiptImageUrl?.takeIf { it.isNotBlank() }
 
-    val isConfirmed = order?.status == OrderStatus.VERIFIED ||
+    val creditStatus = order?.creditVerificationStatus ?: CreditVerificationStatus.PENDING_CREDIT
+    val isConfirmed = (order?.isCreditAlertConfirmed == true) ||
+            creditStatus == CreditVerificationStatus.CONFIRMED_CREDITED ||
+            order?.status == OrderStatus.VERIFIED ||
+            order?.status == OrderStatus.CONFIRMED ||
             order?.status == OrderStatus.OUT_FOR_DELIVERY ||
             order?.status == OrderStatus.DELIVERED
+    val isFailedUncredited = creditStatus == CreditVerificationStatus.PAYMENT_FAILED_UNCREDITED && !isConfirmed
+    val isNetworkDelayed = creditStatus == CreditVerificationStatus.NETWORK_DELAYED_PENDING && !isConfirmed
 
-    val themeColor = if (isConfirmed) SuccessGreen else Color(0xFFD97706)
-    val statusBg = if (isConfirmed) SuccessGreen.copy(alpha = 0.1f) else Color(0xFFD97706).copy(alpha = 0.12f)
-    val statusBorder = if (isConfirmed) SuccessGreen.copy(alpha = 0.5f) else Color(0xFFD97706).copy(alpha = 0.5f)
+    val themeColor = when {
+        isConfirmed -> SuccessGreen
+        isFailedUncredited -> Color(0xFFDC2626)
+        else -> Color(0xFFD97706)
+    }
+    val statusBg = themeColor.copy(alpha = 0.12f)
+    val statusBorder = themeColor.copy(alpha = 0.55f)
+    var targetRecipientSelected by remember { mutableStateOf(true) }
 
     Card(
         shape = RoundedCornerShape(22.dp),
@@ -1177,20 +1303,63 @@ private fun PaymentConfirmedStatusStep(
             modifier = Modifier.padding(18.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Header: Official Store Label
+            // Clickable 24/7 SHOPPING Official Target Recipient Logo
             Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
-                modifier = Modifier.padding(bottom = 12.dp)
+                onClick = {
+                    targetRecipientSelected = true
+                    Toast.makeText(context, "✓ ${storeProfile.storeName} Official Target Recipient Selected", Toast.LENGTH_SHORT).show()
+                },
+                shape = RoundedCornerShape(14.dp),
+                color = if (targetRecipientSelected) SuccessGreen.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.5.dp, if (targetRecipientSelected) SuccessGreen else AccentGold),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp)
+                    .testTag("checkout_target_recipient_logo")
             ) {
-                Text(
-                    text = "${storeProfile.storeName} • OFFICIAL ORDER RECORD",
-                    color = MaterialTheme.colorScheme.primary,
-                    fontSize = 9.5.sp,
-                    fontWeight = FontWeight.Black,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    letterSpacing = 0.5.sp
-                )
+                Row(
+                    modifier = Modifier.padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        Image(
+                            painter = painterResource(id = R.drawable.shopping_logo_icon_1794752250458),
+                            contentDescription = "24/7 SHOPPING Official Recipient Logo",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "${storeProfile.storeName} • TARGET RECIPIENT",
+                                color = MaterialTheme.colorScheme.primary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = 0.4.sp
+                            )
+                            Text(
+                                text = "Click logo to confirm official store recipient",
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (targetRecipientSelected) SuccessGreen else AccentGold
+                    ) {
+                        Text(
+                            text = if (targetRecipientSelected) "SELECTED ✓" else "SELECT",
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
             }
 
             // Status Icon Circle
@@ -1201,7 +1370,11 @@ private fun PaymentConfirmedStatusStep(
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
-                        imageVector = if (isConfirmed) Icons.Default.Verified else Icons.Default.Schedule,
+                        imageVector = when {
+                            isConfirmed -> Icons.Default.Verified
+                            isFailedUncredited -> Icons.Default.Warning
+                            else -> Icons.Default.Schedule
+                        },
                         contentDescription = null,
                         tint = themeColor,
                         modifier = Modifier.size(38.dp)
@@ -1211,22 +1384,33 @@ private fun PaymentConfirmedStatusStep(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Two-phase Live Title
+            // Automatic Credit-Alert Verification Title
             Text(
-                text = if (isConfirmed) "Payment Received & Confirmed!" else "Payment Receipt Sent — Awaiting Confirmation",
+                text = when {
+                    isConfirmed -> "ORDER & PAYMENT CONFIRMATION RECEIPT"
+                    isFailedUncredited -> "ORDER & PAYMENT FAILED"
+                    isNetworkDelayed -> "NETWORK DELAY — AUTO-TRANSFER QUEUED"
+                    else -> "Payment Receipt Sent — Awaiting Credit Alert"
+                },
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Black,
                 textAlign = TextAlign.Center,
-                color = if (isConfirmed) SuccessGreen else Color(0xFFD97706)
+                color = themeColor
             )
 
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-                text = if (isConfirmed)
-                    "Physical bank alert has been confirmed by Admin Cashier. Your order is processing and preparing for delivery dispatch."
-                else
-                    "Your payment receipt has been delivered to Admin Cashier. Awaiting confirmation of physical bank alert.",
+                text = when {
+                    isConfirmed ->
+                        "24/7 SHOPPING account has received the credit alert! Admin Payment Confirmation is automatically ON and your receipt is confirmed."
+                    isFailedUncredited ->
+                        "24/7 SHOPPING account has NOT received a credit alert from your account yet. This turns into ORDER & PAYMENT CONFIRMED once 24/7 account is credited."
+                    isNetworkDelayed ->
+                        "Transfer delayed by network. As soon as network restores, the transaction processes automatically, credits 24/7 SHOPPING, and sends ORDER & PAYMENT CONFIRMED."
+                    else ->
+                        "Your payment receipt has been delivered. Once 24/7 SHOPPING account is credited, Admin Payment Confirmation unlocks automatically."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
@@ -1234,19 +1418,52 @@ private fun PaymentConfirmedStatusStep(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Delivery Status Badge
+            // Delivery & Credit Status Badge
             Surface(
                 shape = RoundedCornerShape(10.dp),
                 color = statusBg,
                 border = BorderStroke(1.dp, statusBorder)
             ) {
                 Text(
-                    text = if (isConfirmed) "● PAYMENT CONFIRMED & ORDER IS PROCESSING" else "● AWAITING ADMIN PHYSICAL ALERT CONFIRMATION",
+                    text = when {
+                        isConfirmed -> "● ORDER & PAYMENT CONFIRMED ✓"
+                        isFailedUncredited -> "● ORDER & PAYMENT FAILED (NO CREDIT ALERT)"
+                        isNetworkDelayed -> "● QUEUED FOR AUTO-CREDIT ON RECONNECT"
+                        else -> "● AWAITING 24/7 ACCOUNT CREDIT ALERT"
+                    },
                     color = themeColor,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Black,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                 )
+            }
+
+            if ((isFailedUncredited || isNetworkDelayed) && order != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Button(
+                    onClick = {
+                        viewModel.retryFailedOrderCreditCheck(order.orderId) { _, msg ->
+                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isFailedUncredited) Color(0xFFDC2626) else AccentGold,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("checkout_retry_credit_check_button")
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (isNetworkDelayed) "Push Transfer & Confirm Credit Now" else "Verify Credit Alert to 24/7 SHOPPING",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -1256,19 +1473,24 @@ private fun PaymentConfirmedStatusStep(
                 Spacer(modifier = Modifier.height(12.dp))
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFFD97706).copy(alpha = 0.08f),
-                    border = BorderStroke(1.dp, Color(0xFFD97706).copy(alpha = 0.25f)),
+                    color = themeColor.copy(alpha = 0.08f),
+                    border = BorderStroke(1.dp, themeColor.copy(alpha = 0.25f)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Schedule, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Schedule, contentDescription = null, tint = themeColor, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Real-Time Verification Pending", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFFD97706))
+                            Text(
+                                text = if (isFailedUncredited) "Awaiting Credit Alert Recovery" else "Real-Time Verification Pending",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = themeColor
+                            )
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "${storeProfile.storeName} Cashier is currently confirming the credit alert on our bank terminal. As soon as admin confirms the alert and clicks 'Payment Confirmed', this page changes instantly to 'Payment Confirmed & Order is Processing'.",
+                            text = "As soon as ${storeProfile.storeName} receives the credit alert on OPay, Moniepoint, or PalmPay, the Admin 'Payment Confirmation' switch turns ON automatically and sends your ORDER & PAYMENT CONFIRMED notification.",
                             style = MaterialTheme.typography.bodySmall,
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1681,6 +1903,20 @@ private fun PaymentConfirmedStatusStep(
 
             Spacer(modifier = Modifier.height(20.dp))
 
+            val saveWordLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.CreateDocument("application/msword")
+            ) { targetUri ->
+                val targetOrder = order
+                if (targetUri != null && targetOrder != null) {
+                    val saved = WordInvoiceExporter.writeToUri(context, targetUri, targetOrder, storeProfile)
+                    Toast.makeText(
+                        context,
+                        if (saved) "Word Receipt (.doc) saved with 24/7 SHOPPING recipient!" else "Could not save Word receipt",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+
             val savePdfLauncher = rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.CreateDocument("application/pdf")
             ) { targetUri ->
@@ -1696,6 +1932,44 @@ private fun PaymentConfirmedStatusStep(
             }
 
             if (order != null) {
+                Text(
+                    text = "Export Generated Receipt (24/7 SHOPPING Recipient)",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = { WordInvoiceExporter.shareWordInvoice(context, order, storeProfile) },
+                        colors = ButtonDefaults.buttonColors(containerColor = MoniepointBlue, contentColor = Color.White),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("checkout_word_share_button")
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Word Format", fontSize = 12.sp, fontWeight = FontWeight.Black)
+                    }
+                    OutlinedButton(
+                        onClick = { saveWordLauncher.launch("${order.orderId}_247_Receipt.doc") },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("checkout_word_save_button")
+                    ) {
+                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Save Word (.doc)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1705,18 +1979,20 @@ private fun PaymentConfirmedStatusStep(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .weight(1f)
+                            .height(48.dp)
                             .testTag("checkout_share_pdf_button")
                     ) {
                         Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Share PDF", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("PDF Format", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
 
                     OutlinedButton(
-                        onClick = { savePdfLauncher.launch("${order.orderId}_Invoice.pdf") },
+                        onClick = { savePdfLauncher.launch("${order.orderId}_247_Invoice.pdf") },
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .weight(1f)
+                            .height(48.dp)
                             .testTag("checkout_save_pdf_button")
                     ) {
                         Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -1988,6 +2264,7 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
     onQuickPickAddress: (SavedAddress) -> Unit = {},
     storeProfile: StoreProfileConfig = StoreProfileConfig(),
     partnerFolder: PartnerOrganization? = null,
+    onOpenDirectPortal: (PaymentMethod) -> Unit = {},
     viewModel: MainViewModel
 ) {
     val effectivePayableTotal = (total - couponDiscountAmount - loyaltyDiscountAmount).coerceAtLeast(0.0)
@@ -2513,12 +2790,15 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
         val effectiveMonieName = partnerFolder?.moniepointAccountName?.takeIf { it.isNotBlank() }
             ?: storeProfile.moniepointAccountName.ifBlank { storeProfile.storeName }
 
+        val effectivePalmpayNum = storeProfile.palmpayAccountNumber.ifBlank { storeProfile.opayAccountNumber.ifBlank { "Contact Store for Account Number" } }
+        val effectivePalmpayName = storeProfile.palmpayAccountName.ifBlank { storeProfile.storeName }
+
         PaymentOptionCard(
             title = "OPay Transfer",
             subtitle = if (partnerFolder?.opayAccountNumber?.isNotBlank() == true)
                 "Partner Folder OPay Account (${partnerFolder.businessName})"
             else
-                "Instant settlement via OPay App / USSD",
+                "Tap to open Direct OPay Portal with embedded 24/7 account & total",
             brandColor = OPayGreen,
             icon = Icons.Default.PhoneAndroid,
             isSelected = selectedPaymentMethod == PaymentMethod.OPAY,
@@ -2530,6 +2810,24 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                 accountName = effectiveOpayName,
                 brandColor = OPayGreen
             )
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = { onOpenDirectPortal(PaymentMethod.OPAY) },
+                colors = ButtonDefaults.buttonColors(containerColor = OPayGreen, contentColor = Color.White),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("direct_portal_opay_button")
+            ) {
+                Icon(Icons.Default.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Pay Direct via OPay Portal (${nairaFormat.format(effectivePayableTotal)})",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Black
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -2539,7 +2837,7 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
             subtitle = if (partnerFolder?.moniepointAccountNumber?.isNotBlank() == true)
                 "Partner Folder Moniepoint Account (${partnerFolder.businessName})"
             else
-                "Direct bank transfer to Moniepoint Account",
+                "Tap to open Direct Moniepoint Portal with embedded 24/7 account & total",
             brandColor = MoniepointBlue,
             icon = Icons.Default.AccountBalance,
             isSelected = selectedPaymentMethod == PaymentMethod.MONIEPOINT,
@@ -2551,6 +2849,60 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                 accountName = effectiveMonieName,
                 brandColor = MoniepointBlue
             )
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = { onOpenDirectPortal(PaymentMethod.MONIEPOINT) },
+                colors = ButtonDefaults.buttonColors(containerColor = MoniepointBlue, contentColor = Color.White),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("direct_portal_moniepoint_button")
+            ) {
+                Icon(Icons.Default.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Pay Direct via Moniepoint Portal (${nairaFormat.format(effectivePayableTotal)})",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Black
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        PaymentOptionCard(
+            title = "PalmPay Digital Wallet",
+            subtitle = "Tap to open Direct PalmPay Portal with embedded 24/7 account & total",
+            brandColor = PalmPayPurple,
+            icon = Icons.Default.AccountBalanceWallet,
+            isSelected = selectedPaymentMethod == PaymentMethod.PALMPAY,
+            onSelect = { onSelectPaymentMethod(PaymentMethod.PALMPAY) }
+        ) {
+            BankTransferDetailsBox(
+                bankName = "PalmPay Digital Bank",
+                accountNumber = effectivePalmpayNum,
+                accountName = effectivePalmpayName,
+                brandColor = PalmPayPurple
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = { onOpenDirectPortal(PaymentMethod.PALMPAY) },
+                colors = ButtonDefaults.buttonColors(containerColor = PalmPayPurple, contentColor = Color.White),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("direct_portal_palmpay_button")
+            ) {
+                Icon(Icons.Default.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Pay Direct via PalmPay Portal (${nairaFormat.format(effectivePayableTotal)})",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Black
+                )
+            }
         }
 
         if (storeProfile.extraBankAccountNumber.isNotBlank()) {
@@ -2923,5 +3275,203 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
         }
 
         Spacer(modifier = Modifier.height(36.dp))
+    }
+}
+
+@Composable
+private fun DirectPortalCheckoutDialog(
+    paymentMethod: PaymentMethod,
+    accountNumber: String,
+    accountName: String,
+    storeName: String,
+    payableAmount: Double,
+    nairaFormat: NumberFormat,
+    customerName: String,
+    customerPhone: String,
+    customerAddress: String,
+    isProcessing: Boolean,
+    onDismiss: () -> Unit,
+    onPayNow: (simulateCredited: Boolean, simulateNetworkDelay: Boolean) -> Unit
+) {
+    val portalColor = when (paymentMethod) {
+        PaymentMethod.OPAY -> OPayGreen
+        PaymentMethod.MONIEPOINT -> MoniepointBlue
+        PaymentMethod.PALMPAY -> PalmPayPurple
+        else -> SuccessGreen
+    }
+    var targetLogoSelected by remember { mutableStateOf(true) }
+    var simulateNetworkDelay by remember { mutableStateOf(false) }
+    var simulateCreditAlert by remember { mutableStateOf(true) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape = RoundedCornerShape(22.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = BorderStroke(2.dp, portalColor),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("direct_portal_dialog")
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "${paymentMethod.title.uppercase()} DIRECT PORTAL",
+                            fontWeight = FontWeight.Black,
+                            fontSize = 14.sp,
+                            color = portalColor
+                        )
+                        Text(
+                            text = "Verify merchant details below & tap Payment Button",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close Portal")
+                    }
+                }
+
+                // Clickable 24/7 SHOPPING Official Recipient Target Logo
+                Surface(
+                    onClick = { targetLogoSelected = !targetLogoSelected },
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (targetLogoSelected) portalColor.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant,
+                    border = BorderStroke(1.5.dp, if (targetLogoSelected) portalColor else MaterialTheme.colorScheme.outline),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("direct_portal_target_logo")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Image(
+                                painter = painterResource(id = R.drawable.shopping_logo_icon_1794752250458),
+                                contentDescription = "24/7 SHOPPING Target Recipient Logo",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(storeName, fontWeight = FontWeight.Black, fontSize = 13.sp)
+                                Text("Target Recipient Logo", fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (targetLogoSelected) portalColor else MaterialTheme.colorScheme.outline
+                        ) {
+                            Text(
+                                text = if (targetLogoSelected) "TARGET ✓" else "TAP TO SELECT",
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Black,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Pre-Embedded 24/7 SHOPPING Account Number & Exact Payable Amount
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    border = BorderStroke(1.dp, portalColor.copy(alpha = 0.45f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("RECEIVER ACCOUNT NUMBER (PRE-EMBEDDED)", fontSize = 10.sp, fontWeight = FontWeight.Black, color = portalColor)
+                        Text(
+                            text = accountNumber,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Text("Account Name: $accountName", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                        Text("EXACT PAYABLE AMOUNT (LOCKED IN FIGURES)", fontSize = 10.sp, fontWeight = FontWeight.Black, color = portalColor)
+                        Text(
+                            text = nairaFormat.format(payableAmount),
+                            fontSize = 26.sp,
+                            fontWeight = FontWeight.Black,
+                            color = portalColor
+                        )
+                    }
+                }
+
+                // Customer verification summary
+                Text(
+                    text = "Payer: ${customerName.ifBlank { "Enter Name Below" }} • ${customerPhone.ifBlank { "Phone Needed" }}\nDestination: ${customerAddress.ifBlank { "Address Needed" }}",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                // Credit-Alert & Network Transmission Condition Selector
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Settlement Verification Mode", fontSize = 10.5.sp, fontWeight = FontWeight.Black)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text("Instant Credit Alert to 24/7 Account", fontSize = 11.sp, modifier = Modifier.weight(1f))
+                            Switch(
+                                checked = simulateCreditAlert && !simulateNetworkDelay,
+                                onCheckedChange = {
+                                    simulateCreditAlert = it
+                                    if (it) simulateNetworkDelay = false
+                                }
+                            )
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text("Simulate Network Delay (Auto-Confirm on Restore)", fontSize = 11.sp, modifier = Modifier.weight(1f))
+                            Switch(
+                                checked = simulateNetworkDelay,
+                                onCheckedChange = { simulateNetworkDelay = it }
+                            )
+                        }
+                    }
+                }
+
+                Button(
+                    enabled = !isProcessing && targetLogoSelected,
+                    onClick = { onPayNow(simulateCreditAlert, simulateNetworkDelay) },
+                    colors = ButtonDefaults.buttonColors(containerColor = portalColor, contentColor = Color.White),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .testTag("direct_portal_pay_now_button")
+                ) {
+                    if (isProcessing) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("DEDUCTING EXACT AMOUNT...", fontWeight = FontWeight.Black)
+                    } else {
+                        Text(
+                            text = "PAY NOW • DEDUCT ${nairaFormat.format(payableAmount)}",
+                            fontWeight = FontWeight.Black,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
+        }
     }
 }

@@ -287,6 +287,239 @@ object CatalogDataSeeder {
             )
         }
 
+        // 8..23 NEW EXPANDED STOREFRONT CATEGORIES (48 items across 16 categories)
+        data class ExpandedSeedSpec(
+            val category: ProductCategory,
+            val idPrefix: String,
+            val model3d: String,
+            val sizes: List<String>,
+            val baseStart: Int,
+            val items: List<Triple<String, String, String>>
+        )
+
+        val expandedSpecs = listOf(
+            ExpandedSeedSpec(
+                category = ProductCategory.MEN,
+                idPrefix = "men",
+                model3d = "CLOTH",
+                sizes = listOf("M", "L", "XL", "XXL"),
+                baseStart = 24000,
+                items = listOf(
+                    Triple("Men's Italian Wool Senator Kaftan Set", "Hugo Boss", "android.resource://com.example/drawable/img_leather_luxury_jacket"),
+                    Triple("Men's Sovereign Automatic Dress Watch", "Rolex Homage", "android.resource://com.example/drawable/img_jewelry_gold_watch"),
+                    Triple("Men's Executive Genuine Leather Loafers", "Clarks", "android.resource://com.example/drawable/img_sneaker_quantum_3d")
+                )
+            ),
+            ExpandedSeedSpec(
+                category = ProductCategory.WOMEN,
+                idPrefix = "women",
+                model3d = "COSMETIC",
+                sizes = listOf("S", "M", "L", "XL"),
+                baseStart = 22000,
+                items = listOf(
+                    Triple("Women's Silk Evening Maxi Gown", "Zara Woman", "android.resource://com.example/drawable/img_luxury_fragrance_bottle"),
+                    Triple("Women's Designer Quilted Leather Handbag", "Coach", "android.resource://com.example/drawable/img_luxury_leather_bag"),
+                    Triple("Women's Crystal Emerald Halo Ring Set", "Swarovski", "android.resource://com.example/drawable/img_jewelry_gold_watch")
+                )
+            ),
+            ExpandedSeedSpec(
+                category = ProductCategory.BABIES,
+                idPrefix = "babies",
+                model3d = "BOX",
+                sizes = listOf("0-3M", "3-6M", "6-12M", "12-18M"),
+                baseStart = 9500,
+                items = listOf(
+                    Triple("Organic Cotton Pastel Baby Romper & Plush Set", "Little Sprouts", "android.resource://com.example/drawable/img_babies_kids_set"),
+                    Triple("Newborn Soft Fleece Swaddle Blanket 3-Pack", "Carter's", "android.resource://com.example/drawable/img_babies_kids_set"),
+                    Triple("Anti-Colic Silicone Feeding Bottle Starter Kit", "Philips Avent", "android.resource://com.example/drawable/img_babies_kids_set")
+                )
+            ),
+            ExpandedSeedSpec(
+                category = ProductCategory.KIDS,
+                idPrefix = "kids",
+                model3d = "SNEAKER",
+                sizes = listOf("EU 24", "EU 26", "EU 28", "EU 30", "EU 32"),
+                baseStart = 12500,
+                items = listOf(
+                    Triple("Kids Pastel Breathable Canvas Sneakers", "TinyStep", "android.resource://com.example/drawable/img_babies_kids_set"),
+                    Triple("Kids Ergonomic School Backpack & Lunch Box", "Nike Kids", "android.resource://com.example/drawable/img_luxury_leather_bag"),
+                    Triple("Kids Cotton Playtime Tracksuit Set", "Adidas Kids", "android.resource://com.example/drawable/img_babies_kids_set")
+                )
+            ),
+            ExpandedSeedSpec(
+                category = ProductCategory.HOUSEHOLD,
+                idPrefix = "household",
+                model3d = "BOX",
+                sizes = listOf("Compact", "Standard", "Family Size"),
+                baseStart = 18500,
+                items = listOf(
+                    Triple("Heavy-Duty Stackable Home Organizer Bins (4-Pack)", "HomePro", "android.resource://com.example/drawable/img_household_upholstery"),
+                    Triple("Stainless Steel Thermal Vacuum Flask Set (2L)", "Thermos", "android.resource://com.example/drawable/img_gourmet_espresso_can"),
+                    Triple("Smart HEPA Room Air Purifier & Diffuser", "Philips Home", "android.resource://com.example/drawable/img_cyber_headset_audiophile")
+                )
+            ),
+            ExpandedSeedSpec(
+                category = ProductCategory.MUSICALS,
+                idPrefix = "musicals",
+                model3d = "CUBE",
+                sizes = listOf("Studio", "Stage Pro"),
+                baseStart = 65000,
+                items = listOf(
+                    Triple("Acoustic Dreadnought Rosewood Guitar + Stand", "Yamaha", "android.resource://com.example/drawable/img_household_upholstery"),
+                    Triple("Studio Closed-Back Monitoring Headphones", "Audio-Technica", "android.resource://com.example/drawable/img_cyber_headset_audiophile"),
+                    Triple("61-Key Touch-Sensitive Arranger Keyboard", "Casio", "android.resource://com.example/drawable/img_household_upholstery")
+                )
+            ),
+            ExpandedSeedSpec(
+                category = ProductCategory.EDUCATIONAL,
+                idPrefix = "educational",
+                model3d = "BOX",
+                sizes = listOf("Primary", "Secondary", "Tertiary"),
+                baseStart = 11000,
+                items = listOf(
+                    Triple("Executive Hardcover Academic Study Compendium & Pen", "Oxford Press", "android.resource://com.example/drawable/img_auto_tools_tech"),
+                    Triple("STEM Robotics & Electronics Learning Kit", "Arduino Edu", "android.resource://com.example/drawable/img_cyber_headset_audiophile"),
+                    Triple("Interactive Multilingual Learning Tablet 10-inch", "LeapFrog Pro", "android.resource://com.example/drawable/img_babies_kids_set")
+                )
+            ),
+            ExpandedSeedSpec(
+                category = ProductCategory.JEWELRY,
+                idPrefix = "jewelry",
+                model3d = "COSMETIC",
+                sizes = listOf("18cm", "20cm", "Adjustable"),
+                baseStart = 85000,
+                items = listOf(
+                    Triple("24K Gold-Plated Chronograph Watch & Emerald Ring", "Geneva Luxe", "android.resource://com.example/drawable/img_jewelry_gold_watch"),
+                    Triple("Tennis Cut White Zirconia Link Bracelet", "Cartier Inspired", "android.resource://com.example/drawable/img_jewelry_gold_watch"),
+                    Triple("Emerald Solitaire 18K Gold Engagement Ring", "Tiffany Style", "android.resource://com.example/drawable/img_jewelry_gold_watch")
+                )
+            ),
+            ExpandedSeedSpec(
+                category = ProductCategory.STATIONARIES,
+                idPrefix = "stationaries",
+                model3d = "BOX",
+                sizes = listOf("A4 Pack", "A5 Executive"),
+                baseStart = 7500,
+                items = listOf(
+                    Triple("Genuine Leather A5 Journal & Fountain Pen Set", "Parker Luxe", "android.resource://com.example/drawable/img_auto_tools_tech"),
+                    Triple("80gsm Bright White A4 Copier Paper Ream (500 Sheets)", "Double A", "android.resource://com.example/drawable/img_auto_tools_tech"),
+                    Triple("Architect Metal Drafting & Gel Pen Studio Box", "Staedtler", "android.resource://com.example/drawable/img_auto_tools_tech")
+                )
+            ),
+            ExpandedSeedSpec(
+                category = ProductCategory.PHONE_ACCESSORIES,
+                idPrefix = "phone-acc",
+                model3d = "PHONE",
+                sizes = listOf("USB-C", "Lightning", "Universal"),
+                baseStart = 14000,
+                items = listOf(
+                    Triple("20,000mAh 65W PD Matte Fast Power Bank", "Anker", "android.resource://com.example/drawable/img_auto_tools_tech"),
+                    Triple("MagSafe Shockproof Kevlar Phone Case + Glass", "Spigen", "android.resource://com.example/drawable/img_cyber_headset_audiophile"),
+                    Triple("3-in-1 Fast Wireless Charging Dock Station", "Belkin", "android.resource://com.example/drawable/img_auto_tools_tech")
+                )
+            ),
+            ExpandedSeedSpec(
+                category = ProductCategory.UPHOLSTERY,
+                idPrefix = "upholstery",
+                model3d = "BOX",
+                sizes = listOf("Single Seater", "3-Seater Roll", "2 Yards"),
+                baseStart = 48000,
+                items = listOf(
+                    Triple("Royal Emerald Velvet Tufted Accent Armchair", "Maison Decor", "android.resource://com.example/drawable/img_household_upholstery"),
+                    Triple("Heavy-Duty Italian Boucle Sofa Upholstery Fabric", "Milano Textile", "android.resource://com.example/drawable/img_household_upholstery"),
+                    Triple("High-Density Memory Foam Sofa Cushion Inserts (4x)", "OrthoComfort", "android.resource://com.example/drawable/img_household_upholstery")
+                )
+            ),
+            ExpandedSeedSpec(
+                category = ProductCategory.RUBBER_PLASTIC,
+                idPrefix = "rubber-plastic",
+                model3d = "CYLINDER",
+                sizes = listOf("25 Litres", "45 Litres", "Heavy Pack"),
+                baseStart = 8500,
+                items = listOf(
+                    Triple("Industrial Lock-Lid Storage Crates (4-Piece Set)", "DuraPlast", "android.resource://com.example/drawable/img_household_upholstery"),
+                    Triple("Heavy-Duty Non-Slip Vulcanized Rubber Floor Mat", "FlexGrip", "android.resource://com.example/drawable/img_auto_tools_tech"),
+                    Triple("Food-Grade Airtight Polypropylene Drum (50L)", "EcoPoly", "android.resource://com.example/drawable/img_household_upholstery")
+                )
+            ),
+            ExpandedSeedSpec(
+                category = ProductCategory.AUTOMOBILE_SPARE_PARTS,
+                idPrefix = "auto-parts",
+                model3d = "CUBE",
+                sizes = listOf("OEM Standard", "Heavy Duty"),
+                baseStart = 28500,
+                items = listOf(
+                    Triple("Cross-Drilled Vented Ceramic Front Brake Rotor Set", "Brembo OEM", "android.resource://com.example/drawable/img_auto_tools_tech"),
+                    Triple("Laser Iridium Twin-Tip Spark Plugs (4-Pack)", "NGK Japan", "android.resource://com.example/drawable/img_auto_tools_tech"),
+                    Triple("Synthetic 5W-30 Engine Oil Filter & Gasket Kit", "Bosch Auto", "android.resource://com.example/drawable/img_auto_tools_tech")
+                )
+            ),
+            ExpandedSeedSpec(
+                category = ProductCategory.CLOTHING_SEWING_MATERIALS,
+                idPrefix = "sewing",
+                model3d = "CUBE",
+                sizes = listOf("6 Yards", "Master Kit"),
+                baseStart = 12000,
+                items = listOf(
+                    Triple("Master Tailor Canvas Kit: Needles, Brass Tape & Shears", "Singer Pro", "android.resource://com.example/drawable/img_auto_tools_tech"),
+                    Triple("Polished Swiss Voile Lace Fabric Bundle (5 Yards)", "Vlisco Heritage", "android.resource://com.example/drawable/img_leather_luxury_jacket"),
+                    Triple("High-Tensile 24-Spool Embroidery Thread Pack", "Gutermann", "android.resource://com.example/drawable/img_auto_tools_tech")
+                )
+            ),
+            ExpandedSeedSpec(
+                category = ProductCategory.HEALTH_MEDICAL_EQUIPMENT,
+                idPrefix = "medical-eq",
+                model3d = "BOX",
+                sizes = listOf("Clinical Adult", "Home Care"),
+                baseStart = 32000,
+                items = listOf(
+                    Triple("Digital Upper-Arm Blood Pressure Monitor + LCD", "Omron Clinical", "android.resource://com.example/drawable/img_medical_pharma_kit"),
+                    Triple("Dual-Head Acoustic Cardiology Stethoscope", "Littmann Class", "android.resource://com.example/drawable/img_medical_pharma_kit"),
+                    Triple("Infrared Non-Contact Forehead Thermometer + Oximeter", "Beurer Med", "android.resource://com.example/drawable/img_medical_pharma_kit")
+                )
+            ),
+            ExpandedSeedSpec(
+                category = ProductCategory.PHARMACEUTICALS,
+                idPrefix = "pharma",
+                model3d = "BOTTLE",
+                sizes = listOf("60 Capsules", "100 Tablets", "200ml Syrup"),
+                baseStart = 6500,
+                items = listOf(
+                    Triple("Complete Multivitamin & Omega-3 Softgel Pharmacy Pack", "Emzor Pharma", "android.resource://com.example/drawable/img_medical_pharma_kit"),
+                    Triple("Sterile Antiseptic First-Aid Amber Bottle & Dressing Kit", "May & Baker", "android.resource://com.example/drawable/img_medical_pharma_kit"),
+                    Triple("Vitamin C 1000mg + Zinc Immune Effervescent Tablets", "Fidson Care", "android.resource://com.example/drawable/img_medical_pharma_kit")
+                )
+            )
+        )
+
+        expandedSpecs.forEach { spec ->
+            spec.items.forEachIndexed { idx, (name, brand, img) ->
+                products.add(
+                    Product(
+                        id = "prod-${spec.idPrefix}-${idx + 1}",
+                        title = name,
+                        category = spec.category.displayName,
+                        brand = brand,
+                        availableBrands = listOf(brand, "24/7 Select", "Premium OEM"),
+                        availableSizes = spec.sizes,
+                        availableColors = listOf(
+                            ProductColor("Signature Finish", "#064E3B"),
+                            ProductColor("Classic Onyx", "#111827")
+                        ),
+                        basePrice = (spec.baseStart + idx * 4500).toDouble(),
+                        discountPercent = if (idx == 0) 5 else 0,
+                        stockQuantity = 24 + idx * 8,
+                        imageUrl = img,
+                        model3dType = spec.model3d,
+                        description = "Verified quality $name under ${spec.category.displayName}. Ready for instant dispatch from 24/7 SHOPPING.",
+                        expiryMonthsRemaining = if (spec.category == ProductCategory.PHARMACEUTICALS) 18 else 24,
+                        rating = 4.7 + (idx % 3) * 0.1,
+                        reviewCount = 38 + idx * 11
+                    )
+                )
+            }
+        }
+
         return products
     }
 }

@@ -1165,6 +1165,48 @@ class EcommerceRepository(
         }
     }
 
+    suspend fun resetCustomerPasswordByPhone(
+        phone: String,
+        fullName: String,
+        newPassword: String
+    ): Result<Customer> = withContext(Dispatchers.IO) {
+        try {
+            val cleanPhone = phone.trim()
+            val phoneKey = normalizePhoneKey(cleanPhone)
+            if (phoneKey.length < 7) {
+                return@withContext Result.failure(Exception("Enter your valid registered phone number."))
+            }
+            if (newPassword.trim().length < 4) {
+                return@withContext Result.failure(Exception("New password must be at least 4 characters."))
+            }
+            val allLocal = dao.getAllCustomersList()
+            val entity = dao.getCustomerByPhone(cleanPhone)
+                ?: allLocal.find { normalizePhoneKey(it.phoneNumber) == phoneKey }
+                ?: return@withContext Result.failure(Exception("No customer account found for phone number $cleanPhone."))
+
+            if (fullName.isNotBlank() && entity.fullName.isNotBlank()) {
+                val inputName = fullName.trim().lowercase()
+                val storedName = entity.fullName.trim().lowercase()
+                val wordsMatch = inputName.split(" ").any { w -> w.length >= 2 && storedName.contains(w) }
+                if (!storedName.contains(inputName) && !inputName.contains(storedName) && !wordsMatch) {
+                    return@withContext Result.failure(Exception("Full name does not match the registered account for this phone line."))
+                }
+            }
+
+            val updatedHash = SecurityUtils.hashPassword(newPassword.trim())
+            val updatedEntity = entity.copy(passwordHash = updatedHash)
+            dao.insertCustomer(updatedEntity)
+            val updatedCustomer = updatedEntity.toDomain()
+            if (!supabaseSync.isPlaceholderConfig()) {
+                val cloudRes = supabaseSync.syncCustomerToCloud(updatedCustomer)
+                lastCloudSyncError = if (cloudRes.isFailure) cloudRes.exceptionOrNull()?.message else null
+            }
+            Result.success(updatedCustomer)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     // Mappers
     private fun ProductEntity.toDomain(): Product {
         val colors = availableColorsJson.split(";").mapNotNull { entry ->
@@ -1382,15 +1424,23 @@ class EcommerceRepository(
 
     private suspend fun seedDefaultProductsIfEmpty() {
         try {
+            val catalogItems = CatalogDataSeeder.generate100Products()
             if (dao.getProductCount() == 0) {
-                val sampleItems = CatalogDataSeeder.generate100Products()
-                dao.insertProducts(sampleItems.map { it.toEntity() })
+                dao.insertProducts(catalogItems.map { it.toEntity() })
                 if (!supabaseSync.isPlaceholderConfig()) {
                     scope.launch {
                         try {
-                            supabaseSync.syncProductsBatchToCloud(sampleItems)
+                            supabaseSync.syncProductsBatchToCloud(catalogItems)
                         } catch (_: Exception) {}
                     }
+                }
+            } else {
+                // Ensure newly expanded categories are also seeded into pre-existing databases
+                val existingProducts = dao.getAllProductsList()
+                val existingCategories = existingProducts.map { it.category.lowercase() }.toSet()
+                val missingCategoryItems = catalogItems.filter { it.category.lowercase() !in existingCategories }
+                if (missingCategoryItems.isNotEmpty()) {
+                    dao.insertProducts(missingCategoryItems.map { it.toEntity() })
                 }
             }
         } catch (e: Exception) {

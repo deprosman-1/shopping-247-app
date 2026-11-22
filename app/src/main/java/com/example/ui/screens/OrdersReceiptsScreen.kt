@@ -56,10 +56,12 @@ import com.example.AppScreen
 import com.example.MainViewModel
 import com.example.data.model.Order
 import com.example.data.model.OrderStatus
+import com.example.data.model.CreditVerificationStatus
 import com.example.data.model.PaymentMethod
 import com.example.ui.theme.CodOrange
 import com.example.ui.theme.MoniepointBlue
 import com.example.ui.theme.OPayGreen
+import com.example.ui.theme.PalmPayPurple
 import com.example.ui.theme.PosPurple
 import com.example.ui.theme.SuccessGreen
 import java.text.NumberFormat
@@ -420,6 +422,7 @@ private fun OrderReceiptCard(
     val paymentColor = when (order.paymentMethod) {
         PaymentMethod.OPAY -> OPayGreen
         PaymentMethod.MONIEPOINT -> MoniepointBlue
+        PaymentMethod.PALMPAY -> PalmPayPurple
         PaymentMethod.POS_TRANSFER -> PosPurple
         PaymentMethod.CASH_ON_DELIVERY -> CodOrange
     }
@@ -457,6 +460,29 @@ private fun OrderReceiptCard(
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+
+            if (order.creditVerificationStatus != CreditVerificationStatus.PENDING_CREDIT) {
+                Spacer(modifier = Modifier.height(6.dp))
+                val creditColor = when (order.creditVerificationStatus) {
+                    CreditVerificationStatus.CONFIRMED_CREDITED -> SuccessGreen
+                    CreditVerificationStatus.PAYMENT_FAILED_UNCREDITED -> Color(0xFFDC2626)
+                    CreditVerificationStatus.NETWORK_DELAYED_PENDING -> AccentGold
+                    CreditVerificationStatus.PENDING_CREDIT -> CyberCyan
+                }
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = creditColor.copy(alpha = 0.14f),
+                    border = BorderStroke(1.dp, creditColor.copy(alpha = 0.45f))
+                ) {
+                    Text(
+                        text = order.creditVerificationStatus.label,
+                        color = creditColor,
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Black,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                     )
                 }
             }

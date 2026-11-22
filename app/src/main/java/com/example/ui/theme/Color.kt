@@ -12,6 +12,7 @@ val ErrorRed = Color(0xFFEF4444)
 // Payment brands
 val OPayGreen = Color(0xFF00B875)
 val MoniepointBlue = Color(0xFF0B63F8)
+val PalmPayPurple = Color(0xFF7C3AED)
 val PosPurple = Color(0xFF8B5CF6)
 val CodOrange = Color(0xFFF97316)
 

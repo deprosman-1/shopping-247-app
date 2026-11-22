@@ -537,6 +537,111 @@ fun AuthScreen(
                                 ) {
                                     Text("Sign In", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                 }
+
+                                var showForgotPassDialog by remember { mutableStateOf(false) }
+                                TextButton(
+                                    onClick = { showForgotPassDialog = true },
+                                    modifier = Modifier
+                                        .align(Alignment.End)
+                                        .height(48.dp)
+                                        .testTag("auth_forgot_password_button")
+                                ) {
+                                    Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(15.dp), tint = AccentGold)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Forgot / Change Password?", fontWeight = FontWeight.Bold, fontSize = 12.5.sp, color = AccentGold)
+                                }
+
+                                if (showForgotPassDialog) {
+                                    var fpPhone by remember { mutableStateOf(signInPhone) }
+                                    var fpName by remember { mutableStateOf("") }
+                                    var fpNewPass by remember { mutableStateOf("") }
+                                    var fpConfirmPass by remember { mutableStateOf("") }
+                                    AlertDialog(
+                                        onDismissRequest = { showForgotPassDialog = false },
+                                        title = { Text("Change Forgotten Password", fontWeight = FontWeight.Black) },
+                                        text = {
+                                            Column(
+                                                modifier = Modifier
+                                                    .verticalScroll(rememberScrollState())
+                                                    .testTag("auth_forgot_password_dialog"),
+                                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                Text(
+                                                    text = "Enter the phone line you signed up with and set a new sign-in password.",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                                OutlinedTextField(
+                                                    value = fpPhone,
+                                                    onValueChange = { fpPhone = it },
+                                                    label = { Text("Registered Phone Number *") },
+                                                    placeholder = { Text("e.g. 08012345678") },
+                                                    singleLine = true,
+                                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                                                    modifier = Modifier.fillMaxWidth().testTag("forgot_password_phone_input")
+                                                )
+                                                OutlinedTextField(
+                                                    value = fpName,
+                                                    onValueChange = { fpName = it },
+                                                    label = { Text("Full Name Verification (Optional)") },
+                                                    singleLine = true,
+                                                    modifier = Modifier.fillMaxWidth().testTag("forgot_password_name_input")
+                                                )
+                                                OutlinedTextField(
+                                                    value = fpNewPass,
+                                                    onValueChange = { fpNewPass = it },
+                                                    label = { Text("New Password *") },
+                                                    visualTransformation = PasswordVisualTransformation(),
+                                                    singleLine = true,
+                                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                                                    modifier = Modifier.fillMaxWidth().testTag("forgot_password_new_pass_input")
+                                                )
+                                                OutlinedTextField(
+                                                    value = fpConfirmPass,
+                                                    onValueChange = { fpConfirmPass = it },
+                                                    label = { Text("Confirm New Password *") },
+                                                    visualTransformation = PasswordVisualTransformation(),
+                                                    singleLine = true,
+                                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                                                    modifier = Modifier.fillMaxWidth().testTag("forgot_password_confirm_pass_input")
+                                                )
+                                            }
+                                        },
+                                        confirmButton = {
+                                            Button(
+                                                onClick = {
+                                                    if (fpPhone.isBlank() || fpNewPass.isBlank()) {
+                                                        Toast.makeText(context, "Enter phone number and new password.", Toast.LENGTH_SHORT).show()
+                                                        return@Button
+                                                    }
+                                                    if (fpNewPass != fpConfirmPass) {
+                                                        Toast.makeText(context, "New passwords do not match.", Toast.LENGTH_SHORT).show()
+                                                        return@Button
+                                                    }
+                                                    viewModel.resetCustomerPasswordByPhone(
+                                                        phone = fpPhone,
+                                                        fullName = fpName,
+                                                        newPassword = fpNewPass
+                                                    ) { ok, msg ->
+                                                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                                        if (ok) {
+                                                            signInPhone = fpPhone.trim()
+                                                            password = ""
+                                                            showForgotPassDialog = false
+                                                        }
+                                                    }
+                                                },
+                                                modifier = Modifier.testTag("forgot_password_submit_button")
+                                            ) {
+                                                Text("Update Password", fontWeight = FontWeight.Bold)
+                                            }
+                                        },
+                                        dismissButton = {
+                                            TextButton(onClick = { showForgotPassDialog = false }) { Text("Cancel") }
+                                        }
+                                    )
+                                }
+
                                 GoogleSignInButton(
                                     onAuthSuccess = {
                                         viewModel.onGoogleSignInSuccess {

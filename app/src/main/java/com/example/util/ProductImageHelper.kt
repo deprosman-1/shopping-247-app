@@ -83,13 +83,28 @@ object ProductImageHelper {
         val cat = category.lowercase()
         val t = title.lowercase()
         return when {
+            cat.contains("jewelry") || t.contains("ring") || t.contains("necklace") || t.contains("bracelet") || t.contains("earring") || t.contains("chronograph") || t.contains("gold watch") -> {
+                R.drawable.img_jewelry_gold_watch
+            }
+            cat.contains("babies") || cat.contains("kids") || t.contains("baby") || t.contains("romper") || t.contains("diaper") || t.contains("toddler") || t.contains("teddy") || t.contains("kids") -> {
+                R.drawable.img_babies_kids_set
+            }
+            cat.contains("pharmaceutical") || cat.contains("health") || cat.contains("medical") || t.contains("blood pressure") || t.contains("stethoscope") || t.contains("vitamin") || t.contains("syrup") || t.contains("tablet") || t.contains("thermometer") || t.contains("first aid") -> {
+                R.drawable.img_medical_pharma_kit
+            }
+            cat.contains("household") || cat.contains("upholstery") || cat.contains("rubber") || cat.contains("plastic") || cat.contains("musical") || t.contains("sofa") || t.contains("armchair") || t.contains("cushion") || t.contains("guitar") || t.contains("piano") || t.contains("drum") || t.contains("bucket") || t.contains("container") -> {
+                R.drawable.img_household_upholstery
+            }
+            cat.contains("automobile") || cat.contains("spare") || cat.contains("stationary") || cat.contains("stationaries") || cat.contains("educational") || cat.contains("sewing") || cat.contains("phone accessories") || t.contains("brake") || t.contains("spark plug") || t.contains("textbook") || t.contains("pen") || t.contains("notebook") || t.contains("fabric") || t.contains("thread") || t.contains("sewing") || t.contains("power bank") || t.contains("charger") -> {
+                R.drawable.img_auto_tools_tech
+            }
             cat.contains("shoe") || t.contains("shoe") || t.contains("sneaker") || t.contains("boot") || t.contains("kick") || t.contains("loafer") || t.contains("oxford") || t.contains("sandal") || t.contains("slide") -> {
                 R.drawable.img_sneaker_quantum_3d
             }
             cat.contains("bag") || t.contains("bag") || t.contains("backpack") || t.contains("tote") || t.contains("duffle") || t.contains("crossbody") || t.contains("clutch") || t.contains("briefcase") || t.contains("suitcase") -> {
                 R.drawable.img_luxury_leather_bag
             }
-            cat.contains("beauty") || cat.contains("cosmetic") || t.contains("serum") || t.contains("parfum") || t.contains("lipstick") || t.contains("fragrance") || t.contains("oil") || t.contains("mask") || t.contains("lotion") || t.contains("cream") -> {
+            cat.contains("beauty") || cat.contains("cosmetic") || cat.contains("women") || t.contains("serum") || t.contains("parfum") || t.contains("lipstick") || t.contains("fragrance") || t.contains("oil") || t.contains("mask") || t.contains("lotion") || t.contains("cream") || t.contains("gown") || t.contains("blouse") -> {
                 R.drawable.img_luxury_fragrance_bottle
             }
             cat.contains("electronic") || t.contains("headphone") || t.contains("audio") || t.contains("watch") || t.contains("phone") || t.contains("laptop") || t.contains("monitor") || t.contains("keyboard") || t.contains("camera") || t.contains("speaker") -> {

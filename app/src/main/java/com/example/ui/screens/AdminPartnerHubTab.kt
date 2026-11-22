@@ -621,11 +621,73 @@ private fun AdminPartnerAgreementsSection(
                             Text("Counter-Sign & Finalize MOU", fontWeight = FontWeight.Black)
                         }
                     } else {
+                        var showCounterSignPad by remember(partner.id) { mutableStateOf(partner.adminCounterSignatureStrokes.isBlank()) }
                         SignaturePreviewBox(
                             strokesData = partner.adminCounterSignatureStrokes,
                             signerName = partner.adminCounterSignatureName,
                             roleLabel = "24/7 SHOPPING ADMIN COUNTER-SIGNATURE (FINALIZED)"
                         )
+                        OutlinedButton(
+                            onClick = { showCounterSignPad = !showCounterSignPad },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("admin_mou_activate_pad_${partner.id}")
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp), tint = AccentGold)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (showCounterSignPad) "Hide Counter-Signature Pad" else "Activate Admin Counter-Signature Pad",
+                                fontWeight = FontWeight.Bold,
+                                color = AccentGold
+                            )
+                        }
+                        if (showCounterSignPad) {
+                            OutlinedTextField(
+                                value = adminSignatoryName,
+                                onValueChange = { adminSignatoryName = it },
+                                label = { Text("24/7 SHOPPING Admin Signatory Name") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            SignaturePadBox(
+                                strokesData = adminSigStrokes,
+                                onStrokesChanged = { adminSigStrokes = it },
+                                title = "24/7 SHOPPING Counter-Signature Pad *",
+                                testTagPrefix = "admin_mou_counter_sig_${partner.id}"
+                            )
+                            Button(
+                                onClick = {
+                                    if (adminSigStrokes.isBlank()) {
+                                        Toast.makeText(context, "Please draw 24/7 SHOPPING Admin counter-signature.", Toast.LENGTH_SHORT).show()
+                                        return@Button
+                                    }
+                                    onCounterSignAndFinalize(
+                                        partner.id,
+                                        adminSignatoryName,
+                                        adminSigStrokes,
+                                        editCommission.toDoubleOrNull() ?: partner.stipulatedCommissionPercent,
+                                        editQty.toIntOrNull() ?: partner.agreedQuantityPerPeriod,
+                                        editPeriodUnit,
+                                        editMonthlyPay.toDoubleOrNull() ?: partner.monthlyHostingPayment,
+                                        editDuration,
+                                        editOpayNum,
+                                        editOpayName,
+                                        editMonieNum,
+                                        editMonieName
+                                    )
+                                    showCounterSignPad = false
+                                    Toast.makeText(context, "✅ Admin MOU Counter-Signature saved!", Toast.LENGTH_SHORT).show()
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = Color.Black),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth().height(48.dp)
+                            ) {
+                                Icon(Icons.Default.Verified, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Save Admin Counter-Signature", fontWeight = FontWeight.Black)
+                            }
+                        }
                         OutlinedButton(
                             onClick = {
                                 onUpdateTerms(

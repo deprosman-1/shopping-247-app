@@ -721,22 +721,94 @@ fun LiveCallScreen(
                             },
                             modifier = Modifier.fillMaxSize()
                         )
-                    } else if (callState.statusBanner.isNotBlank()) {
-                        Surface(
-                            shape = RoundedCornerShape(999.dp),
-                            color = DeepEmerald.copy(alpha = 0.85f),
-                            border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.6f)),
+                    } else {
+                        Column(
                             modifier = Modifier
                                 .align(Alignment.TopCenter)
-                                .padding(top = 12.dp, start = 16.dp, end = 16.dp)
+                                .padding(top = 12.dp, start = 16.dp, end = 16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text(
-                                text = callState.statusBanner,
-                                color = Color.White,
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
-                            )
+                            Surface(
+                                shape = RoundedCornerShape(999.dp),
+                                color = DeepEmerald.copy(alpha = 0.88f),
+                                border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.65f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Videocam, contentDescription = null, tint = AccentGold, modifier = Modifier.size(15.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = callState.statusBanner.ifBlank { "Live Video Camera & Interactive Desk Active" },
+                                        color = Color.White,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                            Surface(
+                                onClick = { showChatOverlay = !showChatOverlay },
+                                shape = RoundedCornerShape(999.dp),
+                                color = if (showChatOverlay) CyberCyan else EmeraldSurface.copy(alpha = 0.9f),
+                                border = BorderStroke(1.dp, CyberCyan.copy(alpha = 0.7f)),
+                                modifier = Modifier.testTag("video_mode_chat_pill")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Chat, contentDescription = "Toggle Live Chat", tint = if (showChatOverlay) DeepEmerald else CyberCyan, modifier = Modifier.size(14.dp))
+                                    Spacer(Modifier.width(5.dp))
+                                    Text(
+                                        text = if (showChatOverlay) "Hide Live Chat" else "Interactive Chat (${callState.chatMessages.size})",
+                                        color = if (showChatOverlay) DeepEmerald else Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Interactive Quick-Prompt Strip (Audio + Video live assistant prompts)
+                    val interactivePrompts = remember {
+                        listOf("Check Order Status", "Store Bank Accounts", "How to Pre-Order", "Catalog Highlights")
+                    }
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(start = 12.dp, end = 12.dp, bottom = 96.dp)
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .testTag("live_interactive_prompt_strip"),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        interactivePrompts.forEach { prompt ->
+                            Surface(
+                                onClick = {
+                                    viewModel.sendInteractiveAudioVisualPrompt(prompt)
+                                    showChatOverlay = true
+                                },
+                                shape = RoundedCornerShape(999.dp),
+                                color = EmeraldSurface.copy(alpha = 0.92f),
+                                border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.65f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.GraphicEq, contentDescription = null, tint = AccentGold, modifier = Modifier.size(14.dp))
+                                    Spacer(Modifier.width(5.dp))
+                                    Text(
+                                        text = prompt,
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -745,7 +817,7 @@ fun LiveCallScreen(
                         visible = showChatOverlay,
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
-                            .padding(start = 12.dp, end = 12.dp, bottom = 104.dp)
+                            .padding(start = 12.dp, end = 12.dp, bottom = 140.dp)
                     ) {
                         Card(
                             shape = RoundedCornerShape(20.dp),

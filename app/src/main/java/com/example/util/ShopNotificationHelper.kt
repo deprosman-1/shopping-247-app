@@ -266,6 +266,103 @@ object ShopNotificationHelper {
         )
     }
 
+    fun notifyNewProductAlert(
+        context: Context,
+        productTitle: String,
+        category: String,
+        priceText: String,
+        targetPhone: String = ""
+    ) {
+        if (!hasNotificationPermission(context)) return
+        ensureChannels(context)
+        val phoneSuffix = if (targetPhone.isNotBlank()) " • Sent to $targetPhone" else ""
+        postNotification(
+            context = context,
+            channelId = CHANNEL_PROMOS,
+            notificationId = ("new_prod_${productTitle}_$category").hashCode(),
+            title = "New Arrival on 24/7 SHOPPING: $productTitle",
+            body = "Category: $category • Price: $priceText$phoneSuffix. Tap to view & shop now!"
+        )
+    }
+
+    fun notifyAppMaintenance(
+        context: Context,
+        title: String,
+        message: String
+    ) {
+        if (!hasNotificationPermission(context)) return
+        ensureChannels(context)
+        postNotification(
+            context = context,
+            channelId = CHANNEL_ORDERS,
+            notificationId = 24899,
+            title = title.ifBlank { "24/7 SHOPPING App Maintenance & Upgrade" },
+            body = message.ifBlank { "Scheduled system upgrade in progress for faster shopping. Thank you for your patience." }
+        )
+    }
+
+    fun notifyCustomerNewReviewToAdmin(
+        context: Context,
+        reviewerName: String,
+        productTitle: String,
+        rating: Int
+    ) {
+        if (!hasNotificationPermission(context)) return
+        ensureChannels(context)
+        postNotification(
+            context = context,
+            channelId = CHANNEL_ORDERS,
+            notificationId = ("review_${reviewerName}_$productTitle").hashCode(),
+            title = "New Customer Rating ($rating★) • $productTitle",
+            body = "${reviewerName.ifBlank { "Customer" }} submitted a $rating-star rating & feedback. Open Admin Feedback tab to view or reply."
+        )
+    }
+
+    fun notifyPaymentConfirmedReceipt(
+        context: Context,
+        orderId: String,
+        portalTitle: String,
+        amountText: String
+    ) {
+        if (!hasNotificationPermission(context)) return
+        ensureChannels(context)
+        postNotification(
+            context = context,
+            channelId = CHANNEL_ORDERS,
+            notificationId = ("pay_ok_$orderId").hashCode(),
+            title = "ORDER & PAYMENT CONFIRMED ($orderId)",
+            body = "24/7 SHOPPING account credited $amountText via $portalTitle. Your ORDER & PAYMENT CONFIRMATION RECEIPT is ready!"
+        )
+    }
+
+    fun notifyPaymentFailedUncredited(
+        context: Context,
+        orderId: String,
+        portalTitle: String,
+        amountText: String,
+        isNetworkDelay: Boolean = false
+    ) {
+        if (!hasNotificationPermission(context)) return
+        ensureChannels(context)
+        val title = if (isNetworkDelay) {
+            "ORDER & PAYMENT PENDING NETWORK ($orderId)"
+        } else {
+            "ORDER & PAYMENT FAILED ($orderId)"
+        }
+        val body = if (isNetworkDelay) {
+            "Network delay detected for $amountText via $portalTitle. Once network restores, transfer pushes automatically to credit 24/7 SHOPPING."
+        } else {
+            "24/7 SHOPPING account has NOT received credit alert for $amountText ($portalTitle) yet. Status turns to ORDER & PAYMENT CONFIRMED once credited."
+        }
+        postNotification(
+            context = context,
+            channelId = CHANNEL_ORDERS,
+            notificationId = ("pay_fail_$orderId").hashCode(),
+            title = title,
+            body = body
+        )
+    }
+
     private fun postNotification(
         context: Context,
         channelId: String,

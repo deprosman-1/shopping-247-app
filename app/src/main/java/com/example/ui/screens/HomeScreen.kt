@@ -68,6 +68,7 @@ import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Refresh
@@ -134,6 +135,7 @@ import com.example.data.model.Product
 import com.example.data.model.ProductCategory
 import com.example.ui.components.CategorySelectorButton
 import com.example.ui.components.DualAxisScrollContainer
+import com.example.ui.components.HorizontalCategoryStrip
 import com.example.ui.components.ShopEmblemWatermark
 import com.example.ui.components.ProductStandardCard
 import com.example.ui.components.QuickEditProductDialog
@@ -605,6 +607,42 @@ fun HomeScreen(
                 }
             }
 
+            // Automatic App Maintenance & Upgrade Banner
+            if (storeProfile.isMaintenanceMode) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color(0xFF7C2D12),
+                    border = BorderStroke(1.2.dp, AccentGold),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 3.dp)
+                        .testTag("home_maintenance_banner")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Build,
+                            contentDescription = "App Maintenance & Upgrade Alert",
+                            tint = AccentGold,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = storeProfile.maintenanceMessage.ifBlank {
+                                "Scheduled system maintenance & app upgrade in progress. Orders will auto-sync cleanly."
+                            },
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+
             // Rearranged Unified Upper Toolbar: Pinned Category Dropdown + Scrollable Action & Filter Strip
             val categoryCounts = remember(allProducts) {
                 allProducts.groupingBy { it.category }.eachCount()
@@ -951,6 +989,14 @@ fun HomeScreen(
                     )
                 }
             }
+
+            // Sideways-Scrollable 23-Category Strip
+            HorizontalCategoryStrip(
+                selectedCategory = selectedCategory,
+                categoryCounts = categoryCounts,
+                totalCount = allProducts.size,
+                onSelectCategory = { viewModel.selectCategory(it) }
+            )
 
             // Expandable Search Panel (Takes 0dp until tapped so catalog stays front-and-center)
             AnimatedVisibility(
@@ -1439,7 +1485,7 @@ fun HomeScreen(
                         // Standard Free-Scrolling Product Cards
                         items(
                             items = products,
-                            key = { it.id },
+                            key = { "grid_${it.id}" },
                             contentType = { "product_card" }
                         ) { product ->
                             val effectiveDiscount = viewModel.getEffectiveDiscountPercent(product.category)

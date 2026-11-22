@@ -7,23 +7,43 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Checkroom
+import androidx.compose.material.icons.filled.ChildCare
+import androidx.compose.material.icons.filled.ChildFriendly
+import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.Diamond
+import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.DryCleaning
+import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FaceRetouchingNatural
 import androidx.compose.material.icons.filled.Fastfood
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.LocalBar
 import androidx.compose.material.icons.filled.LocalMall
+import androidx.compose.material.icons.filled.Man
+import androidx.compose.material.icons.filled.MedicalServices
+import androidx.compose.material.icons.filled.Medication
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.ShoppingBag
+import androidx.compose.material.icons.filled.Weekend
+import androidx.compose.material.icons.filled.Woman
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
@@ -49,6 +69,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.ProductCategory
 import com.example.ui.theme.AccentGold
+import com.example.ui.theme.CyberCyan
 
 /**
  * Compact pinned Category Dropdown Button designed to sit beside the scrollable
@@ -127,16 +148,11 @@ fun CategorySelectorButton(
                     )
                 },
                 text = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(
-                            text = "All 3D Items ($totalCount)",
-                            fontWeight = if (selectedCategory == null) FontWeight.Black else FontWeight.ExtraBold,
-                            color = if (selectedCategory == null) Color(0xFFDC2626) else Color(0xFF000000)
-                        )
-                    }
+                    Text(
+                        text = "All 3D Items ($totalCount)",
+                        fontWeight = if (selectedCategory == null) FontWeight.Black else FontWeight.ExtraBold,
+                        color = if (selectedCategory == null) Color(0xFFDC2626) else Color(0xFF000000)
+                    )
                 },
                 trailingIcon = if (selectedCategory == null) {
                     { Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(16.dp)) }
@@ -198,6 +214,107 @@ fun CategorySelectorButton(
     }
 }
 
+/**
+ * Horizontally scrollable LazyRow arrangement of ALL 23 product categories
+ * for effortless sideways browsing and 1-tap category switching on the home storefront.
+ */
+@Composable
+fun HorizontalCategoryStrip(
+    selectedCategory: String?,
+    categoryCounts: Map<String, Int>,
+    totalCount: Int,
+    onSelectCategory: (String?) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val entries = remember { ProductCategory.entries }
+    LazyRow(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("horizontal_category_strip"),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        item(key = "cat_all", contentType = "category_pill") {
+            val isAll = selectedCategory == null
+            Surface(
+                onClick = { onSelectCategory(null) },
+                shape = RoundedCornerShape(12.dp),
+                color = if (isAll) AccentGold else Color(0xFF064E3B),
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = if (isAll) AccentGold else CyberCyan.copy(alpha = 0.45f)
+                ),
+                modifier = Modifier
+                    .height(34.dp)
+                    .testTag("horizontal_cat_all")
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 11.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.LocalMall,
+                        contentDescription = "All Products",
+                        tint = if (isAll) Color.Black else AccentGold,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text(
+                        text = "All ($totalCount)",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Black,
+                        color = if (isAll) Color.Black else Color.White,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+
+        items(
+            items = entries,
+            key = { it.name },
+            contentType = { "category_pill" }
+        ) { cat ->
+            val isSelected = selectedCategory.equals(cat.displayName, ignoreCase = true)
+            val count = categoryCounts[cat.displayName] ?: 0
+            Surface(
+                onClick = { onSelectCategory(if (isSelected) null else cat.displayName) },
+                shape = RoundedCornerShape(12.dp),
+                color = if (isSelected) AccentGold else Color(0xFF064E3B),
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = if (isSelected) AccentGold else CyberCyan.copy(alpha = 0.38f)
+                ),
+                modifier = Modifier
+                    .height(34.dp)
+                    .testTag("horizontal_cat_${cat.name.lowercase()}")
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 11.dp)
+                ) {
+                    Icon(
+                        imageVector = getCategoryIcon(cat),
+                        contentDescription = cat.displayName,
+                        tint = if (isSelected) Color.Black else CyberCyan,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text(
+                        text = if (count > 0) "${cat.displayName} ($count)" else cat.displayName,
+                        fontSize = 11.5.sp,
+                        fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
+                        color = if (isSelected) Color.Black else Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun CategoryFilterBar(
     selectedCategory: String?, // null = "All"
@@ -212,7 +329,6 @@ fun CategoryFilterBar(
             .padding(horizontal = 16.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // "All" chip
         FilterChip(
             selected = selectedCategory == null,
             onClick = { onSelectCategory(null) },
@@ -228,7 +344,7 @@ fun CategoryFilterBar(
             modifier = Modifier.testTag("category_chip_all")
         )
 
-        ProductCategory.values().forEach { cat ->
+        ProductCategory.entries.forEach { cat ->
             val isSelected = selectedCategory == cat.displayName
             val icon = getCategoryIcon(cat)
 
@@ -263,5 +379,21 @@ fun getCategoryIcon(category: ProductCategory): ImageVector {
         ProductCategory.ELECTRONICS -> Icons.Default.Devices
         ProductCategory.FOOD -> Icons.Default.Fastfood
         ProductCategory.BEVERAGES -> Icons.Default.LocalBar
+        ProductCategory.MEN -> Icons.Default.Man
+        ProductCategory.WOMEN -> Icons.Default.Woman
+        ProductCategory.BABIES -> Icons.Default.ChildCare
+        ProductCategory.KIDS -> Icons.Default.ChildFriendly
+        ProductCategory.HOUSEHOLD -> Icons.Default.Home
+        ProductCategory.MUSICALS -> Icons.Default.MusicNote
+        ProductCategory.EDUCATIONAL -> Icons.Default.School
+        ProductCategory.JEWELRY -> Icons.Default.Diamond
+        ProductCategory.STATIONARIES -> Icons.Default.EditNote
+        ProductCategory.PHONE_ACCESSORIES -> Icons.Default.PhoneAndroid
+        ProductCategory.UPHOLSTERY -> Icons.Default.Weekend
+        ProductCategory.RUBBER_PLASTIC -> Icons.Default.Build
+        ProductCategory.AUTOMOBILE_SPARE_PARTS -> Icons.Default.DirectionsCar
+        ProductCategory.CLOTHING_SEWING_MATERIALS -> Icons.Default.ContentCut
+        ProductCategory.HEALTH_MEDICAL_EQUIPMENT -> Icons.Default.MedicalServices
+        ProductCategory.PHARMACEUTICALS -> Icons.Default.Medication
     }
 }

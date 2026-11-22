@@ -165,59 +165,125 @@ fun ReturnRefundRequestDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = Color(0xFF062E22),
+        titleContentColor = Color(0xFFFDE047),
         icon = {
-            Icon(
-                Icons.Default.AssignmentReturn,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(32.dp)
-            )
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = Color(0xFFDC2626).copy(alpha = 0.22f),
+                modifier = Modifier.size(48.dp)
+            ) {
+                Icon(
+                    Icons.Default.AssignmentReturn,
+                    contentDescription = "Request Return or Refund",
+                    tint = Color(0xFFFDE047),
+                    modifier = Modifier.padding(10.dp).size(28.dp)
+                )
+            }
         },
         title = {
             Text(
                 text = "Request Return / Refund",
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Black,
+                fontSize = 19.sp,
+                color = Color(0xFFFDE047)
             )
         },
         text = {
             Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .testTag("return_refund_dialog"),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF064E3B),
+                    border = androidx.compose.foundation.BorderStroke(1.2.dp, Color(0xFF34D399).copy(alpha = 0.7f)),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.padding(10.dp)) {
+                    Column(modifier = Modifier.padding(12.dp)) {
                         Text(
                             text = "Order ${order.orderId} • ${naira.format(order.totalAmount)}",
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.bodySmall
+                            fontWeight = FontWeight.Black,
+                            fontSize = 14.sp,
+                            color = Color(0xFF34D399)
                         )
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = order.itemsSummary.replace("\n", " "),
-                            style = MaterialTheme.typography.labelSmall,
-                            maxLines = 2
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = Color.White,
+                            maxLines = 3
                         )
                     }
                 }
-                Text("Select Reason:", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium)
+                Text(
+                    text = "Select Return / Refund Reason:",
+                    fontWeight = FontWeight.Black,
+                    fontSize = 13.sp,
+                    color = Color(0xFF38BDF8)
+                )
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     reasons.forEach { reason ->
+                        val isSelected = selectedReason == reason
                         FilterChip(
-                            selected = selectedReason == reason,
+                            selected = isSelected,
                             onClick = { selectedReason = reason },
-                            label = { Text(reason, fontSize = 11.sp) }
+                            label = {
+                                Text(
+                                    text = reason,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = if (isSelected) Color(0xFF052E16) else Color.White
+                                )
+                            },
+                            colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Color(0xFFFDE047),
+                                containerColor = Color(0xFF065F46),
+                                selectedLabelColor = Color(0xFF052E16),
+                                labelColor = Color.White
+                            ),
+                            border = androidx.compose.material3.FilterChipDefaults.filterChipBorder(
+                                enabled = true,
+                                selected = isSelected,
+                                borderColor = Color(0xFF34D399).copy(alpha = 0.6f),
+                                selectedBorderColor = Color(0xFFFDE047)
+                            )
                         )
                     }
                 }
                 OutlinedTextField(
                     value = details,
                     onValueChange = { details = it },
-                    label = { Text("Describe the issue (condition, refund preference)") },
+                    label = {
+                        Text(
+                            "Describe Issue & Refund Preference",
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF38BDF8)
+                        )
+                    },
+                    placeholder = {
+                        Text(
+                            "Explain defect, wrong size, or preferred bank refund",
+                            color = Color.White.copy(alpha = 0.65f),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    },
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    ),
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Color(0xFFFDE047),
+                        unfocusedBorderColor = Color(0xFF34D399)
+                    ),
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 2,
                     maxLines = 4
@@ -228,17 +294,28 @@ fun ReturnRefundRequestDialog(
                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                         )
                     },
-                    modifier = Modifier.fillMaxWidth()
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.5.dp,
+                        if (proofUri != null) Color(0xFF34D399) else Color(0xFFFDE047)
+                    ),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = if (proofUri != null) Color(0xFF065F46) else Color(0xFF064E3B),
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier.fillMaxWidth().height(48.dp)
                 ) {
                     Icon(
                         if (proofUri != null) Icons.Default.CheckCircle else Icons.Default.AddPhotoAlternate,
                         contentDescription = "Attach proof photo",
                         modifier = Modifier.size(18.dp),
-                        tint = if (proofUri != null) Color(0xFF16A34A) else MaterialTheme.colorScheme.primary
+                        tint = if (proofUri != null) Color(0xFF34D399) else Color(0xFFFDE047)
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        if (proofUri != null) "Photo Proof Attached (Tap to change)" else "Attach Photo Proof (Optional)"
+                        text = if (proofUri != null) "Photo Proof Attached (Tap to change)" else "Attach Photo Proof (Optional)",
+                        fontWeight = FontWeight.Black,
+                        fontSize = 12.5.sp,
+                        color = Color.White
                     )
                 }
             }
@@ -252,14 +329,21 @@ fun ReturnRefundRequestDialog(
                         proofUri?.toString().orEmpty()
                     )
                 },
-                modifier = Modifier.testTag("submit_return_refund_button")
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF10B981),
+                    contentColor = Color(0xFF052E16)
+                ),
+                modifier = Modifier.height(48.dp).testTag("submit_return_refund_button")
             ) {
-                Text("Submit Request", fontWeight = FontWeight.Bold)
+                Text("Submit Request", fontWeight = FontWeight.Black, fontSize = 14.sp)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Close")
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.height(48.dp)
+            ) {
+                Text("Close", fontWeight = FontWeight.Black, color = Color(0xFFF87171))
             }
         }
     )

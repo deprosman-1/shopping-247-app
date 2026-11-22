@@ -66,5 +66,21 @@ abstract class DeprosDatabase : RoomDatabase() {
                 instance
             }
         }
+
+        @androidx.annotation.VisibleForTesting
+        fun resetInstanceForTests(context: Context? = null) {
+            synchronized(this) {
+                try {
+                    INSTANCE?.close()
+                } catch (_: Exception) {
+                } finally {
+                    INSTANCE = null
+                }
+                try {
+                    context?.deleteDatabase("depros_database.db")
+                } catch (_: Exception) {
+                }
+            }
+        }
     }
 }

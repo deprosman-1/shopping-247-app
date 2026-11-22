@@ -29,6 +29,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -89,9 +90,15 @@ fun SignaturePadBox(
     modifier: Modifier = Modifier,
     testTagPrefix: String = "signature_pad"
 ) {
-    val strokes = remember(strokesData) {
+    val strokes = remember {
         mutableStateListOf<List<Offset>>().apply {
             addAll(parseNormalizedStrokes(strokesData))
+        }
+    }
+    LaunchedEffect(strokesData) {
+        if (serializeNormalizedStrokes(strokes) != strokesData) {
+            strokes.clear()
+            strokes.addAll(parseNormalizedStrokes(strokesData))
         }
     }
     var activeStroke by remember { mutableStateOf<List<Offset>>(emptyList()) }

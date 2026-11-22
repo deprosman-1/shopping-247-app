@@ -49,12 +49,14 @@ object SharedReceiptHelper {
         val detectedMethod = when {
             lower.contains("opay") || lower.contains("paycom") -> PaymentMethod.OPAY
             lower.contains("moniepoint") || lower.contains("monie") -> PaymentMethod.MONIEPOINT
+            lower.contains("palmpay") || lower.contains("palm pay") -> PaymentMethod.PALMPAY
             lower.contains("pos terminal") || lower.contains("pos transfer") -> PaymentMethod.POS_TRANSFER
             else -> null
         }
         val sourceLabel = when (detectedMethod) {
             PaymentMethod.OPAY -> "OPay"
             PaymentMethod.MONIEPOINT -> "Moniepoint"
+            PaymentMethod.PALMPAY -> "PalmPay"
             PaymentMethod.POS_TRANSFER -> "POS Receipt"
             else -> "Payment App"
         }
@@ -78,7 +80,8 @@ object SharedReceiptHelper {
             .firstOrNull { candidate ->
                 candidate.isNotBlank() &&
                     !candidate.equals("OPay", ignoreCase = true) &&
-                    !candidate.equals("Moniepoint", ignoreCase = true)
+                    !candidate.equals("Moniepoint", ignoreCase = true) &&
+                    !candidate.equals("PalmPay", ignoreCase = true)
             }
             ?: ""
 

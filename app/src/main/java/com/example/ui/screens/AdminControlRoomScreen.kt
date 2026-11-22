@@ -169,6 +169,7 @@ import coil.compose.AsyncImage
 import com.example.AppScreen
 import com.example.MainViewModel
 import com.example.data.model.AdminBargainConfig
+import com.example.data.model.CreditVerificationStatus
 import com.example.data.model.Customer
 import com.example.data.model.Order
 import com.example.data.model.StatusUpdate
@@ -200,6 +201,7 @@ import com.example.ui.theme.CodOrange
 import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.MoniepointBlue
 import com.example.ui.theme.OPayGreen
+import com.example.ui.theme.PalmPayPurple
 import com.example.ui.theme.PosPurple
 import com.example.ui.theme.SuccessGreen
 import java.text.NumberFormat
@@ -425,10 +427,11 @@ fun AdminControlRoomScreen(
                     icon = { Icon(Icons.Default.Handshake, contentDescription = null, modifier = Modifier.size(18.dp)) },
                     modifier = Modifier.testTag("admin_partners_hub_tab")
                 )
+                val reviewsCount = viewModel.productReviews.collectAsState().value.size
                 Tab(
                     selected = selectedTab == 10,
                     onClick = { selectedTab = 10; viewModel.selectAdminTab(10) },
-                    text = { Text("Returns & Support (${returnRequests.size + supportTickets.size})") },
+                    text = { Text("Returns, Reviews & Support (${returnRequests.size + supportTickets.size + reviewsCount})") },
                     icon = { Icon(Icons.Default.SupportAgent, contentDescription = null, modifier = Modifier.size(18.dp)) },
                     modifier = Modifier.testTag("admin_returns_support_tab")
                 )
@@ -2063,7 +2066,7 @@ private fun ProductManagementTab(
                             value = category,
                             onValueChange = {},
                             readOnly = true,
-                            label = { Text("Product Category (7 Available)") },
+                            label = { Text("Product Category (${ProductCategory.entries.size} Available)") },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryDropdownExpanded) },
                             modifier = Modifier
                                 .menuAnchor()
@@ -2778,7 +2781,7 @@ private fun ProductManagementTab(
                         OutlinedButton(
                             onClick = {
                                 viewModel.seed100Products { count ->
-                                    Toast.makeText(context, "Loaded $count catalog products across all 7 categories!", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Loaded $count catalog products across all ${ProductCategory.entries.size} categories!", Toast.LENGTH_SHORT).show()
                                 }
                             },
                             shape = RoundedCornerShape(8.dp),
@@ -4759,9 +4762,21 @@ private fun PaymentReceiptsTab(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         if (inspectOrder.status == OrderStatus.PENDING_VERIFICATION) {
+                            if (!inspectOrder.isCreditAlertConfirmed) {
+                                OutlinedButton(
+                                    onClick = {
+                                        viewModel.recordOrderCreditAlertReceived(inspectOrder.orderId)
+                                        Toast.makeText(context, "✅ 24/7 SHOPPING Credit Alert Recorded! Payment Confirmation is now ON.", Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Confirm Credit Alert", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
                             Button(
+                                enabled = inspectOrder.isCreditAlertConfirmed,
                                 onClick = {
-                                    viewModel.updateOrderStatus(inspectOrder.orderId, OrderStatus.CONFIRMED, "Order confirmed & approved by Admin Cashier after receipt review")
+                                    viewModel.updateOrderStatus(inspectOrder.orderId, OrderStatus.CONFIRMED, "Order confirmed & approved by Admin Cashier after 24/7 credit alert")
                                     Toast.makeText(context, "Order ${inspectOrder.orderId} Confirmed! Status changed to ORDER CONFIRMED.", Toast.LENGTH_SHORT).show()
                                     viewingReceiptImageOrder = null
                                 },
@@ -4770,7 +4785,11 @@ private fun PaymentReceiptsTab(
                             ) {
                                 Icon(Icons.Default.Verified, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Confirm & Process Order", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = if (inspectOrder.isCreditAlertConfirmed) "Payment Confirmation ON" else "Awaiting Credit Alert",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                         }
 
@@ -4909,6 +4928,7 @@ private fun PaymentReceiptsTab(
                     val paymentColor = when (order.paymentMethod) {
                         PaymentMethod.OPAY -> OPayGreen
                         PaymentMethod.MONIEPOINT -> MoniepointBlue
+                        PaymentMethod.PALMPAY -> PalmPayPurple
                         PaymentMethod.POS_TRANSFER -> PosPurple
                         PaymentMethod.CASH_ON_DELIVERY -> CodOrange
                     }
@@ -5111,6 +5131,27 @@ private fun PaymentReceiptsTab(
                                 )
                             }
 
+                            Spacer(modifier = Modifier.height(6.dp))
+                            val creditColor = when {
+                                order.isCreditAlertConfirmed -> SuccessGreen
+                                order.creditVerificationStatus == CreditVerificationStatus.PAYMENT_FAILED_UNCREDITED -> Color(0xFFDC2626)
+                                order.creditVerificationStatus == CreditVerificationStatus.NETWORK_DELAYED_PENDING -> AccentGold
+                                else -> Color(0xFFD97706)
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = creditColor.copy(alpha = 0.14f),
+                                border = BorderStroke(1.dp, creditColor.copy(alpha = 0.45f))
+                            ) {
+                                Text(
+                                    text = if (order.isCreditAlertConfirmed) "24/7 Account Credited ✓ • Payment Confirmation ON" else order.creditVerificationStatus.label,
+                                    color = creditColor,
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Black,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                )
+                            }
+
                             Spacer(modifier = Modifier.height(10.dp))
 
                             // Action buttons to update receipt status
@@ -5120,25 +5161,45 @@ private fun PaymentReceiptsTab(
                             ) {
                                 OutlinedButton(
                                     onClick = { viewingReceiptImageOrder = order },
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(0.9f)
                                 ) {
                                     Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("View Receipt", fontSize = 12.sp)
+                                    Text("Receipt", fontSize = 11.sp)
                                 }
 
                                 if (order.status == OrderStatus.PENDING_VERIFICATION) {
+                                    if (!order.isCreditAlertConfirmed) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                viewModel.recordOrderCreditAlertReceived(order.orderId)
+                                                Toast.makeText(context, "✅ 24/7 Credit Alert Received! Payment Confirmation ON & Receipt sent.", Toast.LENGTH_SHORT).show()
+                                            },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("admin_confirm_credit_alert_${order.orderId}")
+                                        ) {
+                                            Text("Verify Credit", fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
                                     Button(
+                                        enabled = order.isCreditAlertConfirmed,
                                         onClick = {
                                             viewModel.updateOrderStatus(order.orderId, OrderStatus.CONFIRMED, "Order confirmed & verified by Admin Cashier")
                                             Toast.makeText(context, "Order ${order.orderId} Confirmed! Customer status changed to ORDER CONFIRMED.", Toast.LENGTH_SHORT).show()
                                         },
                                         colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
-                                        modifier = Modifier.weight(1.2f)
+                                        modifier = Modifier
+                                            .weight(1.2f)
+                                            .testTag("admin_payment_confirmation_button_${order.orderId}")
                                     ) {
                                         Icon(Icons.Default.Verified, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Confirm & Process Order", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            text = if (order.isCreditAlertConfirmed) "Payment Confirmation ON" else "Locked (Uncredited)",
+                                            fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     }
                                 } else if (order.status == OrderStatus.CONFIRMED || order.status == OrderStatus.VERIFIED) {
                                     Button(
@@ -8913,6 +8974,17 @@ private fun AdminSecuritySettingsTab(
     var opayNameInput by remember(storeProfile.opayAccountName) { mutableStateOf(storeProfile.opayAccountName) }
     var monieNumberInput by remember(storeProfile.moniepointAccountNumber) { mutableStateOf(storeProfile.moniepointAccountNumber) }
     var monieNameInput by remember(storeProfile.moniepointAccountName) { mutableStateOf(storeProfile.moniepointAccountName) }
+    var palmpayNumberInput by remember(storeProfile.palmpayAccountNumber) { mutableStateOf(storeProfile.palmpayAccountNumber) }
+    var palmpayNameInput by remember(storeProfile.palmpayAccountName) { mutableStateOf(storeProfile.palmpayAccountName) }
+    var maintenanceEnabledInput by remember(storeProfile.isMaintenanceMode) { mutableStateOf(storeProfile.isMaintenanceMode) }
+    var maintenanceMessageInput by remember(storeProfile.maintenanceMessage) {
+        mutableStateOf(
+            storeProfile.maintenanceMessage.ifBlank {
+                "Scheduled 24/7 SHOPPING system upgrade & performance maintenance in progress. Orders will auto-sync seamlessly."
+            }
+        )
+    }
+    var maintenanceIsUpgradeInput by remember { mutableStateOf(true) }
     var posTerminalIdInput by remember(storeProfile.posTerminalId) { mutableStateOf(storeProfile.posTerminalId) }
     var posTerminalNameInput by remember(storeProfile.posTerminalName) { mutableStateOf(storeProfile.posTerminalName) }
     var extraBankNameInput by remember(storeProfile.extraBankName) { mutableStateOf(storeProfile.extraBankName) }
@@ -9148,6 +9220,26 @@ private fun AdminSecuritySettingsTab(
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                         OutlinedTextField(
+                            value = palmpayNumberInput,
+                            onValueChange = { palmpayNumberInput = it },
+                            label = { Text("PalmPay Account No.") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f).testTag("admin_palmpay_number_input")
+                        )
+                        OutlinedTextField(
+                            value = palmpayNameInput,
+                            onValueChange = { palmpayNameInput = it },
+                            label = { Text("PalmPay Account Name") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f).testTag("admin_palmpay_name_input")
+                        )
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        OutlinedTextField(
                             value = posTerminalIdInput,
                             onValueChange = { posTerminalIdInput = it },
                             label = { Text("POS Terminal ID") },
@@ -9211,6 +9303,8 @@ private fun AdminSecuritySettingsTab(
                                     opayAccountName = opayNameInput.trim().ifBlank { "24/7 SHOPPING" },
                                     moniepointAccountNumber = monieNumberInput.trim(),
                                     moniepointAccountName = monieNameInput.trim().ifBlank { "24/7 SHOPPING" },
+                                    palmpayAccountNumber = palmpayNumberInput.trim(),
+                                    palmpayAccountName = palmpayNameInput.trim().ifBlank { "24/7 SHOPPING" },
                                     posTerminalId = posTerminalIdInput.trim(),
                                     posTerminalName = posTerminalNameInput.trim(),
                                     extraBankName = extraBankNameInput.trim(),
@@ -9219,7 +9313,10 @@ private fun AdminSecuritySettingsTab(
                                     apkDownloadUrl = com.example.util.WebPortalExporter.normalizeWebUrl(apkDownloadUrlInput),
                                     latestAppVersionCode = latestVersionCodeInput.toIntOrNull()?.coerceAtLeast(1) ?: storeProfile.latestAppVersionCode,
                                     latestAppVersionName = latestVersionNameInput.trim().ifBlank { storeProfile.latestAppVersionName },
-                                    updateReleaseNotes = updateNotesInput.trim()
+                                    updateReleaseNotes = updateNotesInput.trim(),
+                                    isMaintenanceMode = storeProfile.isMaintenanceMode,
+                                    maintenanceMessage = storeProfile.maintenanceMessage,
+                                    maintenanceStartedAt = storeProfile.maintenanceStartedAt
                                 )
                             )
                             Toast.makeText(
@@ -9388,6 +9485,172 @@ private fun AdminSecuritySettingsTab(
                             text = if (isPublishingUpdate) "Publishing Update..." else "Publish APK Update to All Customers",
                             fontWeight = FontWeight.Black
                         )
+                    }
+                }
+            }
+        }
+
+        // AUTOMATIC APP MAINTENANCE & UPGRADE NOTIFICATION BROADCASTER
+        item {
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.5.dp, Color(0xFFF59E0B).copy(alpha = 0.55f)),
+                modifier = Modifier.fillMaxWidth().testTag("admin_maintenance_card")
+            ) {
+                Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "APP MAINTENANCE & UPGRADE AUTO-ALERTS",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Black,
+                                color = Color(0xFFD97706)
+                            )
+                            Text(
+                                text = "Automatically notify all customers on their phone when app maintenance or upgrade starts/completes.",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = maintenanceEnabledInput,
+                            onCheckedChange = { maintenanceEnabledInput = it },
+                            modifier = Modifier.testTag("admin_maintenance_switch")
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Include Upgrade Version Alert", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Switch(
+                            checked = maintenanceIsUpgradeInput,
+                            onCheckedChange = { maintenanceIsUpgradeInput = it }
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = maintenanceMessageInput,
+                        onValueChange = { maintenanceMessageInput = it },
+                        label = { Text("Maintenance / Upgrade Notice Message") },
+                        minLines = 2,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("admin_maintenance_message_input")
+                    )
+
+                    Button(
+                        onClick = {
+                            viewModel.publishAppMaintenanceNotice(
+                                enabled = maintenanceEnabledInput,
+                                message = maintenanceMessageInput,
+                                isUpgradeNotice = maintenanceIsUpgradeInput,
+                                versionName = latestVersionNameInput,
+                                apkDownloadUrl = apkDownloadUrlInput
+                            ) { _, msg ->
+                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (maintenanceEnabledInput) Color(0xFFD97706) else SuccessGreen,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("admin_send_maintenance_alert_button")
+                    ) {
+                        Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (maintenanceEnabledInput) "Send Maintenance & Upgrade Alert" else "Clear Maintenance & Notify Live",
+                            fontWeight = FontWeight.Black,
+                            fontSize = 12.5.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        // NEW PRODUCT PHONE-LINE ALERT BROADCASTER (SIGNED-UP PHONES)
+        item {
+            val signedUpPhones = remember(viewModel.allCustomers.collectAsState().value) {
+                viewModel.getSignedUpCustomerPhones()
+            }
+            val latestProduct = viewModel.allProducts.collectAsState().value.firstOrNull()
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.5.dp, CyberCyan.copy(alpha = 0.55f)),
+                modifier = Modifier.fillMaxWidth().testTag("admin_phone_line_alerts_card")
+            ) {
+                Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "NEW PRODUCT ALERTS TO SIGNED-UP PHONE LINES",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Black,
+                        color = CyberCyan
+                    )
+                    Text(
+                        text = "${signedUpPhones.size} registered phone line(s) active. Dispatch push notifications + 1-tap SMS to customer lines.",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontSize = 11.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (signedUpPhones.isNotEmpty()) {
+                        Text(
+                            text = "Lines: ${signedUpPhones.take(5).joinToString(", ")}${if (signedUpPhones.size > 5) " +${signedUpPhones.size - 5} more" else ""}",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = AccentGold
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            enabled = latestProduct != null,
+                            onClick = {
+                                latestProduct?.let {
+                                    viewModel.broadcastNewProductAlert(it)
+                                    Toast.makeText(context, "📢 Sent New Product alert for '${it.title}' to ${signedUpPhones.size} phone line(s)!", Toast.LENGTH_LONG).show()
+                                }
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("admin_broadcast_new_product_button")
+                        ) {
+                            Text("Push Phone Alert", fontSize = 11.5.sp, fontWeight = FontWeight.Black)
+                        }
+                        OutlinedButton(
+                            enabled = latestProduct != null && signedUpPhones.isNotEmpty(),
+                            onClick = {
+                                val firstLine = signedUpPhones.firstOrNull().orEmpty()
+                                val itemTitle = latestProduct?.title ?: "New Arrival"
+                                val smsIntent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$firstLine")).apply {
+                                    putExtra("sms_body", "🛍️ ${storeProfile.storeName} New Arrival: $itemTitle is now live in the app! Open 24/7 SHOPPING to order now.")
+                                }
+                                runCatching { context.startActivity(smsIntent) }
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("admin_sms_signed_up_line_button")
+                        ) {
+                            Text("Send SMS to Line", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
@@ -9769,7 +10032,8 @@ private fun ReturnsAndSupportAdminTab(viewModel: MainViewModel) {
     val context = LocalContext.current
     val returnRequests by viewModel.returnRequests.collectAsState()
     val supportTickets by viewModel.supportTickets.collectAsState()
-    var filterMode by remember { mutableIntStateOf(0) } // 0 = All, 1 = Returns, 2 = Tickets
+    val productReviews by viewModel.productReviews.collectAsState()
+    var filterMode by remember { mutableIntStateOf(0) } // 0 = All, 1 = Returns, 2 = Tickets, 3 = Ratings & Feedback
     var inspectedProofUrl by remember { mutableStateOf<String?>(null) }
 
     val nairaFormat = remember {
@@ -9804,7 +10068,7 @@ private fun ReturnsAndSupportAdminTab(viewModel: MainViewModel) {
                 FilterChip(
                     selected = filterMode == 0,
                     onClick = { filterMode = 0 },
-                    label = { Text("All (${returnRequests.size + supportTickets.size})") }
+                    label = { Text("All (${returnRequests.size + supportTickets.size + productReviews.size})") }
                 )
                 FilterChip(
                     selected = filterMode == 1,
@@ -9818,10 +10082,111 @@ private fun ReturnsAndSupportAdminTab(viewModel: MainViewModel) {
                     leadingIcon = { Icon(Icons.Default.SupportAgent, contentDescription = null, modifier = Modifier.size(16.dp)) },
                     label = { Text("Support Tickets (${supportTickets.size})") }
                 )
+                FilterChip(
+                    selected = filterMode == 3,
+                    onClick = { filterMode = 3 },
+                    leadingIcon = { Icon(Icons.Default.Verified, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                    label = { Text("Ratings & Feedback (${productReviews.size})") },
+                    modifier = Modifier.testTag("admin_reviews_filter_chip")
+                )
             }
         }
 
-        if (filterMode != 2) {
+        if (filterMode == 0 || filterMode == 3) {
+            item {
+                Text(
+                    text = "Customer Ratings & Feedback (${productReviews.size})",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Black,
+                    color = SuccessGreen
+                )
+            }
+            if (productReviews.isEmpty()) {
+                item {
+                    Card(
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "No customer ratings or feedback received yet. Delivered order reviews appear here automatically.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(16.dp)
+                        )
+                    }
+                }
+            } else {
+                items(productReviews, key = { "rev_${it.id}" }) { rev ->
+                    var adminReplyInput by remember(rev.id, rev.adminReply) { mutableStateOf(rev.adminReply) }
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.4f)),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("admin_review_card_${rev.id}")
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = rev.productTitle.ifBlank { "Product #${rev.productId.take(6)}" },
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 13.5.sp,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = AccentGold.copy(alpha = 0.22f)
+                                ) {
+                                    Text(
+                                        text = "${"★".repeat(rev.rating.coerceIn(1, 5))} (${rev.rating}/5)",
+                                        color = AccentGold,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 11.sp,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "By ${rev.customerName} • ${dateFormat.format(Date(rev.createdAt))}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = CyberCyan
+                            )
+                            Text(
+                                text = rev.comment,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium
+                            )
+                            OutlinedTextField(
+                                value = adminReplyInput,
+                                onValueChange = { adminReplyInput = it },
+                                label = { Text("Admin Reply to Customer Feedback") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Button(
+                                enabled = adminReplyInput.isNotBlank(),
+                                onClick = {
+                                    viewModel.replyToProductReview(rev.id, adminReplyInput)
+                                    Toast.makeText(context, "✅ Admin reply saved for ${rev.customerName}'s feedback!", Toast.LENGTH_SHORT).show()
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.fillMaxWidth().height(48.dp)
+                            ) {
+                                Text("Save Admin Reply", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (filterMode == 0 || filterMode == 1) {
             item {
                 Text(
                     text = "Return & Refund Requests (${returnRequests.size})",
@@ -9988,7 +10353,7 @@ private fun ReturnsAndSupportAdminTab(viewModel: MainViewModel) {
             }
         }
 
-        if (filterMode != 1) {
+        if (filterMode == 0 || filterMode == 2) {
             item {
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(

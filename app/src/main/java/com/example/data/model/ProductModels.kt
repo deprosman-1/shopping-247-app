@@ -10,7 +10,23 @@ enum class ProductCategory(val displayName: String) {
     BEAUTY_PRODUCT("Beauty Product"),
     ELECTRONICS("Electronics"),
     FOOD("Food"),
-    BEVERAGES("Beverages")
+    BEVERAGES("Beverages"),
+    MEN("Men"),
+    WOMEN("Women"),
+    BABIES("Babies"),
+    KIDS("Kids"),
+    HOUSEHOLD("Household"),
+    MUSICALS("Musicals"),
+    EDUCATIONAL("Educational"),
+    JEWELRY("Jewelry"),
+    STATIONARIES("Stationaries"),
+    PHONE_ACCESSORIES("Phone Accessories"),
+    UPHOLSTERY("Upholstery"),
+    RUBBER_PLASTIC("Rubber/Plastic"),
+    AUTOMOBILE_SPARE_PARTS("Automobile Spare-Parts"),
+    CLOTHING_SEWING_MATERIALS("Clothing & Sewing Materials"),
+    HEALTH_MEDICAL_EQUIPMENT("Health/Medical Equipment"),
+    PHARMACEUTICALS("Pharmaceuticals")
 }
 
 @Immutable
@@ -140,8 +156,16 @@ data class CartItem(
 enum class PaymentMethod(val title: String, val subtitle: String) {
     OPAY("OPay Transfer", "Direct transfer to official OPay Merchant Account"),
     MONIEPOINT("Moniepoint MFB", "Fast transfer to Moniepoint Commercial Account"),
+    PALMPAY("PalmPay Wallet", "Direct instant transfer to official 24/7 SHOPPING PalmPay Account"),
     POS_TRANSFER("POS Terminal Transfer", "Offline POS card swipe or terminal slip transfer"),
     CASH_ON_DELIVERY("Payment on Delivery", "Pay cash or card when parcel arrives at your doorstep")
+}
+
+enum class CreditVerificationStatus(val label: String) {
+    PENDING_CREDIT("Awaiting 24/7 Account Credit Alert"),
+    PAYMENT_FAILED_UNCREDITED("ORDER & PAYMENT FAILED — Not Yet Credited"),
+    CONFIRMED_CREDITED("ORDER & PAYMENT CONFIRMED — Account Credited"),
+    NETWORK_DELAYED_PENDING("Network Delayed — Queued for Auto-Confirmation")
 }
 
 enum class OrderStatus(val label: String) {
@@ -184,7 +208,9 @@ data class Order(
     val partnerId: String = "",
     val partnerName: String = "",
     val partnerCommissionAmount: Double = 0.0,
-    val partnerNetPayout: Double = 0.0
+    val partnerNetPayout: Double = 0.0,
+    val isCreditAlertConfirmed: Boolean = false,
+    val creditVerificationStatus: CreditVerificationStatus = CreditVerificationStatus.PENDING_CREDIT
 )
 
 data class SupabaseConfig(
@@ -205,6 +231,8 @@ data class StoreProfileConfig(
     val opayAccountName: String = "24/7 SHOPPING",
     val moniepointAccountNumber: String = "",
     val moniepointAccountName: String = "24/7 SHOPPING",
+    val palmpayAccountNumber: String = "",
+    val palmpayAccountName: String = "24/7 SHOPPING",
     val posTerminalId: String = "",
     val posTerminalName: String = "",
     val extraBankName: String = "",
@@ -213,7 +241,10 @@ data class StoreProfileConfig(
     val apkDownloadUrl: String = "",
     val latestAppVersionCode: Int = 1,
     val latestAppVersionName: String = "1.0",
-    val updateReleaseNotes: String = ""
+    val updateReleaseNotes: String = "",
+    val isMaintenanceMode: Boolean = false,
+    val maintenanceMessage: String = "",
+    val maintenanceStartedAt: Long = 0L
 )
 
 data class AppUpdateManifest(
@@ -295,7 +326,10 @@ data class ProductReview(
     val rating: Int,
     val comment: String,
     val createdAt: Long = System.currentTimeMillis(),
-    val isVerifiedPurchase: Boolean = true
+    val isVerifiedPurchase: Boolean = true,
+    val productTitle: String = "",
+    val adminReply: String = "",
+    val adminRepliedAt: Long = 0L
 )
 
 enum class CatalogBrowseMode(val label: String) {

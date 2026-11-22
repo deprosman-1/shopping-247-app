@@ -80,7 +80,9 @@ enum class OfflineActionType(val label: String) {
     CLOUD_INVENTORY_SYNC("Cloud Inventory & Orders Sync"),
     SUPPORT_TICKET_SYNC("Customer Support Ticket"),
     RETURN_REQUEST_SYNC("Return/Refund Request"),
-    PREORDER_SYNC("Custom Pre-Order Request")
+    PREORDER_SYNC("Custom Pre-Order Request"),
+    PAYMENT_CREDIT_SYNC("Bank Portal Credit & Confirmation Sync"),
+    NEW_PRODUCT_ALERT("New Product Customer Phone Alert")
 }
 
 @Immutable

@@ -619,6 +619,14 @@ private fun DeliveredProductReviewCard(
                             Text(dateFormat.format(Date(rev.createdAt)), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Text(rev.comment, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+                        if (rev.adminReply.isNotBlank()) {
+                            Text(
+                                text = "Store Admin Reply: ${rev.adminReply}",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = CyberCyan
+                            )
+                        }
                     }
                 }
             }

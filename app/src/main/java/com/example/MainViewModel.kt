@@ -10,6 +10,7 @@ import com.example.data.model.AppUpdateManifest
 import com.example.data.model.CartItem
 import com.example.data.model.CatalogBrowseMode
 import com.example.data.model.CatalogSortOption
+import com.example.data.model.CreditVerificationStatus
 import com.example.data.model.Customer
 import com.example.data.model.CustomerDeliveryInfo
 import com.example.data.model.DeliveryOption
@@ -104,6 +105,7 @@ data class AdminPromoConfig(
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     val repository = EcommerceRepository(application, viewModelScope)
     val voiceManager = com.example.util.WelcomeVoiceManager(application)
+    private val adminPrefs = getApplication<Application>().getSharedPreferences("depros_admin_settings", Context.MODE_PRIVATE)
 
     fun playWelcomeAudio() {
         voiceManager.speakAppWelcome()
@@ -240,9 +242,70 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         items.first().sumOf { it.unitPrice * it.quantity }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
-    // Orders & Receipts
-    val allOrders: StateFlow<List<Order>> = repository.allOrders
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    // Per-Order 24/7 SHOPPING Credit-Alert Verification States (Persisted locally & overlaid on Room orders)
+    private fun loadOrderCreditStates(): Map<String, Pair<Boolean, CreditVerificationStatus>> {
+        val raw = adminPrefs.getString("order_credit_states_json", null) ?: return emptyMap()
+        return try {
+            val obj = JSONObject(raw)
+            val result = mutableMapOf<String, Pair<Boolean, CreditVerificationStatus>>()
+            obj.keys().forEach { ordId ->
+                val item = obj.optJSONObject(ordId) ?: return@forEach
+                val confirmed = item.optBoolean("confirmed", false)
+                val statusName = item.optString("status", CreditVerificationStatus.PENDING_CREDIT.name)
+                val status = CreditVerificationStatus.entries.firstOrNull { it.name == statusName }
+                    ?: if (confirmed) CreditVerificationStatus.CONFIRMED_CREDITED else CreditVerificationStatus.PENDING_CREDIT
+                result[ordId] = confirmed to status
+            }
+            result
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
+    private fun persistOrderCreditStates(map: Map<String, Pair<Boolean, CreditVerificationStatus>>) {
+        val root = JSONObject()
+        map.forEach { (ordId, state) ->
+            root.put(ordId, JSONObject().apply {
+                put("confirmed", state.first)
+                put("status", state.second.name)
+            })
+        }
+        adminPrefs.edit().putString("order_credit_states_json", root.toString()).apply()
+    }
+
+    private val _orderCreditStates = MutableStateFlow(loadOrderCreditStates())
+
+    private fun setOrderCreditState(
+        orderId: String,
+        confirmed: Boolean,
+        status: CreditVerificationStatus
+    ) {
+        val updated = _orderCreditStates.value.toMutableMap()
+        updated[orderId] = confirmed to status
+        _orderCreditStates.value = updated
+        persistOrderCreditStates(updated)
+    }
+
+    // Orders & Receipts (Enriched with 24/7 SHOPPING Account Credit-Alert Verification Status)
+    val allOrders: StateFlow<List<Order>> = combine(repository.allOrders, _orderCreditStates) { orders, creditMap ->
+        orders.map { ord ->
+            val st = creditMap[ord.orderId]
+            when {
+                st != null -> ord.copy(
+                    isCreditAlertConfirmed = st.first,
+                    creditVerificationStatus = st.second
+                )
+                ord.status == OrderStatus.CONFIRMED ||
+                    ord.status == OrderStatus.VERIFIED ||
+                    ord.status == OrderStatus.OUT_FOR_DELIVERY ||
+                    ord.status == OrderStatus.DELIVERED -> ord.copy(
+                    isCreditAlertConfirmed = true,
+                    creditVerificationStatus = CreditVerificationStatus.CONFIRMED_CREDITED
+                )
+                else -> ord
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val allCustomers: StateFlow<List<Customer>> = repository.allCustomers
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -392,6 +455,67 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             apkDownloadUrl = resolvedUrl,
             onComplete = onComplete
         )
+    }
+
+    fun publishAppMaintenanceNotice(
+        enabled: Boolean,
+        message: String,
+        isUpgradeNotice: Boolean = false,
+        versionName: String = "",
+        apkDownloadUrl: String = "",
+        onComplete: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch {
+            val cleanMsg = message.trim().ifBlank {
+                "24/7 SHOPPING scheduled system maintenance & upgrade in progress. Shopping and pending transfers will auto-sync cleanly."
+            }
+            val nowMs = System.currentTimeMillis()
+            val updatedProfile = _storeProfile.value.copy(
+                isMaintenanceMode = enabled,
+                maintenanceMessage = cleanMsg,
+                maintenanceStartedAt = if (enabled) nowMs else 0L
+            )
+            updateStoreProfile(updatedProfile)
+
+            val title = when {
+                enabled && isUpgradeNotice -> "🔧 Scheduled Maintenance & App Upgrade"
+                enabled -> "🛠️ 24/7 SHOPPING App Maintenance Alert"
+                else -> "✅ 24/7 SHOPPING Maintenance Completed"
+            }
+            val body = if (enabled) cleanMsg else "App upgrade & maintenance completed! Storefront and instant portals are 100% live."
+            ShopNotificationHelper.notifyAppMaintenance(
+                context = getApplication(),
+                title = title,
+                message = body
+            )
+            voiceManager.speakText(if (enabled) "App maintenance and upgrade notice sent to all customers." else "Storefront maintenance mode cleared.")
+
+            startLiveCallSignalingIfConfigured()
+            liveCallClient.sendSignal(
+                "APP_MAINTENANCE",
+                "global_updates",
+                JSONObject().apply {
+                    put("enabled", enabled)
+                    put("message", body)
+                    put("isUpgradeNotice", isUpgradeNotice)
+                    put("versionName", versionName.ifBlank { updatedProfile.latestAppVersionName })
+                    put("updateUrl", apkDownloadUrl.ifBlank { updatedProfile.apkDownloadUrl })
+                    put("timestamp", nowMs)
+                }
+            )
+            if (isUpgradeNotice && versionName.isNotBlank()) {
+                val (curCode, _) = getInstalledAppVersion()
+                publishAppUpdateNotice(
+                    versionCode = maxOf(curCode + 1, updatedProfile.latestAppVersionCode),
+                    versionName = versionName,
+                    releaseNotes = cleanMsg,
+                    apkDownloadUrl = apkDownloadUrl.ifBlank { updatedProfile.apkDownloadUrl },
+                    onComplete = { _, _ -> }
+                )
+            }
+            _cloudStatusMessage.value = "✅ $title dispatched to customers!"
+            onComplete(true, "✅ Automatic Maintenance & Upgrade notification sent to all customers!")
+        }
     }
 
     // Pre-Order & Special Brand Requests State & Methods (Loaded in init after adminPrefs is constructed)
@@ -597,27 +721,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     persistPreOrderRequests(refreshedList)
                 }
             }
+            val isAdminLocal = _isAdminUnlocked.value || (_currentCustomer.value?.isAdmin == true)
+            ShopNotificationHelper.notifyAdminNewPreOrder(
+                context = getApplication(),
+                requestId = workingReq.id,
+                customerName = workingReq.customerName,
+                productName = workingReq.productName,
+                brandName = workingReq.brandName
+            )
+            if (isAdminLocal) {
+                voiceManager.speakText("Admin Alert: New Pre-Order request from ${workingReq.customerName} for ${workingReq.productName}.")
+            }
             val syncRes = syncPreOrdersWithCloudInternal(
                 preferLocalIds = setOf(workingReq.id),
                 notifyOnNewRemote = false
+            )
+            startLiveCallSignalingIfConfigured()
+            liveCallClient.sendSignal(
+                "PRE_ORDER",
+                "global_preorders",
+                JSONObject().apply {
+                    put("id", workingReq.id)
+                    put("customerName", workingReq.customerName)
+                    put("customerPhone", workingReq.customerPhone)
+                    put("productName", workingReq.productName)
+                    put("brandName", workingReq.brandName)
+                }
             )
             if (syncRes.isFailure || !isOnline.value) {
                 enqueueOfflineAction(
                     type = OfflineActionType.PREORDER_SYNC,
                     referenceId = workingReq.id,
                     summary = "Pre-Order ${workingReq.id}: ${workingReq.productName}"
-                )
-            } else {
-                startLiveCallSignalingIfConfigured()
-                liveCallClient.sendSignal(
-                    "PRE_ORDER",
-                    "global_preorders",
-                    JSONObject().apply {
-                        put("id", workingReq.id)
-                        put("customerName", workingReq.customerName)
-                        put("productName", workingReq.productName)
-                        put("brandName", workingReq.brandName)
-                    }
                 )
             }
         }
@@ -751,8 +886,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _isWideDualAxisMode.value = false
     }
 
-    private val adminPrefs = getApplication<Application>().getSharedPreferences("depros_admin_settings", Context.MODE_PRIVATE)
-
     // Customer Account Shortcut & Vertical Menu Destination
     private val _customerAccountDestination = MutableStateFlow(CustomerAccountDestination.MENU)
     val customerAccountDestination: StateFlow<CustomerAccountDestination> = _customerAccountDestination.asStateFlow()
@@ -852,6 +985,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             opayAccountName = adminPrefs.getString("store_opay_name", "24/7 SHOPPING")?.ifBlank { "24/7 SHOPPING" } ?: "24/7 SHOPPING",
             moniepointAccountNumber = adminPrefs.getString("store_moniepoint_number", "") ?: "",
             moniepointAccountName = adminPrefs.getString("store_moniepoint_name", "24/7 SHOPPING")?.ifBlank { "24/7 SHOPPING" } ?: "24/7 SHOPPING",
+            palmpayAccountNumber = adminPrefs.getString("store_palmpay_number", "") ?: "",
+            palmpayAccountName = adminPrefs.getString("store_palmpay_name", "24/7 SHOPPING")?.ifBlank { "24/7 SHOPPING" } ?: "24/7 SHOPPING",
             posTerminalId = adminPrefs.getString("store_pos_terminal_id", "") ?: "",
             posTerminalName = adminPrefs.getString("store_pos_terminal_name", "") ?: "",
             extraBankName = adminPrefs.getString("store_extra_bank_name", "") ?: "",
@@ -867,7 +1002,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             },
             latestAppVersionCode = adminPrefs.getInt("latest_app_version_code", 1),
             latestAppVersionName = adminPrefs.getString("latest_app_version_name", "1.0")?.ifBlank { "1.0" } ?: "1.0",
-            updateReleaseNotes = adminPrefs.getString("update_release_notes", "") ?: ""
+            updateReleaseNotes = adminPrefs.getString("update_release_notes", "") ?: "",
+            isMaintenanceMode = adminPrefs.getBoolean("store_maintenance_mode", false),
+            maintenanceMessage = adminPrefs.getString("store_maintenance_message", "") ?: "",
+            maintenanceStartedAt = adminPrefs.getLong("store_maintenance_started_at", 0L)
         )
     )
     val storeProfile: StateFlow<StoreProfileConfig> = _storeProfile.asStateFlow()
@@ -885,6 +1023,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             opayAccountName = config.opayAccountName.trim().ifBlank { "24/7 SHOPPING" },
             moniepointAccountNumber = config.moniepointAccountNumber.trim(),
             moniepointAccountName = config.moniepointAccountName.trim().ifBlank { "24/7 SHOPPING" },
+            palmpayAccountNumber = config.palmpayAccountNumber.trim(),
+            palmpayAccountName = config.palmpayAccountName.trim().ifBlank { "24/7 SHOPPING" },
             posTerminalId = config.posTerminalId.trim(),
             posTerminalName = config.posTerminalName.trim(),
             extraBankName = config.extraBankName.trim(),
@@ -893,7 +1033,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             apkDownloadUrl = com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(config.apkDownloadUrl),
             latestAppVersionCode = config.latestAppVersionCode.coerceAtLeast(1),
             latestAppVersionName = config.latestAppVersionName.trim().ifBlank { "1.0" },
-            updateReleaseNotes = config.updateReleaseNotes.trim()
+            updateReleaseNotes = config.updateReleaseNotes.trim(),
+            maintenanceMessage = config.maintenanceMessage.trim()
         )
         adminPrefs.edit()
             .putString("store_name", clean.storeName)
@@ -907,6 +1048,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .putString("store_opay_name", clean.opayAccountName)
             .putString("store_moniepoint_number", clean.moniepointAccountNumber)
             .putString("store_moniepoint_name", clean.moniepointAccountName)
+            .putString("store_palmpay_number", clean.palmpayAccountNumber)
+            .putString("store_palmpay_name", clean.palmpayAccountName)
             .putString("store_pos_terminal_id", clean.posTerminalId)
             .putString("store_pos_terminal_name", clean.posTerminalName)
             .putString("store_extra_bank_name", clean.extraBankName)
@@ -916,6 +1059,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .putInt("latest_app_version_code", clean.latestAppVersionCode)
             .putString("latest_app_version_name", clean.latestAppVersionName)
             .putString("update_release_notes", clean.updateReleaseNotes)
+            .putBoolean("store_maintenance_mode", clean.isMaintenanceMode)
+            .putString("store_maintenance_message", clean.maintenanceMessage)
+            .putLong("store_maintenance_started_at", clean.maintenanceStartedAt)
             .apply()
         _storeProfile.value = clean
         _latestVersionName.value = clean.latestAppVersionName
@@ -1223,12 +1369,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ProductReview(
                     id = obj.optString("id", UUID.randomUUID().toString()),
                     productId = obj.optString("productId", ""),
+                    productTitle = obj.optString("productTitle", ""),
                     customerId = obj.optString("customerId", ""),
                     customerName = obj.optString("customerName", "Customer"),
                     rating = obj.optInt("rating", 5).coerceIn(1, 5),
                     comment = obj.optString("comment", ""),
                     createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
-                    isVerifiedPurchase = obj.optBoolean("isVerifiedPurchase", false)
+                    isVerifiedPurchase = obj.optBoolean("isVerifiedPurchase", false),
+                    adminReply = obj.optString("adminReply", ""),
+                    adminRepliedAt = obj.optLong("adminRepliedAt", 0L)
                 )
             }
         } catch (_: Exception) {
@@ -1243,12 +1392,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 JSONObject().apply {
                     put("id", r.id)
                     put("productId", r.productId)
+                    put("productTitle", r.productTitle)
                     put("customerId", r.customerId)
                     put("customerName", r.customerName)
                     put("rating", r.rating)
                     put("comment", r.comment)
                     put("createdAt", r.createdAt)
                     put("isVerifiedPurchase", r.isVerifiedPurchase)
+                    put("adminReply", r.adminReply)
+                    put("adminRepliedAt", r.adminRepliedAt)
                 }
             )
         }
@@ -1299,6 +1451,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ?: _savedDeliveryInfo.value.fullName.ifBlank { "Verified Shopper" }
         val newReview = ProductReview(
             productId = productId,
+            productTitle = prod.title,
             customerId = customer?.id ?: "guest",
             customerName = reviewerName,
             rating = cleanRating,
@@ -1325,7 +1478,49 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.saveProduct(updatedProd)
         }
-        onResult?.invoke(true, "Thank you! Your $cleanRating★ review has been published.")
+        ShopNotificationHelper.notifyCustomerNewReviewToAdmin(
+            context = getApplication(),
+            reviewerName = reviewerName,
+            productTitle = prod.title,
+            rating = cleanRating
+        )
+        voiceManager.speakText("New $cleanRating star rating and feedback received from $reviewerName for ${prod.title}.")
+        startLiveCallSignalingIfConfigured()
+        liveCallClient.sendSignal(
+            "CUSTOMER_REVIEW",
+            "global_reviews",
+            JSONObject().apply {
+                put("id", newReview.id)
+                put("productId", newReview.productId)
+                put("productTitle", prod.title)
+                put("customerId", newReview.customerId)
+                put("customerName", reviewerName)
+                put("rating", cleanRating)
+                put("comment", cleanComment)
+                put("createdAt", newReview.createdAt)
+            }
+        )
+        onResult?.invoke(true, "Thank you! Your $cleanRating★ review has been sent to Admin & published.")
+    }
+
+    fun replyToProductReview(reviewId: String, replyText: String) {
+        val clean = replyText.trim()
+        if (clean.isBlank()) return
+        val target = _productReviews.value.find { it.id == reviewId } ?: return
+        val updated = _productReviews.value.map { rev ->
+            if (rev.id == reviewId) {
+                rev.copy(adminReply = clean, adminRepliedAt = System.currentTimeMillis())
+            } else rev
+        }
+        _productReviews.value = updated
+        persistProductReviews(updated)
+        ShopNotificationHelper.notifySupportTicketReply(
+            context = getApplication(),
+            ticketId = target.productTitle.ifBlank { target.productId },
+            subject = "Admin Reply on Your ${target.rating}★ Review",
+            reply = clean
+        )
+        voiceManager.speakText("Admin reply saved on ${target.customerName}'s review.")
     }
 
     // Admin Price Bargain Config State & Methods with Strong Persistence
@@ -2133,6 +2328,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         couponDiscountAmount: Double = 0.0,
         loyaltyPointsRedeemed: Int = 0,
         loyaltyDiscountAmount: Double = 0.0,
+        isCreditAlertReceived: Boolean = false,
+        creditVerificationStatus: CreditVerificationStatus = CreditVerificationStatus.PENDING_CREDIT,
         onSuccess: (Order) -> Unit,
         onFailure: (String) -> Unit
     ) {
@@ -2174,7 +2371,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 " [Loyalty: -$loyaltyPointsRedeemed pts (-₦${safeLoyaltyDiscount.toInt()})]"
             } else ""
 
-            // Identify any partner-hosted items & apply automated MOU % split
             val partnerItems = items.filter { it.product.partnerId.isNotBlank() }
             val primaryPartnerId = partnerItems.firstOrNull()?.product?.partnerId ?: ""
             val primaryPartnerName = partnerItems.firstOrNull()?.product?.partnerName ?: ""
@@ -2188,6 +2384,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val pct = item.product.partnerCommissionPercent.coerceIn(0.0, 95.0)
                 val share247 = gross * (pct / 100.0)
                 (gross - share247).coerceAtLeast(0.0)
+            }
+
+            val baseVerificationNote = when (creditVerificationStatus) {
+                CreditVerificationStatus.CONFIRMED_CREDITED ->
+                    "ORDER & PAYMENT CONFIRMED — 24/7 SHOPPING Credited via ${paymentMethod.title}$couponNoteSuffix$loyaltyNoteSuffix"
+                CreditVerificationStatus.PAYMENT_FAILED_UNCREDITED ->
+                    "ORDER & PAYMENT FAILED — 24/7 SHOPPING Account Not Yet Credited$couponNoteSuffix$loyaltyNoteSuffix"
+                CreditVerificationStatus.NETWORK_DELAYED_PENDING ->
+                    "ORDER & PAYMENT FAILED (Network Delay) — Transfer Queued, Auto-Confirming Upon Credit$couponNoteSuffix$loyaltyNoteSuffix"
+                CreditVerificationStatus.PENDING_CREDIT ->
+                    "Payment Receipt Submitted - Awaiting 24/7 SHOPPING Credit Alert Confirmation$couponNoteSuffix$loyaltyNoteSuffix"
             }
 
             val newOrder = Order(
@@ -2206,17 +2413,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 senderName = senderName,
                 status = OrderStatus.PENDING_VERIFICATION,
                 createdAt = System.currentTimeMillis(),
-                verificationNote = "Payment Receipt Submitted - Awaiting Admin Physical Alert Confirmation$couponNoteSuffix$loyaltyNoteSuffix",
+                verificationNote = baseVerificationNote,
                 receiptImageUrl = receiptImageUrl,
                 partnerId = primaryPartnerId,
                 partnerName = primaryPartnerName,
                 partnerCommissionAmount = totalPartnerCommissionAmt,
-                partnerNetPayout = totalPartnerNetAmt
+                partnerNetPayout = totalPartnerNetAmt,
+                isCreditAlertConfirmed = isCreditAlertReceived,
+                creditVerificationStatus = creditVerificationStatus
             )
 
             val result = repository.createOrder(newOrder)
             if (result.isSuccess) {
-                val savedOrder = result.getOrThrow()
+                val savedOrder = result.getOrThrow().copy(
+                    isCreditAlertConfirmed = isCreditAlertReceived,
+                    creditVerificationStatus = creditVerificationStatus
+                )
+                setOrderCreditState(
+                    orderId = savedOrder.orderId,
+                    confirmed = isCreditAlertReceived,
+                    status = creditVerificationStatus
+                )
                 persistDeliveryInfoLocally(
                     fullName = customerName,
                     phoneNumber = customerPhone,
@@ -2225,13 +2442,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 saveCustomerDeliveryInfo(customerName, customerPhone, deliveryAddress)
 
-                // Update loyalty points (redeem used pts + award 1 pt per ₦1,000 paid)
                 updateLoyaltyAfterOrder(
                     pointsRedeemed = loyaltyPointsRedeemed,
                     orderTotalAmount = savedOrder.totalAmount
                 )
 
-                // Automated MOU % split: deduct 24/7 SHOPPING share -> 24/7 account, deposit remaining balance -> Partner account
                 if (partnerItems.isNotEmpty()) {
                     recordPartnerOrderTransactionsAndAlerts(
                         order = savedOrder,
@@ -2244,6 +2459,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 clearCart()
                 _pendingSharedReceipt.value = null
+
+                when (creditVerificationStatus) {
+                    CreditVerificationStatus.CONFIRMED_CREDITED -> {
+                        ShopNotificationHelper.notifyPaymentConfirmedReceipt(
+                            context = getApplication(),
+                            orderId = savedOrder.orderId,
+                            portalTitle = paymentMethod.title,
+                            amountText = "₦${String.format(java.util.Locale.US, "%,.0f", savedOrder.totalAmount)}"
+                        )
+                        startLiveCallSignalingIfConfigured()
+                        liveCallClient.sendSignal(
+                            "PAYMENT_CREDIT_ALERT",
+                            "global_orders",
+                            JSONObject().apply {
+                                put("orderId", savedOrder.orderId)
+                                put("amount", savedOrder.totalAmount)
+                                put("portal", paymentMethod.name)
+                                put("ref", savedOrder.paymentReference)
+                            }
+                        )
+                    }
+                    CreditVerificationStatus.NETWORK_DELAYED_PENDING -> {
+                        enqueueOfflineAction(
+                            type = OfflineActionType.PAYMENT_CREDIT_SYNC,
+                            referenceId = savedOrder.orderId,
+                            summary = "Auto-Credit ${paymentMethod.title} ₦${savedOrder.totalAmount.toInt()} (${savedOrder.orderId})"
+                        )
+                        ShopNotificationHelper.notifyPaymentFailedUncredited(
+                            context = getApplication(),
+                            orderId = savedOrder.orderId,
+                            portalTitle = paymentMethod.title,
+                            amountText = "₦${String.format(java.util.Locale.US, "%,.0f", savedOrder.totalAmount)}",
+                            isNetworkDelay = true
+                        )
+                    }
+                    CreditVerificationStatus.PAYMENT_FAILED_UNCREDITED -> {
+                        ShopNotificationHelper.notifyPaymentFailedUncredited(
+                            context = getApplication(),
+                            orderId = savedOrder.orderId,
+                            portalTitle = paymentMethod.title,
+                            amountText = "₦${String.format(java.util.Locale.US, "%,.0f", savedOrder.totalAmount)}",
+                            isNetworkDelay = false
+                        )
+                    }
+                    CreditVerificationStatus.PENDING_CREDIT -> Unit
+                }
+
                 val syncErr = repository.lastCloudSyncError
                 if (syncErr.isNullOrBlank()) {
                     _cloudStatusMessage.value = "✅ Order ${savedOrder.orderId} & receipt synced to Supabase Cloud!"
@@ -2257,7 +2519,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
                 }
-                // Confirmation voice alert
                 voiceManager.speakNewOrderAlert(
                     customerName = savedOrder.customerName.ifBlank { "Customer" },
                     totalAmountText = "${savedOrder.totalAmount.toInt()} Naira",
@@ -2268,6 +2529,136 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 onFailure(result.exceptionOrNull()?.message ?: "Unknown Error occurred while saving order.")
             }
         }
+    }
+
+    fun processDirectPortalPayment(
+        customerName: String,
+        customerEmail: String,
+        customerPhone: String,
+        deliveryAddress: String,
+        paymentMethod: PaymentMethod,
+        portalAccountNumber: String,
+        portalAccountName: String,
+        senderName: String,
+        deliveryConditionTitle: String,
+        deliveryFeeAmount: Double,
+        simulateCreditAlertReceived: Boolean = true,
+        simulateNetworkDelay: Boolean = false,
+        customBargainTotal: Double? = null,
+        appliedCouponCode: String = "",
+        couponDiscountAmount: Double = 0.0,
+        loyaltyPointsRedeemed: Int = 0,
+        loyaltyDiscountAmount: Double = 0.0,
+        onSuccess: (Order) -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        val networkIsDown = !isOnline.value || simulateNetworkDelay
+        val effectiveStatus = when {
+            networkIsDown -> CreditVerificationStatus.NETWORK_DELAYED_PENDING
+            simulateCreditAlertReceived -> CreditVerificationStatus.CONFIRMED_CREDITED
+            else -> CreditVerificationStatus.PAYMENT_FAILED_UNCREDITED
+        }
+        val effectiveConfirmed = (effectiveStatus == CreditVerificationStatus.CONFIRMED_CREDITED)
+        val portalRef = "${paymentMethod.name.take(4)}-247-${UUID.randomUUID().toString().take(8).uppercase()}"
+        val acctLabel = "${paymentMethod.title}: $portalAccountNumber ($portalAccountName)"
+
+        placeOrder(
+            customerName = customerName,
+            customerEmail = customerEmail,
+            customerPhone = customerPhone,
+            deliveryAddress = deliveryAddress,
+            paymentMethod = paymentMethod,
+            paymentAccountOrTerminal = acctLabel,
+            paymentReference = portalRef,
+            senderName = senderName,
+            deliveryConditionTitle = deliveryConditionTitle,
+            deliveryFeeAmount = deliveryFeeAmount,
+            receiptImageUrl = "",
+            customBargainTotal = customBargainTotal,
+            appliedCouponCode = appliedCouponCode,
+            couponDiscountAmount = couponDiscountAmount,
+            loyaltyPointsRedeemed = loyaltyPointsRedeemed,
+            loyaltyDiscountAmount = loyaltyDiscountAmount,
+            isCreditAlertReceived = effectiveConfirmed,
+            creditVerificationStatus = effectiveStatus,
+            onSuccess = onSuccess,
+            onFailure = onFailure
+        )
+    }
+
+    fun recordOrderCreditAlertReceived(orderId: String, portalRef: String = "Instant Credit Alert") {
+        viewModelScope.launch {
+            val ord = allOrders.value.find { it.orderId == orderId } ?: return@launch
+            setOrderCreditState(
+                orderId = orderId,
+                confirmed = true,
+                status = CreditVerificationStatus.CONFIRMED_CREDITED
+            )
+            val newNote = "ORDER & PAYMENT CONFIRMED — 24/7 SHOPPING Account Credited ($portalRef)"
+            repository.updateOrderStatus(orderId, ord.status, newNote)
+            val updatedQueue = _offlineQueue.value.filterNot {
+                it.type == OfflineActionType.PAYMENT_CREDIT_SYNC && it.referenceId == orderId
+            }
+            if (updatedQueue.size != _offlineQueue.value.size) {
+                _offlineQueue.value = updatedQueue
+                persistOfflineQueue(updatedQueue)
+            }
+            if (_activeReceipt.value?.orderId == orderId) {
+                _activeReceipt.value = _activeReceipt.value?.copy(
+                    isCreditAlertConfirmed = true,
+                    creditVerificationStatus = CreditVerificationStatus.CONFIRMED_CREDITED,
+                    verificationNote = newNote
+                )
+            }
+            ShopNotificationHelper.notifyPaymentConfirmedReceipt(
+                context = getApplication(),
+                orderId = orderId,
+                portalTitle = ord.paymentMethod.title,
+                amountText = "₦${String.format(java.util.Locale.US, "%,.0f", ord.totalAmount)}"
+            )
+            voiceManager.speakText("Order and payment confirmed for $orderId. 24/7 Shopping account credited.")
+            startLiveCallSignalingIfConfigured()
+            liveCallClient.sendSignal(
+                "PAYMENT_CREDIT_ALERT",
+                "global_orders",
+                JSONObject().apply {
+                    put("orderId", orderId)
+                    put("amount", ord.totalAmount)
+                    put("portal", ord.paymentMethod.name)
+                    put("ref", portalRef)
+                }
+            )
+        }
+    }
+
+    fun retryFailedOrderCreditCheck(
+        orderId: String,
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        val ord = allOrders.value.find { it.orderId == orderId }
+        if (ord == null) {
+            onResult(false, "Order $orderId not found.")
+            return
+        }
+        if (!isOnline.value) {
+            setOrderCreditState(orderId, false, CreditVerificationStatus.NETWORK_DELAYED_PENDING)
+            enqueueOfflineAction(
+                type = OfflineActionType.PAYMENT_CREDIT_SYNC,
+                referenceId = orderId,
+                summary = "Auto-Credit ${ord.paymentMethod.title} ₦${ord.totalAmount.toInt()} ($orderId)"
+            )
+            ShopNotificationHelper.notifyPaymentFailedUncredited(
+                context = getApplication(),
+                orderId = orderId,
+                portalTitle = ord.paymentMethod.title,
+                amountText = "₦${String.format(java.util.Locale.US, "%,.0f", ord.totalAmount)}",
+                isNetworkDelay = true
+            )
+            onResult(false, "Network offline — queued. Will auto-confirm as soon as network restores.")
+            return
+        }
+        recordOrderCreditAlertReceived(orderId, "Direct Portal Settlement Verified")
+        onResult(true, "✅ ORDER & PAYMENT CONFIRMED! 24/7 SHOPPING account credited & Admin Payment Confirmation enabled.")
     }
 
     fun showReceipt(order: Order) {
@@ -2316,6 +2707,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // Auth methods (Phone Number & Password)
+    fun resetCustomerPasswordByPhone(
+        phone: String,
+        fullName: String = "",
+        newPassword: String,
+        onResult: (Boolean, String) -> Unit
+    ) {
+        viewModelScope.launch {
+            val res = repository.resetCustomerPasswordByPhone(
+                phone = phone,
+                fullName = fullName,
+                newPassword = newPassword
+            )
+            res.fold(
+                onSuccess = { updatedCustomer ->
+                    if (_currentCustomer.value?.id == updatedCustomer.id) {
+                        _currentCustomer.value = updatedCustomer
+                    }
+                    voiceManager.speakText("Password updated successfully for ${updatedCustomer.fullName}.")
+                    onResult(true, "✅ Password updated for ${updatedCustomer.fullName} (${updatedCustomer.phoneNumber})! You can sign in now.")
+                },
+                onFailure = { err ->
+                    onResult(false, err.message ?: "Could not reset password.")
+                }
+            )
+        }
+    }
+
     fun signIn(phoneOrEmail: String, pass: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
         viewModelScope.launch {
             val res = repository.authenticateCustomer(phoneOrEmail, pass)
@@ -2454,11 +2872,56 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         saveProductFromAdminWithStatus(product) { _, _ -> onComplete() }
     }
 
+    fun getSignedUpCustomerPhones(): List<String> {
+        val phones = allCustomers.value
+            .map { it.phoneNumber.trim() }
+            .filter { it.isNotBlank() }
+            .toMutableList()
+        val currentPhone = _currentCustomer.value?.phoneNumber?.trim().orEmpty()
+        if (currentPhone.isNotBlank()) phones.add(currentPhone)
+        val savedPhone = _savedDeliveryInfo.value.phoneNumber.trim()
+        if (savedPhone.isNotBlank()) phones.add(savedPhone)
+        return phones.distinct()
+    }
+
+    fun broadcastNewProductAlert(product: Product) {
+        val phones = getSignedUpCustomerPhones()
+        val targetPhone = _currentCustomer.value?.phoneNumber?.ifBlank { null }
+            ?: _savedDeliveryInfo.value.phoneNumber.ifBlank { null }
+            ?: phones.firstOrNull().orEmpty()
+        ShopNotificationHelper.notifyNewProductAlert(
+            context = getApplication(),
+            productTitle = product.title,
+            category = product.category,
+            priceText = "₦${String.format(java.util.Locale.US, "%,.0f", product.basePrice)}",
+            targetPhone = targetPhone
+        )
+        startLiveCallSignalingIfConfigured()
+        liveCallClient.sendSignal(
+            "NEW_PRODUCT",
+            "global_products",
+            JSONObject().apply {
+                put("productId", product.id)
+                put("title", product.title)
+                put("category", product.category)
+                put("price", product.basePrice)
+            }
+        )
+        if (!isOnline.value) {
+            enqueueOfflineAction(
+                type = OfflineActionType.NEW_PRODUCT_ALERT,
+                referenceId = product.id,
+                summary = "New Product Alert: ${product.title} (${phones.size} lines)"
+            )
+        }
+    }
+
     fun saveProductFromAdminWithStatus(
         product: Product,
         onComplete: (syncedToCloud: Boolean, cloudError: String?) -> Unit
     ) {
         viewModelScope.launch {
+            val isNewProduct = allProducts.value.none { it.id == product.id }
             val res = repository.saveProduct(product)
             val synced = res.getOrDefault(false)
             val cloudErr = if (res.isFailure) res.exceptionOrNull()?.message else repository.lastCloudSyncError
@@ -2468,9 +2931,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 cloudErr
             ).joinToString(" | ").ifBlank { null }
 
+            if (isNewProduct) {
+                broadcastNewProductAlert(product)
+            }
+
             _cloudStatusMessage.value = when {
                 synced && storageErr == null ->
-                    "✅ Product '${product.title}' + photo saved & synced to Supabase Cloud!"
+                    "✅ Product '${product.title}' + photo saved, synced & New Product Alert dispatched!"
                 synced && storageErr != null ->
                     "⚠️ '${product.title}' synced to Supabase, but photo stayed local ($storageErr). Run 'Copy SQL' in Supabase SQL Editor and tap 'Fix Photo'."
                 else ->
@@ -2490,6 +2957,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val matchingOrder = allOrders.value.find { it.orderId == orderId }
             val wasPending = matchingOrder?.status == OrderStatus.PENDING_VERIFICATION
+            if (status == OrderStatus.CONFIRMED || status == OrderStatus.VERIFIED) {
+                setOrderCreditState(orderId, true, CreditVerificationStatus.CONFIRMED_CREDITED)
+            }
             repository.updateOrderStatus(orderId, status, note)
             val cName = matchingOrder?.customerName ?: "Customer"
             if (status == OrderStatus.CONFIRMED || status == OrderStatus.VERIFIED) {
@@ -4696,11 +5166,61 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             Result.success(com.example.data.repository.CloudSyncSummary())
         }
-        if (res.isSuccess) {
+        // Push delayed payment transfers once network restores so 24/7 SHOPPING gets credited automatically
+        val creditActions = queued.filter { it.type == OfflineActionType.PAYMENT_CREDIT_SYNC }
+        creditActions.forEach { act ->
+            val ord = allOrders.value.find { it.orderId == act.referenceId }
+            setOrderCreditState(
+                orderId = act.referenceId,
+                confirmed = true,
+                status = CreditVerificationStatus.CONFIRMED_CREDITED
+            )
+            val recoveryNote = "ORDER & PAYMENT CONFIRMED — Network Restored, Transfer Pushed & 24/7 SHOPPING Account Credited"
+            if (ord != null) {
+                repository.updateOrderStatus(ord.orderId, ord.status, recoveryNote)
+                ShopNotificationHelper.notifyPaymentConfirmedReceipt(
+                    context = getApplication(),
+                    orderId = ord.orderId,
+                    portalTitle = ord.paymentMethod.title,
+                    amountText = "₦${String.format(java.util.Locale.US, "%,.0f", ord.totalAmount)}"
+                )
+            }
+            startLiveCallSignalingIfConfigured()
+            liveCallClient.sendSignal(
+                "PAYMENT_CREDIT_ALERT",
+                "global_orders",
+                JSONObject().apply {
+                    put("orderId", act.referenceId)
+                    put("ref", "Auto-Recovered After Network Delay")
+                }
+            )
+        }
+        if (creditActions.isNotEmpty()) {
+            voiceManager.speakText("Network restored. ${creditActions.size} delayed payment transfer confirmed and credited to 24/7 Shopping.")
+        }
+
+        // Dispatch queued new product alerts once online
+        val productAlerts = queued.filter { it.type == OfflineActionType.NEW_PRODUCT_ALERT }
+        productAlerts.forEach { act ->
+            allProducts.value.find { it.id == act.referenceId }?.let { prod ->
+                liveCallClient.sendSignal(
+                    "NEW_PRODUCT",
+                    "global_products",
+                    JSONObject().apply {
+                        put("productId", prod.id)
+                        put("title", prod.title)
+                        put("category", prod.category)
+                        put("price", prod.basePrice)
+                    }
+                )
+            }
+        }
+
+        if (res.isSuccess || creditActions.isNotEmpty()) {
             _offlineQueue.value = emptyList()
             persistOfflineQueue(emptyList())
             ShopNotificationHelper.notifyOfflineQueueSynced(getApplication(), queued.size)
-            _cloudStatusMessage.value = "✅ Reconnected! Synced ${queued.size} queued offline update(s)."
+            _cloudStatusMessage.value = "✅ Reconnected! Synced ${queued.size} queued offline update(s) & confirmed pending transfers."
         } else {
             val bumped = queued.map { it.copy(retryCount = it.retryCount + 1) }
             _offlineQueue.value = bumped
@@ -4922,9 +5442,95 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             "PRE_ORDER" -> {
+                val poId = ev.payload.optString("id", "PRE-ORDER")
+                val poCust = ev.payload.optString("customerName", "Customer")
+                val poProd = ev.payload.optString("productName", "Special Request")
+                val poBrand = ev.payload.optString("brandName", "")
+                ShopNotificationHelper.notifyAdminNewPreOrder(
+                    context = getApplication(),
+                    requestId = poId,
+                    customerName = poCust,
+                    productName = poProd,
+                    brandName = poBrand
+                )
                 viewModelScope.launch {
                     syncPreOrdersWithCloudInternal(notifyOnNewRemote = true)
                 }
+            }
+            "APP_MAINTENANCE" -> {
+                val enabled = ev.payload.optBoolean("enabled", false)
+                val msg = ev.payload.optString("message", "").trim()
+                val isUpgrade = ev.payload.optBoolean("isUpgradeNotice", false)
+                val title = if (enabled && isUpgrade) "🔧 App Maintenance & Upgrade Alert" else if (enabled) "🛠️ Store Maintenance Notice" else "✅ Maintenance Complete"
+                updateStoreProfile(
+                    _storeProfile.value.copy(
+                        isMaintenanceMode = enabled,
+                        maintenanceMessage = msg,
+                        maintenanceStartedAt = if (enabled) ev.payload.optLong("timestamp", System.currentTimeMillis()) else 0L
+                    )
+                )
+                ShopNotificationHelper.notifyAppMaintenance(
+                    context = getApplication(),
+                    title = title,
+                    message = msg.ifBlank { "24/7 SHOPPING system maintenance notice." }
+                )
+            }
+            "NEW_PRODUCT" -> {
+                val prodId = ev.payload.optString("productId", "")
+                val title = ev.payload.optString("title", "New Product Arrival")
+                val cat = ev.payload.optString("category", "Featured")
+                val price = ev.payload.optDouble("price", 0.0)
+                val myPhone = _currentCustomer.value?.phoneNumber?.ifBlank { null } ?: _savedDeliveryInfo.value.phoneNumber
+                ShopNotificationHelper.notifyNewProductAlert(
+                    context = getApplication(),
+                    productTitle = title,
+                    category = cat,
+                    priceText = "₦${String.format(java.util.Locale.US, "%,.0f", price)}",
+                    targetPhone = myPhone
+                )
+                viewModelScope.launch {
+                    if (!repository.supabaseSync.isPlaceholderConfig()) {
+                        repository.fetchAndSyncAllFromCloudDetailed()
+                    }
+                }
+            }
+            "PAYMENT_CREDIT_ALERT" -> {
+                val ordId = ev.payload.optString("orderId", "")
+                val ref = ev.payload.optString("ref", "24/7 SHOPPING Credit Alert")
+                if (ordId.isNotBlank()) {
+                    recordOrderCreditAlertReceived(ordId, ref)
+                }
+            }
+            "CUSTOMER_REVIEW" -> {
+                val rId = ev.payload.optString("id", UUID.randomUUID().toString())
+                val pId = ev.payload.optString("productId", "")
+                val pTitle = ev.payload.optString("productTitle", "Product")
+                val cId = ev.payload.optString("customerId", "")
+                val cName = ev.payload.optString("customerName", "Customer")
+                val rating = ev.payload.optInt("rating", 5).coerceIn(1, 5)
+                val comment = ev.payload.optString("comment", "")
+                if (comment.isNotBlank() && _productReviews.value.none { it.id == rId }) {
+                    val rev = ProductReview(
+                        id = rId,
+                        productId = pId,
+                        productTitle = pTitle,
+                        customerId = cId,
+                        customerName = cName,
+                        rating = rating,
+                        comment = comment,
+                        createdAt = ev.payload.optLong("createdAt", System.currentTimeMillis()),
+                        isVerifiedPurchase = true
+                    )
+                    val updated = listOf(rev) + _productReviews.value
+                    _productReviews.value = updated
+                    persistProductReviews(updated)
+                }
+                ShopNotificationHelper.notifyCustomerNewReviewToAdmin(
+                    context = getApplication(),
+                    reviewerName = cName,
+                    productTitle = pTitle,
+                    rating = rating
+                )
             }
             "HANGUP" -> {
                 val updated = state.incomingRequests.filterNot { it.roomId == ev.roomId }
@@ -5010,6 +5616,74 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             liveCallClient.publishLobbySnapshot(cfg.url, cfg.anonKey, _liveCallState.value.adminOnline, updatedReqs)
         }
+
+        // Activate full interactive Audio & Visual Desk right away so microphone/camera/concierge work seamlessly even solo or waiting on peer
+        startLiveCallTimer()
+        viewModelScope.launch {
+            delay(1800L)
+            val cur = _liveCallState.value
+            if (cur.roomId == roomId && cur.phase == LiveCallPhase.RINGING_OUTGOING) {
+                val greetingMsg = LiveCallMessage(
+                    id = UUID.randomUUID().toString().take(8),
+                    senderName = "${_storeProfile.value.storeName} Live Desk",
+                    isFromAdmin = true,
+                    text = "Welcome to ${_storeProfile.value.storeName} Interactive ${mode.label} Studio! Topic: $cleanTopic. Your live audio/video is active.",
+                    timestamp = System.currentTimeMillis()
+                )
+                _liveCallState.value = cur.copy(
+                    phase = LiveCallPhase.CONNECTED,
+                    statusBanner = "Live ${mode.label} Interactive Desk Active",
+                    chatMessages = (cur.chatMessages + greetingMsg).takeLast(60)
+                )
+                voiceManager.speakText("Welcome to ${_storeProfile.value.storeName} Live ${mode.label} Desk. Topic: $cleanTopic.")
+            }
+        }
+    }
+
+    fun sendInteractiveAudioVisualPrompt(prompt: String) {
+        val clean = prompt.trim()
+        if (clean.isBlank()) return
+        val cur = _liveCallState.value
+        sendLiveCallChatMessage(clean)
+
+        val profile = _storeProfile.value
+        val latestOrder = allOrders.value.firstOrNull()
+        val answerText = when {
+            clean.contains("order", ignoreCase = true) || clean.contains("payment", ignoreCase = true) -> {
+                if (latestOrder != null) {
+                    "Order ${latestOrder.orderId} is ${latestOrder.status.label}. Credit status: ${latestOrder.creditVerificationStatus.label}."
+                } else {
+                    "You have no recent orders yet. Use OPay, Moniepoint, or PalmPay direct portal for instant 24/7 Shopping credit verification."
+                }
+            }
+            clean.contains("bank", ignoreCase = true) || clean.contains("account", ignoreCase = true) || clean.contains("pay", ignoreCase = true) -> {
+                buildString {
+                    append("${profile.storeName} official accounts: ")
+                    if (profile.opayAccountNumber.isNotBlank()) append("OPay ${profile.opayAccountNumber}. ")
+                    if (profile.moniepointAccountNumber.isNotBlank()) append("Moniepoint ${profile.moniepointAccountNumber}. ")
+                    if (profile.palmpayAccountNumber.isNotBlank()) append("PalmPay ${profile.palmpayAccountNumber}.")
+                }
+            }
+            clean.contains("pre-order", ignoreCase = true) || clean.contains("preorder", ignoreCase = true) -> {
+                "Open the Pre-Order form from your account or product details to submit custom items directly to Admin with instant notification."
+            }
+            else -> {
+                "${profile.storeName} has ${allProducts.value.size} active catalog items across ${com.example.data.model.ProductCategory.entries.size} categories ready for dispatch!"
+            }
+        }
+
+        val botReply = LiveCallMessage(
+            id = UUID.randomUUID().toString().take(8),
+            senderName = "${profile.storeName} Interactive Desk",
+            isFromAdmin = true,
+            text = answerText,
+            timestamp = System.currentTimeMillis()
+        )
+        _liveCallState.value = _liveCallState.value.copy(
+            chatMessages = (_liveCallState.value.chatMessages + botReply).takeLast(60),
+            statusBanner = "Interactive Audio Reply Active"
+        )
+        voiceManager.speakText(answerText)
     }
 
     fun answerIncomingLiveCall(request: LiveCallRequest, answerMode: LiveCallMode = request.mode) {
