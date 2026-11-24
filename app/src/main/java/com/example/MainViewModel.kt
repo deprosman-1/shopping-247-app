@@ -613,6 +613,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         adminPrefs.edit().putString("pre_order_requests_json", arr.toString()).apply()
     }
 
+    private fun getNotifiedPreOrderIds(): MutableSet<String> =
+        (adminPrefs.getStringSet("notified_preorder_ids", emptySet()) ?: emptySet()).toMutableSet()
+
+    private fun markPreOrdersNotified(ids: Collection<String>) {
+        if (ids.isEmpty()) return
+        val updated = getNotifiedPreOrderIds().apply { addAll(ids) }
+        val trimmed = if (updated.size > 300) updated.toList().takeLast(300).toSet() else updated
+        adminPrefs.edit().putStringSet("notified_preorder_ids", trimmed).apply()
+    }
+
     private suspend fun syncPreOrdersWithCloudInternal(
         preferLocalIds: Set<String> = emptySet(),
         notifyOnNewRemote: Boolean = false
@@ -629,12 +639,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         res.onSuccess { merged ->
             _preOrderRequests.value = merged
             persistPreOrderRequests(merged)
+            val isAdminDevice = isKnownAdminDevice()
             if (notifyOnNewRemote) {
-                val recentCutoffMs = appLaunchTimestampMs - 300_000L
-                val isAdminDevice = _isAdminUnlocked.value || (_currentCustomer.value?.isAdmin == true)
-                val newItems = merged.filter { it.id !in beforeIds && it.createdAt >= recentCutoffMs }
+                val alreadyNotified = getNotifiedPreOrderIds()
+                val hasPreviousSet = adminPrefs.contains("notified_preorder_ids")
+                val newItems = merged.filter { req ->
+                    req.status == com.example.data.model.PreOrderStatus.PENDING &&
+                        req.id !in alreadyNotified &&
+                        (req.id !in beforeIds || !hasPreviousSet)
+                }
                 if (newItems.isNotEmpty() && isAdminDevice) {
-                    val latest = newItems.first()
+                    val latest = newItems.maxByOrNull { it.createdAt } ?: newItems.first()
                     ShopNotificationHelper.notifyAdminNewPreOrder(
                         context = getApplication(),
                         requestId = latest.id,
@@ -643,6 +658,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         brandName = latest.brandName
                     )
                     voiceManager.speakText("New Pre-Order Request received from ${latest.customerName} for ${latest.productName}.")
+                }
+                if (isAdminDevice) {
+                    markPreOrdersNotified(merged.map { it.id })
                 }
                 // Notify customer if Admin updated an existing request remotely
                 val myCustId = _currentCustomer.value?.id
@@ -660,6 +678,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
                 }
+            } else if (isAdminDevice) {
+                // When Admin manually pulls or opens Pre-Orders tab, mark already-fetched rows as seen
+                markPreOrdersNotified(merged.map { it.id })
             }
         }
         return res
@@ -769,15 +790,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     persistPreOrderRequests(refreshedList)
                 }
             }
-            val isAdminLocal = _isAdminUnlocked.value || (_currentCustomer.value?.isAdmin == true)
-            ShopNotificationHelper.notifyAdminNewPreOrder(
-                context = getApplication(),
-                requestId = workingReq.id,
-                customerName = workingReq.customerName,
-                productName = workingReq.productName,
-                brandName = workingReq.brandName
-            )
+            val isAdminLocal = isKnownAdminDevice()
             if (isAdminLocal) {
+                markPreOrdersNotified(listOf(workingReq.id))
+                ShopNotificationHelper.notifyAdminNewPreOrder(
+                    context = getApplication(),
+                    requestId = workingReq.id,
+                    customerName = workingReq.customerName,
+                    productName = workingReq.productName,
+                    brandName = workingReq.brandName
+                )
                 voiceManager.speakText("Admin Alert: New Pre-Order request from ${workingReq.customerName} for ${workingReq.productName}.")
             }
             val isUnconfiguredCloud = repository.supabaseSync.isPlaceholderConfig()
@@ -807,6 +829,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     referenceId = workingReq.id,
                     summary = "Pre-Order ${workingReq.id}: ${workingReq.productName}"
                 )
+            } else if (_offlineQueue.value.any { it.referenceId == workingReq.id && it.type == OfflineActionType.PREORDER_SYNC }) {
+                val cleanedQueue = _offlineQueue.value.filterNot {
+                    it.referenceId == workingReq.id && it.type == OfflineActionType.PREORDER_SYNC
+                }
+                _offlineQueue.value = cleanedQueue
+                persistOfflineQueue(cleanedQueue)
             }
         }
         return true
@@ -1142,6 +1170,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isAdminDeviceAuthorized = MutableStateFlow(false)
     val isAdminDeviceAuthorized: StateFlow<Boolean> = _isAdminDeviceAuthorized.asStateFlow()
 
+    private fun isKnownAdminDevice(): Boolean =
+        _isAdminUnlocked.value ||
+            (_currentCustomer.value?.isAdmin == true) ||
+            adminPrefs.getBoolean("is_known_admin_device", false)
+
     fun selectAdminTab(tabIndex: Int) {
         _adminSelectedTab.value = tabIndex.coerceIn(0, 11)
     }
@@ -1164,6 +1197,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (matches) {
             _isAdminUnlocked.value = true
             _isAdminDeviceAuthorized.value = true
+            adminPrefs.edit().putBoolean("is_known_admin_device", true).apply()
         }
         return matches
     }
@@ -1171,6 +1205,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun unlockAdminWithBiometric() {
         _isAdminUnlocked.value = true
         _isAdminDeviceAuthorized.value = true
+        adminPrefs.edit().putBoolean("is_known_admin_device", true).apply()
     }
 
     fun lockAdmin() {
@@ -1182,7 +1217,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun hideAdminControlForCustomerMode() {
         _isAdminUnlocked.value = false
         _isAdminDeviceAuthorized.value = false
-        adminPrefs.edit().putBoolean("is_admin_device_authorized", false).apply()
+        adminPrefs.edit()
+            .putBoolean("is_admin_device_authorized", false)
+            .putBoolean("is_known_admin_device", false)
+            .apply()
         if (_currentScreen.value == AppScreen.ADMIN_CONTROL_ROOM) {
             navigateToHome()
         }
@@ -2026,7 +2064,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     repository.supabaseSync.updateConfig(connectedCfg)
                     _supabaseConfigState.value = repository.supabaseSync.getConfig()
                     val syncRes = repository.fetchAndSyncAllFromCloudDetailed()
-                    syncPreOrdersWithCloudInternal(notifyOnNewRemote = false)
+                    val queuedPreIds = _offlineQueue.value
+                        .filter { it.type == OfflineActionType.PREORDER_SYNC }
+                        .map { it.referenceId }
+                        .toSet()
+                    val preStartupRes = syncPreOrdersWithCloudInternal(
+                        preferLocalIds = queuedPreIds,
+                        notifyOnNewRemote = isKnownAdminDevice()
+                    )
+                    if (preStartupRes.isSuccess && queuedPreIds.isNotEmpty()) {
+                        val remaining = _offlineQueue.value.filterNot { it.type == OfflineActionType.PREORDER_SYNC }
+                        _offlineQueue.value = remaining
+                        persistOfflineQueue(remaining)
+                    }
                     syncPartnerLedgerWithCloudInternal()
                     runAutomatic30DayHostingBilling()
                     hasCompletedInitialCloudPull = true
@@ -2111,7 +2161,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (!repository.supabaseSync.isPlaceholderConfig()) {
                         val wasBaselineEstablished = hasCompletedInitialCloudPull
                         val syncRes = repository.fetchAndSyncAllFromCloudDetailed()
-                        syncPreOrdersWithCloudInternal(notifyOnNewRemote = wasBaselineEstablished)
+                        val queuedPreIds = _offlineQueue.value
+                            .filter { it.type == OfflineActionType.PREORDER_SYNC }
+                            .map { it.referenceId }
+                            .toSet()
+                        val prePollRes = syncPreOrdersWithCloudInternal(
+                            preferLocalIds = queuedPreIds,
+                            notifyOnNewRemote = wasBaselineEstablished || isKnownAdminDevice()
+                        )
+                        if (prePollRes.isSuccess && queuedPreIds.isNotEmpty()) {
+                            val remaining = _offlineQueue.value.filterNot { it.type == OfflineActionType.PREORDER_SYNC }
+                            _offlineQueue.value = remaining
+                            persistOfflineQueue(remaining)
+                        }
                         syncPartnerLedgerWithCloudInternal()
                         runAutomatic30DayHostingBilling()
                         if (syncRes.isSuccess) {
@@ -2150,7 +2212,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isRefreshing.value = true
             val res = repository.fetchAndSyncAllFromCloudDetailed()
-            syncPreOrdersWithCloudInternal(notifyOnNewRemote = false)
+            val queuedPreIds = _offlineQueue.value
+                .filter { it.type == OfflineActionType.PREORDER_SYNC }
+                .map { it.referenceId }
+                .toSet()
+            val preRes = syncPreOrdersWithCloudInternal(
+                preferLocalIds = queuedPreIds,
+                notifyOnNewRemote = isKnownAdminDevice()
+            )
+            if (preRes.isSuccess && queuedPreIds.isNotEmpty()) {
+                val remaining = _offlineQueue.value.filterNot { it.type == OfflineActionType.PREORDER_SYNC }
+                _offlineQueue.value = remaining
+                persistOfflineQueue(remaining)
+            }
             syncPartnerLedgerWithCloudInternal()
             runAutomatic30DayHostingBilling()
             _isRefreshing.value = false
@@ -2177,7 +2251,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _isRefreshing.value = true
             _cloudStatusMessage.value = "🔄 Syncing catalog, customers, orders, pre-orders & receipts with Supabase..."
             val res = repository.fetchAndSyncAllFromCloudDetailed()
-            syncPreOrdersWithCloudInternal(notifyOnNewRemote = false)
+            val queuedPreIds = _offlineQueue.value
+                .filter { it.type == OfflineActionType.PREORDER_SYNC }
+                .map { it.referenceId }
+                .toSet()
+            val preRes = syncPreOrdersWithCloudInternal(
+                preferLocalIds = queuedPreIds,
+                notifyOnNewRemote = isKnownAdminDevice()
+            )
+            if (preRes.isSuccess && queuedPreIds.isNotEmpty()) {
+                val remaining = _offlineQueue.value.filterNot { it.type == OfflineActionType.PREORDER_SYNC }
+                _offlineQueue.value = remaining
+                persistOfflineQueue(remaining)
+            }
             syncPartnerLedgerWithCloudInternal()
             runAutomatic30DayHostingBilling()
             _isSupabaseBusy.value = false
@@ -2225,7 +2311,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val effectiveDownloadUrl = listOfNotNull(
                 remoteManifest?.downloadUrl,
                 profile.apkDownloadUrl,
-                portalUrl
+                portalUrl,
+                com.example.util.WebPortalExporter.DEFAULT_LIVE_PORTAL_URL
             ).map { com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(it) }
                 .firstOrNull {
                     it.isNotBlank() &&
@@ -2935,6 +3022,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         onResult(true, "✅ ORDER & PAYMENT CONFIRMED! ODIYA account credited & Admin Payment Confirmation enabled.")
     }
 
+    fun calculateCartPaystackSplitPlan(
+        deliveryFeeAmount: Double = 0.0,
+        couponDiscountAmount: Double = 0.0,
+        loyaltyDiscountAmount: Double = 0.0,
+        customBargainTotal: Double? = null
+    ): com.example.data.remote.PaystackSplitPlan {
+        return paystackGateway.calculatePaystackSplitPlan(
+            cartItems = _cartItems.value,
+            partners = _partnerOrganizations.value,
+            deliveryFeeNaira = deliveryFeeAmount,
+            couponDiscountNaira = couponDiscountAmount,
+            loyaltyDiscountNaira = loyaltyDiscountAmount,
+            customBargainTotal = customBargainTotal,
+            applyDueHostingFeeOffset = true
+        )
+    }
+
     fun initiatePaystackCheckout(
         customerName: String,
         customerPhone: String,
@@ -2957,12 +3061,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val safeCoupon = couponDiscountAmount.coerceIn(0.0, subtotal)
         val safeLoyalty = loyaltyDiscountAmount.coerceIn(0.0, (subtotal - safeCoupon).coerceAtLeast(0.0))
         val expectedTotal = customBargainTotal ?: ((subtotal - safeCoupon - safeLoyalty).coerceAtLeast(0.0) + deliveryFeeAmount)
+        val splitPlan = calculateCartPaystackSplitPlan(
+            deliveryFeeAmount = deliveryFeeAmount,
+            couponDiscountAmount = safeCoupon,
+            loyaltyDiscountAmount = safeLoyalty,
+            customBargainTotal = customBargainTotal
+        )
+        val primaryAlloc = splitPlan.allocations.firstOrNull()
         val previewRef = paystackGateway.generatePaystackReference("ORD${System.currentTimeMillis().toString().takeLast(5)}")
+        val splitLabel = if (splitPlan.hasActiveSubaccountSplit) {
+            "Paystack Split (${profile.storeName} ↔ ${splitPlan.allocations.filter { it.subaccountCode.startsWith("ACCT_") }.joinToString(", ") { it.partnerName }})"
+        } else {
+            "Paystack Merchant Gateway (${profile.storeName})"
+        }
 
         _paystackCheckoutState.value = com.example.data.remote.PaystackCheckoutUiState(
             isLoading = true,
             reference = previewRef,
-            statusMessage = "Connecting securely to Paystack Checkout..."
+            statusMessage = if (splitPlan.hasActiveSubaccountSplit) {
+                "Preparing Paystack Auto-Split settlement (ODIYA + Partner Subaccount)..."
+            } else {
+                "Connecting securely to Paystack Checkout..."
+            },
+            purpose = "ORDER_CHECKOUT",
+            partnerId = primaryAlloc?.partnerId ?: "",
+            hostingOffsetAppliedNaira = splitPlan.hostingOffsetNaira
         )
 
         placeOrder(
@@ -2971,7 +3094,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             customerPhone = customerPhone,
             deliveryAddress = deliveryAddress,
             paymentMethod = PaymentMethod.PAYSTACK,
-            paymentAccountOrTerminal = "Paystack Merchant Gateway (${profile.storeName})",
+            paymentAccountOrTerminal = splitLabel,
             paymentReference = previewRef,
             senderName = senderName.ifBlank { customerName },
             deliveryConditionTitle = deliveryConditionTitle,
@@ -2996,15 +3119,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         customerPhone = customerPhone,
                         supportEmail = profile.supportEmail,
                         callbackUrl = profile.paystackCallbackUrl,
-                        referenceOverride = previewRef
+                        referenceOverride = previewRef,
+                        splitPlan = splitPlan,
+                        purpose = "ORDER_CHECKOUT",
+                        partnerId = primaryAlloc?.partnerId ?: "",
+                        partnerName = primaryAlloc?.partnerName ?: "",
+                        hostingFeeNaira = splitPlan.hostingOffsetNaira
                     )
                     if (initRes.success && initRes.authorizationUrl.isNotBlank()) {
+                        val splitNote = if (splitPlan.hasActiveSubaccountSplit) {
+                            " | Split: ODIYA ₦${splitPlan.odiyaTotalShareNaira.toInt()} • Partner Net ₦${splitPlan.totalPartnerNetNaira.toInt()}"
+                        } else ""
                         _paystackCheckoutState.value = com.example.data.remote.PaystackCheckoutUiState(
                             isLoading = false,
                             orderId = createdOrder.orderId,
                             reference = initRes.reference,
                             authorizationUrl = initRes.authorizationUrl,
-                            statusMessage = "Paystack session ready (${initRes.reference}). Complete payment then tap Verify Payment."
+                            statusMessage = "Paystack session ready (${initRes.reference})$splitNote. Complete payment then tap Verify Payment.",
+                            purpose = "ORDER_CHECKOUT",
+                            partnerId = primaryAlloc?.partnerId ?: "",
+                            hostingOffsetAppliedNaira = splitPlan.hostingOffsetNaira
                         )
                         onReadyToOpenUrl(initRes.authorizationUrl, createdOrder, initRes.reference)
                     } else {
@@ -3013,7 +3147,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             orderId = createdOrder.orderId,
                             reference = initRes.reference.ifBlank { previewRef },
                             authorizationUrl = "",
-                            statusMessage = initRes.message
+                            statusMessage = initRes.message,
+                            purpose = "ORDER_CHECKOUT",
+                            partnerId = primaryAlloc?.partnerId ?: "",
+                            hostingOffsetAppliedNaira = splitPlan.hostingOffsetNaira
                         )
                         onFailure(initRes.message)
                     }
@@ -3029,6 +3166,153 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    fun startPaystackHostingFeeCheckout(
+        partnerId: String,
+        amountOverrideNaira: Double? = null,
+        onReadyToOpenUrl: (authorizationUrl: String, reference: String) -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        val partner = _partnerOrganizations.value.find { it.id == partnerId }
+        if (partner == null) {
+            onFailure("Partner organization not found.")
+            return
+        }
+        val payableNaira = (
+            amountOverrideNaira?.takeIf { it > 0.0 }
+                ?: partner.pendingHostingFeeBalance.takeIf { it > 0.0 }
+                ?: partner.monthlyHostingPayment
+            ).coerceAtLeast(100.0)
+        val sbCfg = repository.supabaseSync.getConfig()
+        val profile = _storeProfile.value
+        val hostOrderId = "HOST-${partner.id}"
+        val ref = "PSKHOST-${partner.id.takeLast(5)}-${UUID.randomUUID().toString().replace("-", "").take(7).uppercase()}"
+
+        _paystackCheckoutState.value = com.example.data.remote.PaystackCheckoutUiState(
+            isLoading = true,
+            orderId = hostOrderId,
+            reference = ref,
+            statusMessage = "Initializing Paystack Monthly Hosting Payment (100% to ODIYA)...",
+            purpose = "PARTNER_HOSTING_FEE",
+            partnerId = partner.id,
+            hostingOffsetAppliedNaira = payableNaira
+        )
+
+        viewModelScope.launch {
+            val initRes = paystackGateway.initializeTransaction(
+                supabaseUrl = sbCfg.url,
+                supabaseAnonKey = sbCfg.anonKey,
+                overrideEdgeBaseUrl = profile.paystackEdgeFunctionBaseUrl,
+                orderId = hostOrderId,
+                amountNaira = payableNaira,
+                customerName = partner.businessName,
+                customerPhone = partner.ownerPhone,
+                supportEmail = profile.supportEmail,
+                callbackUrl = profile.paystackCallbackUrl,
+                referenceOverride = ref,
+                splitPlan = null,
+                purpose = "PARTNER_HOSTING_FEE",
+                partnerId = partner.id,
+                partnerName = partner.businessName,
+                hostingFeeNaira = payableNaira
+            )
+            if (initRes.success && initRes.authorizationUrl.isNotBlank()) {
+                _paystackCheckoutState.value = com.example.data.remote.PaystackCheckoutUiState(
+                    isLoading = false,
+                    orderId = hostOrderId,
+                    reference = initRes.reference,
+                    authorizationUrl = initRes.authorizationUrl,
+                    statusMessage = "Hosting Fee Paystack session ready (${initRes.reference}). Complete payment then tap Verify Hosting Payment.",
+                    purpose = "PARTNER_HOSTING_FEE",
+                    partnerId = partner.id,
+                    hostingOffsetAppliedNaira = payableNaira
+                )
+                onReadyToOpenUrl(initRes.authorizationUrl, initRes.reference)
+            } else {
+                _paystackCheckoutState.value = _paystackCheckoutState.value.copy(
+                    isLoading = false,
+                    authorizationUrl = "",
+                    statusMessage = initRes.message
+                )
+                onFailure(initRes.message)
+            }
+        }
+    }
+
+    private suspend fun applyPaystackHostingFeeSettlement(
+        partnerId: String,
+        paidNaira: Double,
+        reference: String,
+        channel: String,
+        isSplitOffset: Boolean
+    ) {
+        if (partnerId.isBlank() || paidNaira <= 0.0) return
+        val alreadyLogged = _partnerTransactions.value.any {
+            it.type == PartnerTransactionType.MONTHLY_HOSTING_FEE &&
+                it.paymentReference.equals(reference, ignoreCase = true)
+        }
+        if (alreadyLogged) return
+        val partner = _partnerOrganizations.value.find { it.id == partnerId } ?: return
+        val now = System.currentTimeMillis()
+        val storeAcct = _storeProfile.value.opayAccountNumber
+            .ifBlank { _storeProfile.value.moniepointAccountNumber }
+            .ifBlank { "ODIYA Main Paystack Account" }
+        val partnerAcct = partner.paystackSubaccountCode.ifBlank {
+            partner.paystackAccountNumber.ifBlank { partner.opayAccountNumber.ifBlank { "Partner Account" } }
+        }
+        val newPending = (partner.pendingHostingFeeBalance - paidNaira).coerceAtLeast(0.0)
+        val newCycles = if (isSplitOffset && newPending > 0.0) partner.hostingCyclesBilled else partner.hostingCyclesBilled + 1
+        val nextDue = if (isSplitOffset) {
+            partner.nextHostingBillingDueAt
+        } else {
+            maxOf(partner.nextHostingBillingDueAt, now) + THIRTY_DAYS_MS
+        }
+
+        val updatedOrgs = _partnerOrganizations.value.map { org ->
+            if (org.id == partnerId) {
+                org.copy(
+                    pendingHostingFeeBalance = newPending,
+                    totalHostingFeesAutoDeducted = org.totalHostingFeesAutoDeducted + paidNaira,
+                    hostingCyclesBilled = newCycles,
+                    lastHostingBillingAt = now,
+                    nextHostingBillingDueAt = if (nextDue > 0L) nextDue else (now + THIRTY_DAYS_MS),
+                    isCatalogLocked = if (!isSplitOffset && org.status != PartnerAgreementStatus.TERMINATED) false else org.isCatalogLocked,
+                    catalogLockedAt = if (!isSplitOffset && org.status != PartnerAgreementStatus.TERMINATED) 0L else org.catalogLockedAt,
+                    status = if (!isSplitOffset && org.status == PartnerAgreementStatus.SUSPENDED) PartnerAgreementStatus.FINALIZED else org.status
+                )
+            } else org
+        }
+        _partnerOrganizations.value = updatedOrgs
+        persistPartnerOrganizations(updatedOrgs)
+
+        if (!isSplitOffset) {
+            repository.setPartnerProductsCatalogLocked(partnerId, false)
+        }
+
+        appendPartnerTransaction(
+            PartnerFolderTransaction(
+                partnerId = partner.id,
+                partnerName = partner.businessName,
+                type = PartnerTransactionType.MONTHLY_HOSTING_FEE,
+                category = partner.primaryCategory,
+                grossAmount = paidNaira,
+                commissionProfitAmount = paidNaira,
+                partnerNetAmount = 0.0,
+                paymentMethod = if (isSplitOffset) "Paystack Auto-Split Hosting Offset ($channel)" else "Paystack Hosting Fee ($channel • 100% ODIYA)",
+                paymentAccount = "$partnerAcct → $storeAcct",
+                paymentReference = reference,
+                alertSentToAdmin = true,
+                alertSentToPartner = true,
+                timestamp = now,
+                note = if (isSplitOffset) {
+                    "Hosting fee offset (₦${paidNaira.toInt()}) routed to ODIYA Paystack main account via Split ref $reference"
+                } else {
+                    "Monthly Hosting Fee (₦${paidNaira.toInt()}) paid 100% to ODIYA via Paystack ($reference) • Remaining due: ₦${newPending.toInt()}"
+                }
+            )
+        )
+        pushPartnerLedgerAsync(preferLocal = true)
+    }
+
     fun verifyPaystackPayment(
         reference: String,
         orderId: String? = null,
@@ -3041,7 +3325,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     it.paymentReference.equals(cleanRef, ignoreCase = true)
             }
             val targetOrderId = orderId ?: matchedOrder?.orderId ?: _paystackCheckoutState.value.orderId
-            _paystackCheckoutState.value = _paystackCheckoutState.value.copy(
+            val currentState = _paystackCheckoutState.value
+            val isHostingPayment = currentState.purpose == "PARTNER_HOSTING_FEE" ||
+                cleanRef.startsWith("PSKHOST-", ignoreCase = true) ||
+                targetOrderId.startsWith("HOST-", ignoreCase = true)
+
+            _paystackCheckoutState.value = currentState.copy(
                 isLoading = true,
                 orderId = targetOrderId,
                 reference = cleanRef,
@@ -3056,15 +3345,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 reference = cleanRef
             )
             if (verifyRes.success) {
-                if (targetOrderId.isNotBlank()) {
-                    recordOrderCreditAlertReceived(targetOrderId, "Paystack Verified (${verifyRes.channel} • $cleanRef)")
+                if (isHostingPayment) {
+                    val resolvedPartnerId = currentState.partnerId.ifBlank {
+                        targetOrderId.removePrefix("HOST-").takeIf { it.isNotBlank() } ?: ""
+                    }
+                    val settledAmt = if (verifyRes.amountNaira > 0.0) verifyRes.amountNaira else currentState.hostingOffsetAppliedNaira
+                    applyPaystackHostingFeeSettlement(
+                        partnerId = resolvedPartnerId,
+                        paidNaira = settledAmt,
+                        reference = cleanRef,
+                        channel = verifyRes.channel,
+                        isSplitOffset = false
+                    )
+                    _paystackCheckoutState.value = _paystackCheckoutState.value.copy(
+                        isLoading = false,
+                        isVerifiedPaid = true,
+                        statusMessage = "✅ Hosting Fee Paid via Paystack (${verifyRes.channel}) • ₦${settledAmt.toInt()} credited 100% to ODIYA!"
+                    )
+                    onResult(true, "✅ Monthly Hosting Fee verified via Paystack (${verifyRes.channel})! Catalog active.")
+                } else {
+                    if (targetOrderId.isNotBlank()) {
+                        recordOrderCreditAlertReceived(targetOrderId, "Paystack Verified (${verifyRes.channel} • $cleanRef)")
+                    }
+                    val offsetPartnerId = currentState.partnerId.ifBlank { matchedOrder?.partnerId.orEmpty() }
+                    val offsetNaira = currentState.hostingOffsetAppliedNaira
+                    if (offsetPartnerId.isNotBlank() && offsetNaira > 0.0) {
+                        applyPaystackHostingFeeSettlement(
+                            partnerId = offsetPartnerId,
+                            paidNaira = offsetNaira,
+                            reference = cleanRef,
+                            channel = verifyRes.channel,
+                            isSplitOffset = true
+                        )
+                    }
+                    _paystackCheckoutState.value = _paystackCheckoutState.value.copy(
+                        isLoading = false,
+                        isVerifiedPaid = true,
+                        statusMessage = "✅ Paystack Verified (${verifyRes.channel}) • Order $targetOrderId Confirmed!"
+                    )
+                    onResult(true, "✅ Paystack payment confirmed for order $targetOrderId!")
                 }
-                _paystackCheckoutState.value = _paystackCheckoutState.value.copy(
-                    isLoading = false,
-                    isVerifiedPaid = true,
-                    statusMessage = "✅ Paystack Verified (${verifyRes.channel}) • Order $targetOrderId Confirmed!"
-                )
-                onResult(true, "✅ Paystack payment confirmed for order $targetOrderId!")
             } else {
                 _paystackCheckoutState.value = _paystackCheckoutState.value.copy(
                     isLoading = false,
@@ -3498,14 +3818,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _isSupabaseConnected.value = true
                 val cfg = repository.supabaseSync.getConfig()
                 repository.supabaseSync.updateConfig(cfg.copy(isConnected = true))
-                // Immediately run bidirectional product/customer/order sync!
+                // Immediately run bidirectional product/customer/order & pre-order sync!
                 val syncRes = repository.fetchAndSyncAllFromCloudDetailed()
+                val queuedPreIds = _offlineQueue.value
+                    .filter { it.type == OfflineActionType.PREORDER_SYNC }
+                    .map { it.referenceId }
+                    .toSet() + _preOrderRequests.value.map { it.id }.toSet()
+                val preRes = syncPreOrdersWithCloudInternal(
+                    preferLocalIds = queuedPreIds,
+                    notifyOnNewRemote = isKnownAdminDevice()
+                )
+                if (preRes.isSuccess && _offlineQueue.value.any { it.type == OfflineActionType.PREORDER_SYNC }) {
+                    val remaining = _offlineQueue.value.filterNot { it.type == OfflineActionType.PREORDER_SYNC }
+                    _offlineQueue.value = remaining
+                    persistOfflineQueue(remaining)
+                }
                 _isSupabaseBusy.value = false
                 if (syncRes.isSuccess) {
                     val s = syncRes.getOrThrow()
                     _lastSyncTimestamp.value = System.currentTimeMillis()
                     if (s.errors.isEmpty()) {
-                        "${res.getOrThrow()} Synced ${s.syncedProducts} products (${s.customCloudProducts} uploaded), ${s.syncedCustomers} customers & ${s.syncedOrders} orders."
+                        "${res.getOrThrow()} Synced ${s.syncedProducts} products (${s.customCloudProducts} uploaded), ${s.syncedCustomers} customers, ${s.syncedOrders} orders & ${_preOrderRequests.value.size} pre-orders."
                     } else {
                         "⚠️ Connected, with warnings: ${s.errors.joinToString("; ")}"
                     }
@@ -3795,7 +4128,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     totalHostingFeesAutoDeducted = obj.optDouble("totalHostingFeesAutoDeducted", 0.0),
                     totalAutoDeducted247Share = obj.optDouble("totalAutoDeducted247Share", 0.0),
                     totalAutoPartnerNetDeposited = obj.optDouble("totalAutoPartnerNetDeposited", 0.0),
-                    totalAccruedOfflinePenalty = obj.optDouble("totalAccruedOfflinePenalty", 0.0)
+                    totalAccruedOfflinePenalty = obj.optDouble("totalAccruedOfflinePenalty", 0.0),
+                    paystackSubaccountCode = obj.optString("paystackSubaccountCode", ""),
+                    paystackBankCode = obj.optString("paystackBankCode", ""),
+                    paystackAccountNumber = obj.optString("paystackAccountNumber", ""),
+                    paystackAccountName = obj.optString("paystackAccountName", ""),
+                    pendingHostingFeeBalance = obj.optDouble("pendingHostingFeeBalance", 0.0),
+                    autoDeductHostingFromPaystackSplit = obj.optBoolean("autoDeductHostingFromPaystackSplit", true)
                 )
             }
         } catch (_: Exception) {
@@ -3841,6 +4180,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 put("totalAutoDeducted247Share", p.totalAutoDeducted247Share)
                 put("totalAutoPartnerNetDeposited", p.totalAutoPartnerNetDeposited)
                 put("totalAccruedOfflinePenalty", p.totalAccruedOfflinePenalty)
+                put("paystackSubaccountCode", p.paystackSubaccountCode)
+                put("paystackBankCode", p.paystackBankCode)
+                put("paystackAccountNumber", p.paystackAccountNumber)
+                put("paystackAccountName", p.paystackAccountName)
+                put("pendingHostingFeeBalance", p.pendingHostingFeeBalance)
+                put("autoDeductHostingFromPaystackSplit", p.autoDeductHostingFromPaystackSplit)
             })
         }
         adminPrefs.edit().putString("partner_organizations_json", arr.toString()).apply()
@@ -4179,8 +4524,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         stipulatedCommissionPercent: Double,
         partnerSignatureName: String,
         partnerSignatureStrokes: String,
+        paystackBankCode: String = "",
+        paystackAccountNumber: String = "",
+        paystackAccountName: String = "",
+        paystackSubaccountCode: String = "",
+        autoDeductHostingFromPaystackSplit: Boolean = true,
         onComplete: (PartnerOrganization) -> Unit
     ) {
+        val cleanPaystackBank = paystackBankCode.trim().ifBlank {
+            when {
+                opayAccountNumber.isNotBlank() -> "999992"
+                moniepointAccountNumber.isNotBlank() -> "50515"
+                else -> ""
+            }
+        }
+        val cleanPaystackNum = paystackAccountNumber.filter { it.isDigit() }.ifBlank {
+            opayAccountNumber.filter { it.isDigit() }.ifBlank { moniepointAccountNumber.filter { it.isDigit() } }
+        }
+        val cleanPaystackNm = paystackAccountName.trim().ifBlank {
+            opayAccountName.trim().ifBlank { moniepointAccountName.trim().ifBlank { businessName.trim() } }
+        }
         val newPartner = PartnerOrganization(
             businessName = businessName.trim(),
             ownerName = ownerName.trim(),
@@ -4200,7 +4563,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             partnerSignatureName = partnerSignatureName.trim().ifBlank { ownerName.trim() },
             partnerSignatureStrokes = partnerSignatureStrokes,
             status = PartnerAgreementStatus.PENDING_FINALIZATION,
-            createdAt = System.currentTimeMillis()
+            createdAt = System.currentTimeMillis(),
+            paystackSubaccountCode = paystackSubaccountCode.trim(),
+            paystackBankCode = cleanPaystackBank,
+            paystackAccountNumber = cleanPaystackNum,
+            paystackAccountName = cleanPaystackNm,
+            pendingHostingFeeBalance = 0.0,
+            autoDeductHostingFromPaystackSplit = autoDeductHostingFromPaystackSplit
         )
         val updated = listOf(newPartner) + _partnerOrganizations.value
         _partnerOrganizations.value = updated
@@ -4223,6 +4592,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         opayName: String,
         moniepointNumber: String,
         moniepointName: String,
+        paystackBankCode: String? = null,
+        paystackAccountNumber: String? = null,
+        paystackAccountName: String? = null,
+        paystackSubaccountCode: String? = null,
+        autoDeductHostingFromPaystackSplit: Boolean? = null,
         onComplete: (Boolean, String) -> Unit
     ) {
         val current = _partnerOrganizations.value
@@ -4259,7 +4633,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             lastHostingBillingAt = if (billInitialCycle) now else existing.lastHostingBillingAt,
             nextHostingBillingDueAt = if (billInitialCycle) (now + THIRTY_DAYS_MS) else existing.nextHostingBillingDueAt.takeIf { it > 0L } ?: (now + THIRTY_DAYS_MS),
             hostingCyclesBilled = if (billInitialCycle) 1 else alreadyBilledCycles,
-            totalHostingFeesAutoDeducted = if (billInitialCycle) existing.totalHostingFeesAutoDeducted + safeHostingFee else existing.totalHostingFeesAutoDeducted
+            totalHostingFeesAutoDeducted = if (billInitialCycle) existing.totalHostingFeesAutoDeducted + safeHostingFee else existing.totalHostingFeesAutoDeducted,
+            paystackBankCode = paystackBankCode?.trim() ?: existing.paystackBankCode,
+            paystackAccountNumber = paystackAccountNumber?.filter { it.isDigit() } ?: existing.paystackAccountNumber,
+            paystackAccountName = paystackAccountName?.trim()?.ifBlank { existing.businessName } ?: existing.paystackAccountName,
+            paystackSubaccountCode = paystackSubaccountCode?.trim() ?: existing.paystackSubaccountCode,
+            autoDeductHostingFromPaystackSplit = autoDeductHostingFromPaystackSplit ?: existing.autoDeductHostingFromPaystackSplit
         )
         val updated = current.map { if (it.id == partnerId) finalized else it }
         _partnerOrganizations.value = updated
@@ -4304,7 +4683,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         opayNumber: String,
         opayName: String,
         moniepointNumber: String,
-        moniepointName: String
+        moniepointName: String,
+        paystackBankCode: String? = null,
+        paystackAccountNumber: String? = null,
+        paystackAccountName: String? = null,
+        paystackSubaccountCode: String? = null,
+        pendingHostingFeeBalance: Double? = null,
+        autoDeductHostingFromPaystackSplit: Boolean? = null
     ) {
         val updated = _partnerOrganizations.value.map { p ->
             if (p.id == partnerId) {
@@ -4321,13 +4706,96 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     opayAccountNumber = opayNumber.trim(),
                     opayAccountName = opayName.trim().ifBlank { p.businessName },
                     moniepointAccountNumber = moniepointNumber.trim(),
-                    moniepointAccountName = moniepointName.trim().ifBlank { p.businessName }
+                    moniepointAccountName = moniepointName.trim().ifBlank { p.businessName },
+                    paystackBankCode = paystackBankCode?.trim() ?: p.paystackBankCode,
+                    paystackAccountNumber = paystackAccountNumber?.filter { it.isDigit() } ?: p.paystackAccountNumber,
+                    paystackAccountName = paystackAccountName?.trim()?.ifBlank { p.businessName } ?: p.paystackAccountName,
+                    paystackSubaccountCode = paystackSubaccountCode?.trim() ?: p.paystackSubaccountCode,
+                    pendingHostingFeeBalance = pendingHostingFeeBalance?.coerceAtLeast(0.0) ?: p.pendingHostingFeeBalance,
+                    autoDeductHostingFromPaystackSplit = autoDeductHostingFromPaystackSplit ?: p.autoDeductHostingFromPaystackSplit
                 )
             } else p
         }
         _partnerOrganizations.value = updated
         persistPartnerOrganizations(updated)
         pushPartnerLedgerAsync(preferLocal = true)
+    }
+
+    fun registerPartnerPaystackSubaccount(
+        partnerId: String,
+        businessName: String,
+        bankCode: String,
+        accountNumber: String,
+        commissionPercent: Double,
+        existingSubaccountCode: String = "",
+        onComplete: (Boolean, String) -> Unit
+    ) {
+        val partner = _partnerOrganizations.value.find { it.id == partnerId }
+        if (partner == null) {
+            onComplete(false, "Partner organization not found.")
+            return
+        }
+        val sbCfg = repository.supabaseSync.getConfig()
+        val profile = _storeProfile.value
+        viewModelScope.launch {
+            val res = paystackGateway.createOrUpdatePartnerSubaccount(
+                supabaseUrl = sbCfg.url,
+                supabaseAnonKey = sbCfg.anonKey,
+                overrideEdgeBaseUrl = profile.paystackEdgeFunctionBaseUrl,
+                partnerId = partner.id,
+                businessName = businessName.ifBlank { partner.businessName },
+                bankCode = bankCode,
+                accountNumber = accountNumber,
+                commissionPercent = commissionPercent.coerceIn(0.5, 95.0),
+                existingSubaccountCode = existingSubaccountCode.ifBlank { partner.paystackSubaccountCode },
+                contactEmail = profile.supportEmail,
+                contactPhone = partner.ownerPhone
+            )
+            if (res.success && res.subaccountCode.isNotBlank()) {
+                val updated = _partnerOrganizations.value.map { org ->
+                    if (org.id == partnerId) {
+                        org.copy(
+                            paystackBankCode = bankCode.trim(),
+                            paystackAccountNumber = accountNumber.filter { it.isDigit() },
+                            paystackAccountName = res.accountName.ifBlank { org.paystackAccountName.ifBlank { org.businessName } },
+                            paystackSubaccountCode = res.subaccountCode
+                        )
+                    } else org
+                }
+                _partnerOrganizations.value = updated
+                persistPartnerOrganizations(updated)
+                pushPartnerLedgerAsync(preferLocal = true)
+                onComplete(true, "✅ ${res.message} (${res.accountName.ifBlank { businessName }})")
+            } else {
+                onComplete(false, res.message)
+            }
+        }
+    }
+
+    fun queuePartnerPendingHostingCharge(
+        partnerId: String,
+        amountNaira: Double,
+        onComplete: ((Boolean, String) -> Unit)? = null
+    ) {
+        val partner = _partnerOrganizations.value.find { it.id == partnerId }
+        if (partner == null) {
+            onComplete?.invoke(false, "Partner organization not found.")
+            return
+        }
+        val safeAmt = amountNaira.coerceAtLeast(0.0)
+        val updated = _partnerOrganizations.value.map { org ->
+            if (org.id == partnerId) {
+                org.copy(pendingHostingFeeBalance = safeAmt)
+            } else org
+        }
+        _partnerOrganizations.value = updated
+        persistPartnerOrganizations(updated)
+        pushPartnerLedgerAsync(preferLocal = true)
+        onComplete?.invoke(
+            true,
+            if (safeAmt > 0.0) "Updated Paystack Hosting Fee Due to ₦${safeAmt.toInt()} for ${partner.businessName}."
+            else "Cleared Paystack pending hosting fee balance for ${partner.businessName}."
+        )
     }
 
     fun submitPartnerProductToAdminStaging(
@@ -5906,15 +6374,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val poCust = ev.payload.optString("customerName", "Customer")
                 val poProd = ev.payload.optString("productName", "Special Request")
                 val poBrand = ev.payload.optString("brandName", "")
-                ShopNotificationHelper.notifyAdminNewPreOrder(
-                    context = getApplication(),
-                    requestId = poId,
-                    customerName = poCust,
-                    productName = poProd,
-                    brandName = poBrand
-                )
+                val isAdmin = isKnownAdminDevice()
+                if (isAdmin && poId !in getNotifiedPreOrderIds()) {
+                    markPreOrdersNotified(listOf(poId))
+                    ShopNotificationHelper.notifyAdminNewPreOrder(
+                        context = getApplication(),
+                        requestId = poId,
+                        customerName = poCust,
+                        productName = poProd,
+                        brandName = poBrand
+                    )
+                    voiceManager.speakText("New Pre-Order Request received from $poCust for $poProd.")
+                }
                 viewModelScope.launch {
-                    syncPreOrdersWithCloudInternal(notifyOnNewRemote = true)
+                    syncPreOrdersWithCloudInternal(notifyOnNewRemote = isAdmin)
                 }
             }
             "APP_MAINTENANCE" -> {

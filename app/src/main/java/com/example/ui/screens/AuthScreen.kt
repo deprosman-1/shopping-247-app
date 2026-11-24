@@ -109,6 +109,7 @@ fun AuthScreen(
 ) {
     val context = LocalContext.current
     val currentCustomer by viewModel.currentCustomer.collectAsState()
+    val savedDeliveryInfo by viewModel.savedDeliveryInfo.collectAsState()
     val accountDestination by viewModel.customerAccountDestination.collectAsState()
     val initialAuthTab by viewModel.authTab.collectAsState()
     val isWideDualAxisMode by viewModel.isWideDualAxisMode.collectAsState()
@@ -235,12 +236,18 @@ fun AuthScreen(
             ) {
                 when (accountDestination) {
                     CustomerAccountDestination.MENU -> {
-                        // Top Compact Summary (Customer Name & Phone Number ONLY when signed in)
+                        val resolvedName = currentCustomer?.fullName?.takeIf { it.isNotBlank() } ?: savedDeliveryInfo.fullName.trim()
+                        val resolvedPhone = currentCustomer?.phoneNumber?.takeIf { it.isNotBlank() } ?: savedDeliveryInfo.phoneNumber.trim()
+                        val resolvedAddress = currentCustomer?.deliveryAddress?.takeIf { it.isNotBlank() } ?: savedDeliveryInfo.deliveryAddress.trim()
+
+                        // Permanent Customer Credentials Summary (Name, Phone & Delivery Address — No Email/Gmail)
                         Surface(
                             shape = RoundedCornerShape(16.dp),
                             color = Color(0xFF052E16),
                             border = BorderStroke(1.2.dp, AccentGold.copy(alpha = 0.7f)),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("auth_menu_credentials_card")
                         ) {
                             Row(
                                 modifier = Modifier
@@ -258,21 +265,68 @@ fun AuthScreen(
                                     Icon(Icons.Default.Person, contentDescription = null, tint = AccentGold, modifier = Modifier.size(26.dp))
                                 }
                                 Spacer(modifier = Modifier.width(12.dp))
-                                Column {
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                     Text(
-                                        text = currentCustomer?.fullName ?: "ODIYA Customer",
+                                        text = resolvedName.ifBlank { "ODIYA Customer" },
                                         fontWeight = FontWeight.Black,
                                         fontSize = 15.sp,
-                                        color = Color.White
+                                        color = Color.White,
+                                        modifier = Modifier.testTag("auth_menu_credentials_name")
                                     )
                                     Text(
-                                        text = currentCustomer?.phoneNumber ?: "Tap WELCOME below to Sign In or Sign Up",
+                                        text = resolvedPhone.ifBlank { "Tap WELCOME below to Sign In or Sign Up" },
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.SemiBold,
-                                        color = AccentGold
+                                        color = AccentGold,
+                                        modifier = Modifier.testTag("auth_menu_credentials_phone")
                                     )
+                                    if (resolvedAddress.isNotBlank()) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector = Icons.Default.LocationOn,
+                                                contentDescription = "Customer Delivery Address",
+                                                tint = CyberCyan,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = resolvedAddress,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = CyberCyan,
+                                                modifier = Modifier.testTag("auth_menu_credentials_address")
+                                            )
+                                        }
+                                    }
                                 }
                             }
+                        }
+
+                        Button(
+                            onClick = { viewModel.navigateToHome() },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = SuccessGreen,
+                                contentColor = Color(0xFF052E16)
+                            ),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp)
+                                .testTag("account_menu_start_shopping_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Storefront,
+                                contentDescription = "Start Shopping",
+                                tint = Color(0xFF052E16),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Start Shopping",
+                                fontWeight = FontWeight.Black,
+                                fontSize = 15.sp,
+                                color = Color(0xFF052E16)
+                            )
                         }
 
                         // Required Exact Vertical List Arrangement
@@ -280,6 +334,8 @@ fun AuthScreen(
                             title = "WELCOME",
                             subtitle = if (currentCustomer != null) {
                                 "${currentCustomer!!.fullName} • ${currentCustomer!!.phoneNumber}"
+                            } else if (resolvedName.isNotBlank() || resolvedPhone.isNotBlank()) {
+                                "Saved: ${listOfNotNull(resolvedName.ifBlank { null }, resolvedPhone.ifBlank { null }).joinToString(" • ")} • Tap to Sign In"
                             } else {
                                 "Sign In / Sign Up (Name & Phone Number)"
                             },
@@ -741,6 +797,31 @@ fun AuthScreen(
                                 ) {
                                     Text("Create Account", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                 }
+                            }
+
+                            OutlinedButton(
+                                onClick = { viewModel.navigateToHome() },
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = SuccessGreen),
+                                border = BorderStroke(1.2.dp, SuccessGreen.copy(alpha = 0.7f)),
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .testTag("welcome_guest_start_shopping_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Storefront,
+                                    contentDescription = "Start Shopping",
+                                    tint = SuccessGreen,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Start Shopping",
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 14.sp,
+                                    color = SuccessGreen
+                                )
                             }
                         }
                     }

@@ -2816,10 +2816,30 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
         val effectivePalmpayName = storeProfile.palmpayAccountName.ifBlank { storeProfile.storeName }
 
         val paystackUiState by viewModel.paystackCheckoutState.collectAsState()
+        val partnerOrgsForSplit by viewModel.partnerOrganizations.collectAsState()
+        val paystackSplitPlan = remember(
+            cartItems,
+            partnerOrgsForSplit,
+            deliveryFee,
+            couponDiscountAmount,
+            loyaltyDiscountAmount,
+            appliedBargainPrice
+        ) {
+            viewModel.calculateCartPaystackSplitPlan(
+                deliveryFeeAmount = deliveryFee,
+                couponDiscountAmount = couponDiscountAmount,
+                loyaltyDiscountAmount = loyaltyDiscountAmount,
+                customBargainTotal = appliedBargainPrice
+            )
+        }
         val paystackContext = LocalContext.current
 
         PaymentOptionCard(
-            title = "Paystack Checkout (Cards • Bank • USSD • OPay)",
+            title = if (paystackSplitPlan.hasActiveSubaccountSplit) {
+                "Paystack Split Checkout (Auto Partner Payout)"
+            } else {
+                "Paystack Checkout (Cards • Bank • USSD • OPay)"
+            },
             subtitle = "Nigeria #1 Automated Gateway • Pay even WITHOUT a debit card via Bank Transfer or USSD",
             brandColor = PaystackTeal,
             icon = Icons.Default.CreditCard,
@@ -2833,6 +2853,50 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                     fontSize = 11.5.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (paystackSplitPlan.hasPartnerItems) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (paystackSplitPlan.hasActiveSubaccountSplit) PaystackTeal.copy(alpha = 0.12f) else AccentGold.copy(alpha = 0.12f),
+                        border = BorderStroke(
+                            1.dp,
+                            if (paystackSplitPlan.hasActiveSubaccountSplit) PaystackTeal.copy(alpha = 0.55f) else AccentGold.copy(alpha = 0.55f)
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("paystack_split_breakdown_card")
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = if (paystackSplitPlan.hasActiveSubaccountSplit) {
+                                    "⚡ LIVE PAYSTACK AUTO-SPLIT ACTIVE (${paystackSplitPlan.splitMode.replace('_', ' ')})"
+                                } else {
+                                    "PAYSTACK SPLIT SUMMARY (Register ACCT_ Subaccount in Admin Partner Hub for auto bank routing)"
+                                },
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Black,
+                                color = if (paystackSplitPlan.hasActiveSubaccountSplit) PaystackTeal else AccentGold
+                            )
+                            Text(
+                                text = "• ${storeProfile.storeName} Account Share: ${nairaFormat.format(paystackSplitPlan.odiyaTotalShareNaira)} " +
+                                    "(% Commission ${nairaFormat.format(paystackSplitPlan.odiyaCommissionNaira)}" +
+                                    (if (paystackSplitPlan.hostingOffsetNaira > 0.0) " + Due Hosting Offset ${nairaFormat.format(paystackSplitPlan.hostingOffsetNaira)}" else "") +
+                                    ")",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = SuccessGreen
+                            )
+                            paystackSplitPlan.allocations.forEach { alloc ->
+                                val acctTag = if (alloc.subaccountCode.startsWith("ACCT_")) alloc.subaccountCode else "Pending ACCT_ Subaccount"
+                                Text(
+                                    text = "• ${alloc.partnerName} Net (${String.format(java.util.Locale.US, "%.1f", 100.0 - alloc.commissionPercent)}%): ${nairaFormat.format(alloc.partnerNetNaira)} [$acctTag]",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = CyberCyan
+                                )
+                            }
+                        }
+                    }
+                }
                 Button(
                     enabled = !paystackUiState.isLoading && !isPlacingOrder,
                     onClick = {

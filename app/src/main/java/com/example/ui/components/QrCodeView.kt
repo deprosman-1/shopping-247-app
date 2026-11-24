@@ -3,6 +3,7 @@ package com.example.ui.components
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
 import androidx.compose.foundation.Image
@@ -18,17 +19,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
-import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
-import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
+import com.google.zxing.qrcode.encoder.Encoder
 
 /**
- * High-fidelity, 100% standards-compliant ISO/IEC 18004 QR Code View using ZXing.
- * Generates an authentic scannable QR code that any Android camera, QR scanner,
- * or desktop webcam can scan immediately.
+ * High-fidelity, 100% standards-compliant ISO/IEC 18004 QR Code View using ZXing Encoder.
+ * Renders integer-aligned crisp dark/light modules with FilterQuality.None and ISO quiet zones
+ * so phone cameras, QR scanners, and Google Lens decode both short and long sync URLs instantly.
  */
 @Composable
 fun QrCodeView(
@@ -36,8 +38,9 @@ fun QrCodeView(
     modifier: Modifier = Modifier,
     sizePx: Int = 720
 ) {
-    val qrBitmap = remember(content, sizePx) {
-        generateQrBitmap(content, sizePx)
+    val cleanContent = content.trim()
+    val qrBitmap = remember(cleanContent, sizePx) {
+        generateQrBitmap(cleanContent, sizePx)
     }
 
     Box(
@@ -45,13 +48,15 @@ fun QrCodeView(
             .aspectRatio(1f)
             .clip(RoundedCornerShape(16.dp))
             .background(Color.White)
-            .padding(8.dp),
+            .padding(6.dp),
         contentAlignment = Alignment.Center
     ) {
         if (qrBitmap != null) {
             Image(
                 bitmap = qrBitmap.asImageBitmap(),
                 contentDescription = "Official Scannable App Download QR Code",
+                contentScale = ContentScale.Fit,
+                filterQuality = FilterQuality.None,
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -59,36 +64,46 @@ fun QrCodeView(
 }
 
 /**
- * Generates a high-contrast, error-corrected QR Code Bitmap ready for scanning.
+ * Generates a high-contrast, integer-aligned QR Code Bitmap ready for fast camera scanning.
  */
 fun generateQrBitmap(content: String, size: Int = 720): Bitmap? {
-    if (content.isBlank()) return null
+    val cleanContent = content.trim()
+    if (cleanContent.isBlank()) return null
     return try {
+        val ecLevel = when {
+            cleanContent.length > 220 -> ErrorCorrectionLevel.M
+            cleanContent.length > 110 -> ErrorCorrectionLevel.Q
+            else -> ErrorCorrectionLevel.H
+        }
         val hints = mapOf(
-            EncodeHintType.MARGIN to 2,
-            EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.H,
             EncodeHintType.CHARACTER_SET to "UTF-8"
         )
-        val bitMatrix = QRCodeWriter().encode(
-            content,
-            BarcodeFormat.QR_CODE,
-            size,
-            size,
-            hints
-        )
-        val pixels = IntArray(size * size)
-        for (y in 0 until size) {
-            val offset = y * size
-            for (x in 0 until size) {
-                pixels[offset + x] = if (bitMatrix.get(x, y)) {
-                    android.graphics.Color.BLACK
-                } else {
-                    android.graphics.Color.WHITE
+        val qrCode = Encoder.encode(cleanContent, ecLevel, hints)
+        val matrix = qrCode.matrix
+        val quietModules = 4
+        val totalModulesX = matrix.width + quietModules * 2
+        val totalModulesY = matrix.height + quietModules * 2
+        val modulePx = (size.coerceAtLeast(240) / maxOf(totalModulesX, totalModulesY)).coerceAtLeast(4)
+        val outWidth = totalModulesX * modulePx
+        val outHeight = totalModulesY * modulePx
+        val pixels = IntArray(outWidth * outHeight) { android.graphics.Color.WHITE }
+
+        for (my in 0 until matrix.height) {
+            val startPy = (my + quietModules) * modulePx
+            for (mx in 0 until matrix.width) {
+                if (matrix.get(mx, my).toInt() != 0) {
+                    val startPx = (mx + quietModules) * modulePx
+                    for (py in startPy until (startPy + modulePx)) {
+                        val rowOffset = py * outWidth
+                        for (px in startPx until (startPx + modulePx)) {
+                            pixels[rowOffset + px] = android.graphics.Color.BLACK
+                        }
+                    }
                 }
             }
         }
-        Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888).apply {
-            setPixels(pixels, 0, size, 0, 0, size, size)
+        Bitmap.createBitmap(outWidth, outHeight, Bitmap.Config.ARGB_8888).apply {
+            setPixels(pixels, 0, outWidth, 0, 0, outWidth, outHeight)
         }
     } catch (_: Exception) {
         null
@@ -143,9 +158,21 @@ fun generateShareableQrPosterBitmap(
     }
     canvas.drawRoundRect(RectF(96f, 232f, width - 96f, 1000f), 32f, 32f, borderPaint)
 
-    // Draw QR bitmap centered
-    val qrLeft = (width - qr.width) / 2f
-    canvas.drawBitmap(qr, qrLeft, 256f, null)
+    // Draw razor-sharp QR bitmap scaled cleanly into the card without blurring
+    val targetSide = 700
+    val qrLeft = (width - targetSide) / 2
+    val qrTop = 266
+    val nearestPaint = Paint().apply {
+        isFilterBitmap = false
+        isAntiAlias = false
+        isDither = false
+    }
+    canvas.drawBitmap(
+        qr,
+        Rect(0, 0, qr.width, qr.height),
+        Rect(qrLeft, qrTop, qrLeft + targetSide, qrTop + targetSide),
+        nearestPaint
+    )
 
     // Footer instruction & URL
     val ctaPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -154,7 +181,7 @@ fun generateShareableQrPosterBitmap(
         typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         textAlign = Paint.Align.CENTER
     }
-    canvas.drawText("Install on Android, Windows, Mac & Chromebook", width / 2f, 1058f, ctaPaint)
+    canvas.drawText("Install on Android, iPhone, Windows, Mac & Chromebook", width / 2f, 1058f, ctaPaint)
 
     val urlPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = android.graphics.Color.parseColor("#0284C7")
@@ -162,7 +189,8 @@ fun generateShareableQrPosterBitmap(
         typeface = Typeface.MONOSPACE
         textAlign = Paint.Align.CENTER
     }
-    val displayUrl = if (content.length > 62) content.take(59) + "..." else content
+    val cleanUrl = content.trim()
+    val displayUrl = if (cleanUrl.length > 62) cleanUrl.take(59) + "..." else cleanUrl
     canvas.drawText(displayUrl, width / 2f, 1106f, urlPaint)
 
     return poster

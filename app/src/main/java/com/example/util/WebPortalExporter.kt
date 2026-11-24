@@ -1,8 +1,10 @@
 package com.example.util
 
+import android.content.ComponentName
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -189,18 +191,123 @@ object WebPortalExporter {
         }
     }
 
-    fun openExternalUrl(context: Context, url: String) {
-        val target = normalizeWebUrl(url)
-        if (target.isBlank()) return
+    /**
+     * Appends `web=1` (and strips `open_app`) on HTTP(S) portal URLs so opening the
+     * Live Storefront in an external browser (e.g., to download a new APK update or preview)
+     * never bounces straight back into the same old installed Android app.
+     */
+    fun withStayOnWebParam(url: String): String {
+        val clean = normalizeWebUrl(url)
+        if (clean.isBlank()) return ""
+        if (isDirectApkReleaseUrl(clean)) return clean
+        val qIdx = clean.indexOf('?')
+        val base = if (qIdx >= 0) clean.substring(0, qIdx) else clean
+        val baseWithSlash = if (!base.contains("?") && base.count { it == '/' } == 2) "$base/" else base
+        val keptParams = if (qIdx >= 0) {
+            clean.substring(qIdx + 1).split("&").filter { param ->
+                val key = param.substringBefore("=").lowercase()
+                key.isNotBlank() && key != "open_app" && key != "web"
+            }
+        } else {
+            emptyList()
+        }
+        val finalParams = keptParams + "web=1"
+        return "$baseWithSlash?${finalParams.joinToString("&")}"
+    }
+
+    /**
+     * Opens an HTTP/HTTPS URL strictly inside an external web browser (Chrome, Samsung Browser,
+     * Firefox, Opera, Edge, etc.), explicitly excluding this app's own MainActivity so Android
+     * deep-link filters NEVER hijack an APK Update or Live Storefront request back into the app.
+     */
+    fun openInExternalBrowserOnly(
+        context: Context,
+        url: String,
+        forceStayOnWebIfPortal: Boolean = true
+    ) {
+        val rawNorm = normalizeApkOrPortalUrl(url).ifBlank { normalizeWebUrl(url) }
+        if (rawNorm.isBlank()) return
+        val target = if (forceStayOnWebIfPortal && !isDirectApkReleaseUrl(rawNorm)) {
+            withStayOnWebParam(rawNorm)
+        } else {
+            rawNorm
+        }
+        val targetUri = Uri.parse(target)
         try {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(target)).apply {
+            val probeIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://deprosman-1.github.io/")).apply {
+                addCategory(Intent.CATEGORY_BROWSABLE)
+            }
+            @Suppress("DEPRECATION")
+            val browserMatches = context.packageManager.queryIntentActivities(
+                probeIntent,
+                PackageManager.MATCH_DEFAULT_ONLY
+            ).filter { info ->
+                val pkg = info.activityInfo?.packageName.orEmpty()
+                pkg.isNotBlank() &&
+                    pkg != context.packageName &&
+                    pkg != APP_PACKAGE &&
+                    pkg != "android"
+            }
+            val preferredPackages = listOf(
+                "com.android.chrome",
+                "com.sec.android.app.sbrowser",
+                "com.brave.browser",
+                "com.microsoft.emmx",
+                "com.opera.browser",
+                "com.opera.mini.native",
+                "org.mozilla.firefox"
+            )
+            val chosenBrowserPkg = preferredPackages.firstOrNull { pref ->
+                browserMatches.any { it.activityInfo?.packageName == pref }
+            } ?: browserMatches.firstOrNull()?.activityInfo?.packageName
+
+            if (!chosenBrowserPkg.isNullOrBlank()) {
+                val directBrowserIntent = Intent(Intent.ACTION_VIEW, targetUri).apply {
+                    addCategory(Intent.CATEGORY_BROWSABLE)
+                    `package` = chosenBrowserPkg
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(directBrowserIntent)
+                return
+            }
+
+            val baseIntent = Intent(Intent.ACTION_VIEW, targetUri).apply {
                 addCategory(Intent.CATEGORY_BROWSABLE)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            context.startActivity(intent)
+            val chooser = Intent.createChooser(baseIntent, "Open in Web Browser").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    putExtra(
+                        Intent.EXTRA_EXCLUDE_COMPONENTS,
+                        arrayOf(
+                            ComponentName(context.packageName, "com.example.MainActivity"),
+                            ComponentName(APP_PACKAGE, "com.example.MainActivity")
+                        )
+                    )
+                }
+            }
+            context.startActivity(chooser)
         } catch (e: Exception) {
-            Toast.makeText(context, "Could not open browser: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Could not open external browser: ${e.message}", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    fun openExternalUrl(context: Context, url: String) {
+        val trimmed = url.trim()
+        if (trimmed.startsWith("depros://", ignoreCase = true) ||
+            trimmed.startsWith("deprosboutique://", ignoreCase = true)
+        ) {
+            try {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(trimmed)).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                })
+            } catch (e: Exception) {
+                Toast.makeText(context, "Could not open app link: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
+        openInExternalBrowserOnly(context, trimmed, forceStayOnWebIfPortal = true)
     }
 
     /**
@@ -220,7 +327,12 @@ object WebPortalExporter {
         val escapedSbUrl = JSONObject.quote(sbUrl.trim())
         val escapedSbKey = JSONObject.quote(sbKey.trim())
         val escapedPkg = JSONObject.quote(APP_PACKAGE)
-        val cleanApkUrl = normalizeWebUrl(apkDownloadUrl)
+        val rawApkNorm = normalizeWebUrl(apkDownloadUrl)
+        val cleanApkUrl = if (isDirectApkReleaseUrl(rawApkNorm)) {
+            rawApkNorm
+        } else {
+            DEFAULT_GITHUB_APK_RELEASE_URL
+        }
         val escapedApkUrl = JSONObject.quote(cleanApkUrl)
         val cleanStoreName = storeName.trim().ifBlank { "ODIYA" }
         val safeHtmlName = cleanStoreName
@@ -229,8 +341,7 @@ object WebPortalExporter {
             .replace(">", "&gt;")
         val contactParts = listOfNotNull(
             storePhone.trim().takeIf { it.isNotBlank() }?.let { "📞 $it" },
-            storeAddress.trim().takeIf { it.isNotBlank() }?.let { "📍 $it" },
-            storeEmail.trim().takeIf { it.isNotBlank() }?.let { "✉️ $it" }
+            storeAddress.trim().takeIf { it.isNotBlank() }?.let { "📍 $it" }
         ).joinToString(" • ").ifBlank { "Real-Time Cloud Storefront" }
         val safeHtmlContact = contactParts
             .replace("&", "&amp;")
@@ -338,6 +449,8 @@ object WebPortalExporter {
     .btn-green { background: linear-gradient(135deg, #10B981, #047857); }
     .btn-gold { background: linear-gradient(135deg, #D97706, #B45309); }
     .btn-dark { background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.3); }
+    .btn-wish { background: rgba(255, 255, 255, 0.10); border: 1px solid rgba(255, 255, 255, 0.28); color: #FFFFFF; }
+    .btn-wish.saved { background: rgba(239, 68, 68, 0.26); border-color: #F87171; color: #FECACA; }
     .btn-sm { min-height: 38px; padding: 8px 12px; font-size: 13px; border-radius: 10px; }
     .status-note {
       margin-top: 12px;
@@ -353,7 +466,7 @@ object WebPortalExporter {
     }
     .tabs {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       gap: 8px;
       margin-bottom: 14px;
       position: sticky;
@@ -456,6 +569,7 @@ object WebPortalExporter {
       cursor: pointer;
     }
     .prod-body { padding: 11px; flex: 1; display: flex; flex-direction: column; justify-content: space-between; gap: 8px; }
+    .prod-actions { display: flex; flex-direction: column; gap: 6px; }
     .prod-cat { font-size: 11px; color: #A7F3D0; font-weight: 800; text-transform: uppercase; margin-bottom: 2px; }
     .prod-title { font-size: 14px; color: #FFFFFF; font-weight: 800; line-height: 1.3; margin-bottom: 4px; overflow-wrap: anywhere; cursor: pointer; }
     .prod-price { font-size: 15px; font-weight: 900; color: #FDE68A; }
@@ -567,7 +681,11 @@ object WebPortalExporter {
       .search { max-width: 100%; }
       .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
       .prod img { height: 135px; }
-      .tab-btn { font-size: 12px; padding: 6px 4px; }
+      .tabs { gap: 6px; padding: 6px; }
+      .tab-btn { font-size: 11.5px; padding: 6px 4px; }
+    }
+    @media (max-width: 480px) {
+      .tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     }
     @media (max-width: 390px) {
       .grid { grid-template-columns: minmax(0, 1fr); }
@@ -600,8 +718,42 @@ object WebPortalExporter {
 
     <div id="globalAlert" class="msg-banner"></div>
 
+    <div id="customerCredentialsPanel" class="card" style="padding:14px 16px;margin-bottom:12px;border-color:rgba(245,158,11,0.55);background:rgba(5,46,22,0.92);">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+        <div style="min-width:0;flex:1;">
+          <div style="font-size:11px;font-weight:900;letter-spacing:0.6px;color:#FDE68A;text-transform:uppercase;margin-bottom:4px;">
+            👤 Permanent Customer Credentials
+          </div>
+          <div id="savedCredentialsSummary" style="font-size:13px;font-weight:700;color:#FFFFFF;line-height:1.4;word-break:break-word;">
+            Tap Edit to save your Name, Phone Number &amp; Delivery Address permanently.
+          </div>
+        </div>
+        <button id="toggleCredEditBtn" type="button" class="btn btn-gold btn-sm" onclick="toggleCredentialsEditor()">✏️ Edit</button>
+      </div>
+      <div id="credentialsEditorForm" style="display:none;margin-top:12px;border-top:1px solid rgba(255,255,255,0.16);padding-top:12px;">
+        <div class="field-grid">
+          <div>
+            <label class="label" for="credName">Full Name *</label>
+            <input class="input" id="credName" placeholder="e.g. Chinedu Okafor" />
+          </div>
+          <div>
+            <label class="label" for="credPhone">Phone Number (WhatsApp) *</label>
+            <input class="input" id="credPhone" type="tel" placeholder="e.g. 08012345678" />
+          </div>
+        </div>
+        <div style="margin-bottom:10px;">
+          <label class="label" for="credAddress">Delivery Address (Street, City, State) *</label>
+          <input class="input" id="credAddress" placeholder="e.g. 14 Admiralty Way, Lekki Phase 1, Lagos" />
+        </div>
+        <button id="saveCredentialsBtn" type="button" class="btn btn-green btn-sm" style="width:100%;" onclick="savePermanentCredentialsForm()">
+          💾 Save Customer Credentials Permanently
+        </button>
+      </div>
+    </div>
+
     <nav class="tabs" aria-label="Storefront Sections">
       <button class="tab-btn active" data-tab="shop" onclick="switchTab('shop')">🛍️ Shop</button>
+      <button class="tab-btn" data-tab="wishlist" onclick="switchTab('wishlist')">❤️ Wishlist (<span id="wishlistTabCount">0</span>)</button>
       <button class="tab-btn" data-tab="cart" onclick="switchTab('cart')">🛒 Cart (<span id="cartTabCount">0</span>)</button>
       <button class="tab-btn" data-tab="track" onclick="switchTab('track')">📦 Track</button>
       <button class="tab-btn" data-tab="preorder" onclick="switchTab('preorder')">✨ Pre-Order</button>
@@ -615,6 +767,16 @@ object WebPortalExporter {
         </div>
         <div id="categoryChips" class="cats"></div>
         <div id="catalogContainer" class="empty">Connecting to live store inventory...</div>
+      </div>
+    </section>
+
+    <section id="panel-wishlist" class="panel">
+      <div class="card">
+        <div class="card-head">
+          <h2>❤️ Saved Wishlist Items</h2>
+          <button class="btn btn-dark btn-sm" onclick="clearWishlist()">Clear Wishlist</button>
+        </div>
+        <div id="wishlistContainer" class="empty">Your wishlist is empty. Tap &ldquo;Add to Wishlist&rdquo; on any product card!</div>
       </div>
     </section>
 
@@ -632,20 +794,17 @@ object WebPortalExporter {
               <span id="cartTotalText">₦0</span>
             </div>
             <div style="font-size:12px;color:#A7F3D0;margin-top:4px;">Instant sync to $safeHtmlName Admin &amp; verified Paystack checkout</div>
+            <div id="webSplitBanner" style="display:none;margin-top:6px;font-size:11.5px;color:#FDE68A;font-weight:700;"></div>
           </div>
 
           <div class="field-grid">
             <div>
               <label class="label" for="coName">Full Name *</label>
-              <input class="input" id="coName" placeholder="e.g. Chinedu Okafor" />
+              <input class="input" id="coName" placeholder="e.g. Chinedu Okafor" oninput="syncPermanentCustomerCredentials('co')" />
             </div>
             <div>
               <label class="label" for="coPhone">Phone Number (WhatsApp) *</label>
-              <input class="input" id="coPhone" type="tel" placeholder="e.g. 08012345678" />
-            </div>
-            <div>
-              <label class="label" for="coEmail">Email Address (for Receipt) *</label>
-              <input class="input" id="coEmail" type="email" placeholder="customer@example.com" />
+              <input class="input" id="coPhone" type="tel" placeholder="e.g. 08012345678" oninput="syncPermanentCustomerCredentials('co')" />
             </div>
             <div>
               <label class="label" for="coPayment">Payment Method *</label>
@@ -659,7 +818,7 @@ object WebPortalExporter {
 
           <div style="margin-bottom:10px;">
             <label class="label" for="coAddress">Delivery Address (Street, City, State) *</label>
-            <input class="input" id="coAddress" placeholder="e.g. 14 Admiralty Way, Lekki Phase 1, Lagos" />
+            <input class="input" id="coAddress" placeholder="e.g. 14 Admiralty Way, Lekki Phase 1, Lagos" oninput="syncPermanentCustomerCredentials('co')" />
           </div>
 
           <div id="transferSenderRow" style="display:none;margin-bottom:10px;">
@@ -703,11 +862,11 @@ object WebPortalExporter {
         <div class="field-grid">
           <div>
             <label class="label" for="poName">Your Full Name *</label>
-            <input class="input" id="poName" placeholder="e.g. Amina Bello" />
+            <input class="input" id="poName" placeholder="e.g. Amina Bello" oninput="syncPermanentCustomerCredentials('po')" />
           </div>
           <div>
             <label class="label" for="poPhone">Your Phone Number *</label>
-            <input class="input" id="poPhone" type="tel" placeholder="e.g. 08099887766" />
+            <input class="input" id="poPhone" type="tel" placeholder="e.g. 08099887766" oninput="syncPermanentCustomerCredentials('po')" />
           </div>
           <div>
             <label class="label" for="poProduct">Product Name *</label>
@@ -803,6 +962,7 @@ object WebPortalExporter {
         </div>
       </div>
       <button id="pmAddBtn" class="btn btn-cyan" style="width:100%;" onclick="confirmAddFromModal()">🛒 Add to Cart</button>
+      <button id="pmWishBtn" class="btn btn-wish" style="width:100%;margin-top:8px;" onclick="toggleWishlistFromModal()">🤍 Add to Wishlist</button>
     </div>
   </div>
 
@@ -824,13 +984,15 @@ object WebPortalExporter {
     const ua = navigator.userAgent || "";
     const isAndroid = /Android/i.test(ua);
     const isIOS = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-    const isAltBrowser = /OPR|Opera|Opera Mini|UCBrowser|PHX|SamsungBrowser|MiuiBrowser|VivoBrowser|HeyTapBrowser|YaBrowser|Firefox|FxiOS|EdgA|wv\b/i.test(ua);
-    const isChromeAndroid = isAndroid && /\bChrome\/\d+/i.test(ua) && !isAltBrowser;
+    const isAltBrowser = /OPR|Opera|Opera Mini|UCBrowser|PHX|SamsungBrowser|MiuiBrowser|VivoBrowser|HeyTapBrowser|YaBrowser|Firefox|FxiOS|EdgA/i.test(ua);
+    const isWebView = /\bwv\b|Instagram|FBAN|FBAV|WhatsApp/i.test(ua);
+    const isChromeAndroid = isAndroid && /\bChrome\/\d+/i.test(ua) && !isAltBrowser && !isWebView;
 
     const apkBtn = document.getElementById("downloadApkBtn");
     const openBtn = document.getElementById("openAppBtn");
     const copyBtn = document.getElementById("copySyncBtn");
     const installBtn = document.getElementById("installWebBtn");
+    const statusNote = document.getElementById("syncStatusNote");
     const cleanApkUrl = (typeof APK_DOWNLOAD_URL === "string" ? APK_DOWNLOAD_URL.trim() : "");
 
     if (isIOS) {
@@ -840,6 +1002,7 @@ object WebPortalExporter {
       installBtn.innerText = "📱 Install on iPhone (Safari)";
     } else if (cleanApkUrl && /^https?:\/\/[^\s<>]+$/i.test(cleanApkUrl) && !cleanApkUrl.includes("<")) {
       apkBtn.href = cleanApkUrl;
+      apkBtn.setAttribute("download", "Odiya_Official.apk");
       apkBtn.style.display = "flex";
     } else {
       apkBtn.removeAttribute("href");
@@ -863,33 +1026,45 @@ object WebPortalExporter {
       ? ("intent://connect?sb_url=" + encodeURIComponent(sbUrl) + "&sb_key=" + encodeURIComponent(sbKey) + "#Intent;scheme=depros;package=" + ANDROID_PACKAGE + fbSuffix + ";end")
       : ("intent://open#Intent;scheme=depros;package=" + ANDROID_PACKAGE + fbSuffix + ";end");
 
-    openBtn.href = isChromeAndroid ? androidIntentLink : customSchemeLink;
+    openBtn.href = (isChromeAndroid || isWebView) ? androidIntentLink : customSchemeLink;
 
     openBtn.addEventListener("click", function(e) {
-      if (isAndroid && !isChromeAndroid) {
+      if (isAndroid) {
         e.preventDefault();
         let leftPage = false;
         const onHide = function() { if (document.hidden) leftPage = true; };
         document.addEventListener("visibilitychange", onHide, { once: true });
-        try { window.location.href = customSchemeLink; } catch (_) {}
+        try {
+          window.location.href = (isChromeAndroid || isWebView) ? androidIntentLink : customSchemeLink;
+        } catch (_) {}
+        if (!isChromeAndroid) {
+          setTimeout(function() {
+            if (!leftPage && !document.hidden) {
+              try { window.location.href = customSchemeLink; } catch (_) {}
+            }
+          }, 260);
+        }
         setTimeout(function() {
           document.removeEventListener("visibilitychange", onHide);
-          if (!leftPage && !document.hidden) {
-            const note = document.getElementById("syncStatusNote");
-            if (note) {
-              note.innerHTML = "⚠️ <strong>App not installed yet?</strong> Shop directly right here below on the web!";
-            }
+          if (!leftPage && !document.hidden && statusNote) {
+            statusNote.innerHTML = "⚠️ <strong>App not opening from this browser?</strong> Tap <strong>Copy Store Sync Link</strong> above &rarr; paste inside ODIYA &rarr; <strong>Account &rarr; Link Now</strong>, or tap <strong>Download Android APK</strong>!";
           }
-        }, 1200);
+        }, 1500);
       }
     });
 
     const stayOnWeb = params.get("web") === "1";
     const isHttpsOrigin = window.location.protocol === "https:" || window.location.protocol === "http:";
-    if (isChromeAndroid && isHttpsOrigin && !window.AndroidBridge && !stayOnWeb && (params.get("open_app") === "1" || params.has("sb_url"))) {
+    if (stayOnWeb && isAndroid && statusNote) {
+      statusNote.innerHTML = "⬇️ <strong>Update / APK Storefront Mode:</strong> Tap <strong>Download Android APK</strong> above to install the newest ODIYA build cleanly, or tap <strong>Open $safeHtmlName App</strong> anytime.";
+    }
+    const wantsAutoLaunch = params.get("open_app") === "1" || params.has("sb_url") || params.get("open") === "1";
+    if (isAndroid && isHttpsOrigin && !window.AndroidBridge && !stayOnWeb && wantsAutoLaunch) {
       setTimeout(function() {
-        try { window.location.href = androidIntentLink; } catch (_) {}
-      }, 120);
+        try {
+          window.location.href = (isChromeAndroid || isWebView) ? androidIntentLink : customSchemeLink;
+        } catch (_) {}
+      }, 80);
     }
 
     if (!sbUrl || !sbKey) {
@@ -982,6 +1157,7 @@ object WebPortalExporter {
         p.classList.toggle("active", p.id === "panel-" + tabName);
       });
       if (tabName === "cart") renderCart();
+      if (tabName === "wishlist") renderWishlist();
       if (tabName === "track" && !document.getElementById("trackQuery").value) {
         const savedPhone = localStorage.getItem("odiya_customer_phone") || "";
         const savedOrd = localStorage.getItem("odiya_last_order_id") || "";
@@ -997,6 +1173,131 @@ object WebPortalExporter {
           loadMyPreOrders();
         }
       }
+    }
+
+    let wishlist = [];
+    try {
+      wishlist = JSON.parse(localStorage.getItem("odiya_web_wishlist") || "[]");
+      if (!Array.isArray(wishlist)) wishlist = [];
+    } catch (_) { wishlist = []; }
+
+    function saveWishlist() {
+      try { localStorage.setItem("odiya_web_wishlist", JSON.stringify(wishlist)); } catch (_) {}
+      updateWishlistBadge();
+      if (allProducts.length) renderProducts();
+      renderWishlist();
+      syncModalWishlistButton();
+    }
+
+    function updateWishlistBadge() {
+      const countEl = document.getElementById("wishlistTabCount");
+      if (countEl) countEl.innerText = String(wishlist.length);
+    }
+
+    function isInWishlist(productId) {
+      return wishlist.some(function(item) { return item && item.id === productId; });
+    }
+
+    function findKnownProduct(productId) {
+      return allProducts.find(function(x) { return x.id === productId; }) ||
+        wishlist.find(function(x) { return x && x.id === productId; }) ||
+        null;
+    }
+
+    function toggleWishlistProduct(productId) {
+      const idx = wishlist.findIndex(function(item) { return item && item.id === productId; });
+      if (idx >= 0) {
+        const removed = wishlist[idx];
+        wishlist.splice(idx, 1);
+        saveWishlist();
+        showGlobalAlert("Removed '" + ((removed && removed.title) || "Item") + "' from Wishlist.", true);
+        return;
+      }
+      const p = findKnownProduct(productId);
+      if (!p) return;
+      wishlist.unshift({
+        id: p.id,
+        title: p.title || "Item",
+        category: p.category || "ODIYA",
+        brand: p.brand || "ODIYA",
+        available_brands: p.available_brands || "",
+        available_sizes: p.available_sizes || "",
+        available_colors: p.available_colors || "",
+        base_price: Number(p.base_price || 0),
+        discount_percent: Number(p.discount_percent || 0),
+        stock_quantity: Number(p.stock_quantity || 0),
+        image_url: p.image_url || "",
+        description: p.description || "",
+        is_catalog_locked: p.is_catalog_locked === true,
+        partner_id: p.partner_id || "",
+        partner_name: p.partner_name || "",
+        partner_commission_percent: Number(p.partner_commission_percent || 0),
+        savedAt: Date.now()
+      });
+      saveWishlist();
+      showGlobalAlert("❤️ Saved '" + (p.title || "Item") + "' to your Wishlist!", true);
+    }
+
+    function toggleWishlistFromModal() {
+      if (!modalProduct || !modalProduct.id) return;
+      toggleWishlistProduct(modalProduct.id);
+    }
+
+    function syncModalWishlistButton() {
+      const btn = document.getElementById("pmWishBtn");
+      if (!btn || !modalProduct) return;
+      const saved = isInWishlist(modalProduct.id);
+      btn.className = "btn btn-wish" + (saved ? " saved" : "");
+      btn.innerText = saved ? "❤️ Saved in Wishlist (Tap to Remove)" : "🤍 Add to Wishlist";
+    }
+
+    function clearWishlist() {
+      wishlist = [];
+      saveWishlist();
+      showGlobalAlert("Wishlist cleared.", true);
+    }
+
+    function renderWishlist() {
+      const box = document.getElementById("wishlistContainer");
+      if (!box) return;
+      if (!wishlist.length) {
+        box.className = "empty";
+        box.innerText = "Your wishlist is empty. Tap \"Add to Wishlist\" on any product card!";
+        return;
+      }
+      box.className = "grid";
+      box.innerHTML = wishlist.map(function(savedItem) {
+        const p = allProducts.find(function(x) { return x.id === savedItem.id; }) || savedItem;
+        const base = Math.round(Number(p.base_price || 0));
+        const finalPrice = effectivePrice(p);
+        const disc = Number(p.discount_percent || 0);
+        const stock = Number(p.stock_quantity || 0);
+        const locked = p.is_catalog_locked === true || stock <= 0;
+        const rawUrl = (p.image_url || "").trim();
+        const hasHttpImg = rawUrl.startsWith("http://") || rawUrl.startsWith("https://");
+        const safeId = escapeHtml(p.id).replace(/'/g, "\\'");
+        const mediaHtml = hasHttpImg
+          ? '<img src="' + escapeHtml(rawUrl) + '" alt="' + escapeHtml(p.title) + '" loading="lazy" onclick="openProductModal(\'' + safeId + '\')" onerror="this.onerror=null;this.style.visibility=\'hidden\';" />'
+          : '<div onclick="openProductModal(\'' + safeId + '\')" style="width:100%;height:140px;background:#052E16;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.65);font-size:13px;font-weight:700;cursor:pointer;">ODIYA Item</div>';
+        const priceHtml = '₦' + finalPrice.toLocaleString("en-NG") + (disc > 0 ? '<span class="prod-old">₦' + base.toLocaleString("en-NG") + '</span>' : '');
+        const cartBtnHtml = locked
+          ? '<button class="btn btn-dark btn-sm" disabled>Unavailable</button>'
+          : '<button class="btn btn-cyan btn-sm" onclick="quickAddProduct(\'' + safeId + '\')">+ Add to Cart</button>';
+        return '<div class="prod">' +
+          mediaHtml +
+          '<div class="prod-body">' +
+            '<div>' +
+              '<div class="prod-cat">' + escapeHtml(p.category || "Odiya") + (disc > 0 ? ' • -' + disc + '%' : '') + '</div>' +
+              '<div class="prod-title" onclick="openProductModal(\'' + safeId + '\')">' + escapeHtml(p.title || "Item") + '</div>' +
+              '<div class="prod-price">' + priceHtml + '</div>' +
+            '</div>' +
+            '<div class="prod-actions">' +
+              cartBtnHtml +
+              '<button class="btn btn-wish saved btn-sm" onclick="toggleWishlistProduct(\'' + safeId + '\')">✕ Remove</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      }).join("");
     }
 
     let cart = [];
@@ -1039,6 +1340,7 @@ object WebPortalExporter {
     }
 
     let allProducts = [];
+    let allPartners = [];
     let selectedCategory = "All";
     let modalProduct = null;
 
@@ -1049,13 +1351,22 @@ object WebPortalExporter {
         return;
       }
       try {
-        const res = await fetch(sbUrl + "/rest/v1/products?select=id,title,category,brand,available_brands,available_sizes,available_colors,base_price,discount_percent,stock_quantity,image_url,description,is_catalog_locked&order=created_at.desc.nullslast&limit=100", {
+        const res = await fetch(sbUrl + "/rest/v1/products?select=id,title,category,brand,available_brands,available_sizes,available_colors,base_price,discount_percent,stock_quantity,image_url,description,is_catalog_locked,partner_id,partner_name,partner_commission_percent&order=created_at.desc.nullslast&limit=100", {
           headers: sbHeaders()
         });
         if (!res.ok) throw new Error("HTTP " + res.status);
         allProducts = await res.json();
+        try {
+          const pRes = await fetch(sbUrl + "/storage/v1/object/public/shop-receipts/partners_ledger.json?t=" + Date.now());
+          if (pRes.ok) {
+            const pJson = await pRes.json();
+            if (pJson && Array.isArray(pJson.organizations)) allPartners = pJson.organizations;
+          }
+        } catch (_) {}
         renderCategoryChips();
         renderProducts();
+        renderWishlist();
+        renderCart();
       } catch (err) {
         container.innerHTML = '<div class="empty">Could not load live catalog (' + escapeHtml(err.message) + '). Check internet connection and refresh.</div>';
       }
@@ -1101,29 +1412,36 @@ object WebPortalExporter {
         const locked = p.is_catalog_locked === true || stock <= 0;
         const rawUrl = (p.image_url || "").trim();
         const hasHttpImg = rawUrl.startsWith("http://") || rawUrl.startsWith("https://");
+        const safeId = escapeHtml(p.id).replace(/'/g, "\\'");
+        const inWish = isInWishlist(p.id);
         const mediaHtml = hasHttpImg
-          ? '<img src="' + escapeHtml(rawUrl) + '" alt="' + escapeHtml(p.title) + '" loading="lazy" onclick="openProductModal(\'' + escapeHtml(p.id).replace(/'/g, "\\'") + '\')" onerror="this.onerror=null;this.style.visibility=\'hidden\';" />'
-          : '<div onclick="openProductModal(\'' + escapeHtml(p.id).replace(/'/g, "\\'") + '\')" style="width:100%;height:140px;background:#052E16;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.65);font-size:13px;font-weight:700;cursor:pointer;">ODIYA Item</div>';
+          ? '<img src="' + escapeHtml(rawUrl) + '" alt="' + escapeHtml(p.title) + '" loading="lazy" onclick="openProductModal(\'' + safeId + '\')" onerror="this.onerror=null;this.style.visibility=\'hidden\';" />'
+          : '<div onclick="openProductModal(\'' + safeId + '\')" style="width:100%;height:140px;background:#052E16;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.65);font-size:13px;font-weight:700;cursor:pointer;">ODIYA Item</div>';
         const priceHtml = '₦' + finalPrice.toLocaleString("en-NG") + (disc > 0 ? '<span class="prod-old">₦' + base.toLocaleString("en-NG") + '</span>' : '');
         const btnHtml = locked
           ? '<button class="btn btn-dark btn-sm" disabled>Unavailable</button>'
-          : '<button class="btn btn-cyan btn-sm" onclick="quickAddProduct(\'' + escapeHtml(p.id).replace(/'/g, "\\'") + '\')">+ Add to Cart</button>';
+          : '<button class="btn btn-cyan btn-sm" onclick="quickAddProduct(\'' + safeId + '\')">+ Add to Cart</button>';
+        const wishBtnHtml = '<button class="btn btn-wish' + (inWish ? ' saved' : '') + ' btn-sm" onclick="toggleWishlistProduct(\'' + safeId + '\')">' +
+          (inWish ? '❤️ Saved in Wishlist' : '🤍 Add to Wishlist') + '</button>';
         return '<div class="prod">' +
           mediaHtml +
           '<div class="prod-body">' +
             '<div>' +
               '<div class="prod-cat">' + escapeHtml(p.category || "Odiya") + (disc > 0 ? ' • -' + disc + '%' : '') + '</div>' +
-              '<div class="prod-title" onclick="openProductModal(\'' + escapeHtml(p.id).replace(/'/g, "\\'") + '\')">' + escapeHtml(p.title || "Item") + '</div>' +
+              '<div class="prod-title" onclick="openProductModal(\'' + safeId + '\')">' + escapeHtml(p.title || "Item") + '</div>' +
               '<div class="prod-price">' + priceHtml + '</div>' +
             '</div>' +
-            btnHtml +
+            '<div class="prod-actions">' +
+              btnHtml +
+              wishBtnHtml +
+            '</div>' +
           '</div>' +
         '</div>';
       }).join("");
     }
 
     function quickAddProduct(productId) {
-      const p = allProducts.find(function(x) { return x.id === productId; });
+      const p = findKnownProduct(productId);
       if (!p) return;
       const brand = parseList(p.available_brands, [p.brand || "ODIYA"])[0];
       const size = parseList(p.available_sizes, ["Standard"])[0];
@@ -1133,7 +1451,7 @@ object WebPortalExporter {
     }
 
     function openProductModal(productId) {
-      const p = allProducts.find(function(x) { return x.id === productId; });
+      const p = findKnownProduct(productId);
       if (!p) return;
       modalProduct = p;
       document.getElementById("pmTitle").innerText = p.title || "Product";
@@ -1155,6 +1473,7 @@ object WebPortalExporter {
       document.getElementById("pmColor").innerHTML = parseColors(p.available_colors).map(function(v) { return '<option>' + escapeHtml(v) + '</option>'; }).join("");
       document.getElementById("pmQty").value = "1";
       document.getElementById("pmAddBtn").disabled = locked;
+      syncModalWishlistButton();
       document.getElementById("productModal").classList.add("open");
     }
 
@@ -1180,10 +1499,93 @@ object WebPortalExporter {
       });
       if (existing) {
         existing.qty = Number(existing.qty || 1) + qty;
+        existing.partnerId = p.partner_id || existing.partnerId || "";
+        existing.partnerName = p.partner_name || existing.partnerName || "";
+        existing.commissionPct = Number(p.partner_commission_percent || existing.commissionPct || 0);
       } else {
-        cart.push({ id: p.id, title: p.title, brand: brand, size: size, color: color, unitPrice: unitPrice, qty: qty });
+        cart.push({
+          id: p.id,
+          title: p.title,
+          brand: brand,
+          size: size,
+          color: color,
+          unitPrice: unitPrice,
+          qty: qty,
+          partnerId: p.partner_id || "",
+          partnerName: p.partner_name || "",
+          commissionPct: Number(p.partner_commission_percent || 0)
+        });
       }
       saveCart();
+    }
+
+    function computeWebPaystackSplit() {
+      const totalAmountNaira = cart.reduce(function(s, i) { return s + Number(i.unitPrice || 0) * Number(i.qty || 1); }, 0);
+      const groups = {};
+      cart.forEach(function(item) {
+        const prodMatch = allProducts.find(function(p) { return p.id === item.id; });
+        const pid = String(item.partnerId || (prodMatch && prodMatch.partner_id) || "").trim();
+        if (!pid) return;
+        if (!groups[pid]) groups[pid] = [];
+        groups[pid].push({ item: item, prod: prodMatch });
+      });
+      const allocations = [];
+      let totalCommission = 0;
+      let totalHostingOffset = 0;
+      let totalPartnerNet = 0;
+
+      Object.keys(groups).forEach(function(pid) {
+        const org = allPartners.find(function(o) { return o.id === pid; });
+        const entries = groups[pid];
+        const partnerName = (org && org.businessName) || (entries[0].item.partnerName) || (entries[0].prod && entries[0].prod.partner_name) || "Partner";
+        let grossNaira = 0;
+        let commNaira = 0;
+        entries.forEach(function(e) {
+          const line = Number(e.item.unitPrice || 0) * Number(e.item.qty || 1);
+          const pctRaw = Number(e.item.commissionPct || (e.prod && e.prod.partner_commission_percent) || (org && org.stipulatedCommissionPercent) || 10);
+          const pct = Math.max(0, Math.min(95, pctRaw));
+          grossNaira += line;
+          commNaira += line * (pct / 100);
+        });
+        const rawNet = Math.max(0, grossNaira - commNaira);
+        const dueHost = (org && org.autoDeductHostingFromPaystackSplit !== false) ? Math.max(0, Number(org.pendingHostingFeeBalance || 0)) : 0;
+        const hostOffset = Math.min(rawNet, dueHost);
+        const netNaira = Math.max(0, rawNet - hostOffset);
+        const subCode = org && org.paystackSubaccountCode ? String(org.paystackSubaccountCode).trim() : "";
+
+        totalCommission += commNaira;
+        totalHostingOffset += hostOffset;
+        totalPartnerNet += netNaira;
+
+        allocations.push({
+          partner_id: pid,
+          partner_name: partnerName,
+          subaccount: subCode,
+          partner_net_kobo: Math.max(0, Math.round(netNaira * 100)),
+          commission_kobo: Math.max(0, Math.round(commNaira * 100)),
+          hosting_offset_kobo: Math.max(0, Math.round(hostOffset * 100)),
+          partnerNetNaira: netNaira
+        });
+      });
+
+      const active = allocations.filter(function(a) { return a.subaccount.indexOf("ACCT_") === 0 && a.partner_net_kobo >= 100; });
+      const splitMode = active.length >= 2 ? "PARTNER_MULTI_SPLIT" : (active.length === 1 ? "PARTNER_SUBACCOUNT" : "STANDARD");
+      const amountKobo = Math.max(100, Math.round(totalAmountNaira * 100));
+      const odiyaShareNaira = Math.max(0, totalAmountNaira - totalPartnerNet);
+      return {
+        splitMode: splitMode,
+        amountKobo: amountKobo,
+        odiyaShareKobo: Math.max(0, Math.round(odiyaShareNaira * 100)),
+        odiyaCommissionKobo: Math.max(0, Math.round(totalCommission * 100)),
+        hostingFeeKobo: Math.max(0, Math.round(totalHostingOffset * 100)),
+        partnerNetKobo: Math.max(0, Math.round(totalPartnerNet * 100)),
+        odiyaShareNaira: odiyaShareNaira,
+        odiyaCommissionNaira: totalCommission,
+        hostingOffsetNaira: totalHostingOffset,
+        totalPartnerNetNaira: totalPartnerNet,
+        allocations: allocations,
+        activeAllocations: active
+      };
     }
 
     function changeCartQty(idx, delta) {
@@ -1233,10 +1635,124 @@ object WebPortalExporter {
       }).join("");
       document.getElementById("cartTotalText").innerText = "₦" + Math.round(total).toLocaleString("en-NG");
 
-      if (!document.getElementById("coName").value) document.getElementById("coName").value = localStorage.getItem("odiya_customer_name") || "";
-      if (!document.getElementById("coPhone").value) document.getElementById("coPhone").value = localStorage.getItem("odiya_customer_phone") || "";
-      if (!document.getElementById("coEmail").value) document.getElementById("coEmail").value = localStorage.getItem("odiya_customer_email") || "";
-      if (!document.getElementById("coAddress").value) document.getElementById("coAddress").value = localStorage.getItem("odiya_customer_addr") || "";
+      const splitBanner = document.getElementById("webSplitBanner");
+      if (splitBanner) {
+        const sp = computeWebPaystackSplit();
+        if (sp.allocations.length > 0) {
+          splitBanner.style.display = "block";
+          splitBanner.innerText = (sp.activeAllocations.length > 0 ? "⚡ Paystack Auto-Split: " : "Partner Split Summary: ") +
+            "ODIYA ₦" + Math.round(sp.odiyaShareNaira).toLocaleString("en-NG") +
+            " • Partner Net ₦" + Math.round(sp.totalPartnerNetNaira).toLocaleString("en-NG");
+        } else {
+          splitBanner.style.display = "none";
+        }
+      }
+
+      applyPermanentCustomerCredentials();
+    }
+
+    function getSavedCustomerCredentials() {
+      return {
+        name: (localStorage.getItem("odiya_customer_name") || "").trim(),
+        phone: (localStorage.getItem("odiya_customer_phone") || "").trim(),
+        address: (localStorage.getItem("odiya_customer_addr") || "").trim()
+      };
+    }
+
+    function renderSavedCredentialsCard() {
+      const creds = getSavedCustomerCredentials();
+      const summary = document.getElementById("savedCredentialsSummary");
+      const editor = document.getElementById("credentialsEditorForm");
+      const toggleBtn = document.getElementById("toggleCredEditBtn");
+      if (!summary) return;
+      if (creds.name || creds.phone || creds.address) {
+        const parts = [];
+        if (creds.name) parts.push("👤 " + escapeHtml(creds.name));
+        if (creds.phone) parts.push("📞 " + escapeHtml(creds.phone));
+        if (creds.address) parts.push("📍 " + escapeHtml(creds.address));
+        summary.innerHTML = parts.join(" &nbsp;•&nbsp; ");
+        if (toggleBtn) toggleBtn.innerText = (editor && editor.style.display === "block") ? "Hide" : "✏️ Edit";
+      } else {
+        summary.innerHTML = 'No saved credentials yet — enter your <strong>Name</strong>, <strong>Phone</strong> &amp; <strong>Address</strong> once to keep them permanently on this storefront.';
+        if (editor) editor.style.display = "block";
+        if (toggleBtn) toggleBtn.innerText = "Hide";
+      }
+      const credName = document.getElementById("credName");
+      const credPhone = document.getElementById("credPhone");
+      const credAddress = document.getElementById("credAddress");
+      if (credName && document.activeElement !== credName) credName.value = creds.name;
+      if (credPhone && document.activeElement !== credPhone) credPhone.value = creds.phone;
+      if (credAddress && document.activeElement !== credAddress) credAddress.value = creds.address;
+    }
+
+    function applyPermanentCustomerCredentials() {
+      const creds = getSavedCustomerCredentials();
+      const targets = [
+        ["coName", creds.name],
+        ["coPhone", creds.phone],
+        ["coAddress", creds.address],
+        ["poName", creds.name],
+        ["poPhone", creds.phone],
+        ["poLookupPhone", creds.phone],
+        ["trackQuery", creds.phone]
+      ];
+      targets.forEach(function(pair) {
+        const el = document.getElementById(pair[0]);
+        if (el && !el.value && pair[1] && document.activeElement !== el) {
+          el.value = pair[1];
+        }
+      });
+      renderSavedCredentialsCard();
+    }
+
+    function syncPermanentCustomerCredentials(source) {
+      const nameEl = document.getElementById(source === "po" ? "poName" : "coName");
+      const phoneEl = document.getElementById(source === "po" ? "poPhone" : "coPhone");
+      const addrEl = document.getElementById("coAddress");
+      if (nameEl && nameEl.value.trim()) localStorage.setItem("odiya_customer_name", nameEl.value.trim());
+      if (phoneEl && phoneEl.value.trim()) localStorage.setItem("odiya_customer_phone", phoneEl.value.trim());
+      if (addrEl && addrEl.value.trim()) localStorage.setItem("odiya_customer_addr", addrEl.value.trim());
+      renderSavedCredentialsCard();
+    }
+
+    function toggleCredentialsEditor() {
+      const editor = document.getElementById("credentialsEditorForm");
+      const toggleBtn = document.getElementById("toggleCredEditBtn");
+      if (!editor) return;
+      const open = editor.style.display !== "block";
+      editor.style.display = open ? "block" : "none";
+      if (toggleBtn) toggleBtn.innerText = open ? "Hide" : "✏️ Edit";
+    }
+
+    function savePermanentCredentialsForm() {
+      const name = (document.getElementById("credName").value || "").trim();
+      const phone = (document.getElementById("credPhone").value || "").trim();
+      const address = (document.getElementById("credAddress").value || "").trim();
+      if (!name || !phone) {
+        showGlobalAlert("Please enter at least your Full Name and Phone Number.", false);
+        return;
+      }
+      localStorage.setItem("odiya_customer_name", name);
+      localStorage.setItem("odiya_customer_phone", phone);
+      localStorage.setItem("odiya_customer_addr", address);
+      const coName = document.getElementById("coName");
+      const coPhone = document.getElementById("coPhone");
+      const coAddr = document.getElementById("coAddress");
+      const poName = document.getElementById("poName");
+      const poPhone = document.getElementById("poPhone");
+      const poLookup = document.getElementById("poLookupPhone");
+      const trk = document.getElementById("trackQuery");
+      if (coName) coName.value = name;
+      if (coPhone) coPhone.value = phone;
+      if (coAddr) coAddr.value = address;
+      if (poName) poName.value = name;
+      if (poPhone) poPhone.value = phone;
+      if (poLookup) poLookup.value = phone;
+      if (trk) trk.value = phone;
+      const editor = document.getElementById("credentialsEditorForm");
+      if (editor) editor.style.display = "none";
+      renderSavedCredentialsCard();
+      showGlobalAlert("✅ Customer credentials saved permanently on this storefront!", true);
     }
 
     async function submitCheckout() {
@@ -1250,13 +1766,12 @@ object WebPortalExporter {
       }
       const name = document.getElementById("coName").value.trim();
       const phone = document.getElementById("coPhone").value.trim();
-      const email = document.getElementById("coEmail").value.trim();
       const address = document.getElementById("coAddress").value.trim();
       const method = document.getElementById("coPayment").value;
       const sender = document.getElementById("coSender").value.trim();
 
-      if (!name || !phone || !address || !email || email.indexOf("@") === -1) {
-        showGlobalAlert("Please enter your full name, phone number, valid email address, and delivery address.", false);
+      if (!name || !phone || !address) {
+        showGlobalAlert("Please enter your full name, phone number, and delivery address.", false);
         return;
       }
 
@@ -1264,6 +1779,8 @@ object WebPortalExporter {
       const itemsSummary = cart.map(function(i) { return i.qty + "x " + i.title + " (" + i.brand + ", " + i.size + ", " + i.color + ")"; }).join("; ");
       const orderId = "ORD-WEB-" + Date.now().toString().slice(-8);
       const custId = "web-" + phone.replace(/\D/g, "").slice(-10);
+      const phoneDigits = phone.replace(/\D/g, "").slice(-11) || orderId.slice(-10).toLowerCase();
+      const paystackReceiptEmail = "customer." + phoneDigits + "@odiya.store";
       const ref = method === "PAYSTACK"
         ? ("PSKODY-" + orderId.slice(-7) + "-" + Math.random().toString(36).slice(2, 8).toUpperCase())
         : (sender || ("TRF-" + orderId.slice(-6)));
@@ -1275,9 +1792,9 @@ object WebPortalExporter {
       try {
         localStorage.setItem("odiya_customer_name", name);
         localStorage.setItem("odiya_customer_phone", phone);
-        localStorage.setItem("odiya_customer_email", email);
         localStorage.setItem("odiya_customer_addr", address);
         localStorage.setItem("odiya_last_order_id", orderId);
+        applyPermanentCustomerCredentials();
 
         await fetch(sbUrl + "/rest/v1/customers?on_conflict=id", {
           method: "POST",
@@ -1285,7 +1802,7 @@ object WebPortalExporter {
           body: JSON.stringify({
             id: custId,
             full_name: name,
-            email: email,
+            email: "",
             phone_number: phone,
             delivery_address: address,
             created_at: Date.now()
@@ -1296,7 +1813,7 @@ object WebPortalExporter {
           order_id: orderId,
           customer_id: custId,
           customer_name: name,
-          customer_email: email,
+          customer_email: "",
           customer_phone: phone,
           delivery_address: address,
           items_summary: itemsSummary,
@@ -1322,18 +1839,54 @@ object WebPortalExporter {
         if (method === "PAYSTACK") {
           btn.innerText = "🔒 Redirecting to Paystack...";
           const cleanBase = window.location.href.split("?")[0];
+          const splitPlan = computeWebPaystackSplit();
+          const primaryAlloc = splitPlan.activeAllocations[0] || splitPlan.allocations[0] || null;
+          const psBody = {
+            order_id: orderId,
+            reference: ref,
+            amount: splitPlan.amountKobo,
+            amount_naira: total,
+            currency: "NGN",
+            email: paystackReceiptEmail,
+            callback_url: cleanBase + "?paystack_ref=" + encodeURIComponent(ref) + "&order_id=" + encodeURIComponent(orderId),
+            purpose: "ORDER_CHECKOUT",
+            split_mode: splitPlan.splitMode,
+            bearer: "account",
+            metadata: {
+              order_id: orderId,
+              purpose: "ORDER_CHECKOUT",
+              split_mode: splitPlan.splitMode,
+              odiya_share_kobo: splitPlan.odiyaShareKobo,
+              odiya_commission_kobo: splitPlan.odiyaCommissionKobo,
+              hosting_fee_kobo: splitPlan.hostingFeeKobo,
+              partner_net_kobo: splitPlan.partnerNetKobo,
+              customer_name: name,
+              customer_phone: phone,
+              platform: "web_ios_safari"
+            }
+          };
+          if (primaryAlloc) {
+            psBody.partner_id = primaryAlloc.partner_id;
+            psBody.partner_name = primaryAlloc.partner_name;
+            psBody.metadata.partner_id = primaryAlloc.partner_id;
+            psBody.metadata.partner_name = primaryAlloc.partner_name;
+          }
+          if (splitPlan.activeAllocations.length > 0) {
+            psBody.odiya_share_kobo = splitPlan.odiyaShareKobo;
+            psBody.odiya_commission_kobo = splitPlan.odiyaCommissionKobo;
+            psBody.hosting_fee_kobo = splitPlan.hostingFeeKobo;
+            psBody.split_allocations = splitPlan.activeAllocations;
+            if (splitPlan.activeAllocations.length === 1) {
+              const single = splitPlan.activeAllocations[0];
+              psBody.subaccount = single.subaccount;
+              const txCharge = Math.max(0, splitPlan.amountKobo - single.partner_net_kobo);
+              if (txCharge > 0) psBody.transaction_charge = txCharge;
+            }
+          }
           const initRes = await fetch(sbUrl + "/functions/v1/paystack-init", {
             method: "POST",
             headers: sbHeaders({ "Content-Type": "application/json" }),
-            body: JSON.stringify({
-              order_id: orderId,
-              reference: ref,
-              amount: Math.max(100, Math.round(total * 100)),
-              currency: "NGN",
-              email: email,
-              callback_url: cleanBase + "?paystack_ref=" + encodeURIComponent(ref) + "&order_id=" + encodeURIComponent(orderId),
-              metadata: { order_id: orderId, customer_name: name, customer_phone: phone, platform: "web_ios_safari" }
-            })
+            body: JSON.stringify(psBody)
           });
           const initJson = await initRes.json().catch(function() { return {}; });
           const authUrl = (initJson.data && initJson.data.authorization_url) || initJson.authorization_url || "";
@@ -1427,6 +1980,51 @@ object WebPortalExporter {
       }
     }
 
+    async function mirrorPreOrderToStorage(payloadSnake) {
+      const camelObj = {
+        id: payloadSnake.id,
+        customerId: payloadSnake.customer_id || "guest",
+        customerName: payloadSnake.customer_name || "Valued Customer",
+        customerPhone: payloadSnake.customer_phone || "",
+        productName: payloadSnake.product_name || "",
+        brandName: payloadSnake.brand_name || "",
+        category: payloadSnake.category || "Clothes",
+        preferredSize: payloadSnake.preferred_size || "Standard",
+        preferredColor: payloadSnake.preferred_color || "Any",
+        targetBudget: Number(payloadSnake.target_budget || 0) || 0,
+        description: payloadSnake.description || "",
+        photoUrl: payloadSnake.photo_url || "",
+        status: payloadSnake.status || "PENDING",
+        createdAt: Number(payloadSnake.created_at || Date.now()),
+        adminResponse: payloadSnake.admin_response || "",
+        adminQuotedPrice: Number(payloadSnake.admin_quoted_price || 0) || 0,
+        customerReply: payloadSnake.customer_reply || ""
+      };
+      const buckets = ["product-media", "shop-receipts"];
+      let existing = [];
+      for (let i = 0; i < buckets.length; i++) {
+        try {
+          const r = await fetch(sbUrl + "/storage/v1/object/public/" + buckets[i] + "/system/pre_orders.json?t=" + Date.now());
+          if (r.ok) {
+            const arr = await r.json();
+            if (Array.isArray(arr)) { existing = arr; break; }
+          }
+        } catch (_) {}
+      }
+      const merged = [camelObj].concat(existing.filter(function(item) { return item && item.id !== camelObj.id; }));
+      for (let i = 0; i < buckets.length; i++) {
+        try {
+          const up = await fetch(sbUrl + "/storage/v1/object/" + buckets[i] + "/system/pre_orders.json", {
+            method: "POST",
+            headers: sbHeaders({ "Content-Type": "application/json", "x-upsert": "true" }),
+            body: JSON.stringify(merged)
+          });
+          if (up.ok) return true;
+        } catch (_) {}
+      }
+      return false;
+    }
+
     async function submitPreOrder() {
       if (navigator.onLine === false) {
         showGlobalAlert("You are offline. Reconnect to send your pre-order request.", false);
@@ -1445,6 +2043,7 @@ object WebPortalExporter {
       try {
         localStorage.setItem("odiya_customer_name", name);
         localStorage.setItem("odiya_customer_phone", phone);
+        applyPermanentCustomerCredentials();
         const preId = "PRE-WEB-" + Date.now().toString().slice(-8);
         const payload = {
           id: preId,
@@ -1465,14 +2064,26 @@ object WebPortalExporter {
           admin_quoted_price: 0,
           customer_reply: ""
         };
-        const res = await fetch(sbUrl + "/rest/v1/pre_orders?on_conflict=id", {
-          method: "POST",
-          headers: sbHeaders({ "Content-Type": "application/json", "Prefer": "resolution=merge-duplicates,return=minimal" }),
-          body: JSON.stringify(payload)
-        });
-        if (!res.ok) {
-          const errTxt = await res.text();
-          throw new Error("HTTP " + res.status + ": " + errTxt.slice(0, 140));
+        let tableOk = false;
+        let tableErrMsg = "";
+        try {
+          const res = await fetch(sbUrl + "/rest/v1/pre_orders?on_conflict=id", {
+            method: "POST",
+            headers: sbHeaders({ "Content-Type": "application/json", "Prefer": "resolution=merge-duplicates,return=minimal" }),
+            body: JSON.stringify(payload)
+          });
+          if (res.ok) {
+            tableOk = true;
+          } else {
+            const errTxt = await res.text();
+            tableErrMsg = "HTTP " + res.status + ": " + errTxt.slice(0, 120);
+          }
+        } catch (netErr) {
+          tableErrMsg = netErr.message;
+        }
+        const storageOk = await mirrorPreOrderToStorage(payload);
+        if (!tableOk && !storageOk) {
+          throw new Error(tableErrMsg || "Pre-order cloud endpoint rejected write.");
         }
         document.getElementById("poProduct").value = "";
         document.getElementById("poDesc").value = "";
@@ -1498,11 +2109,41 @@ object WebPortalExporter {
       try {
         const digits = q.replace(/\D/g, "");
         const needle = digits.length >= 7 ? digits.slice(-10) : q;
-        const res = await fetch(sbUrl + "/rest/v1/pre_orders?customer_phone=ilike.*" + encodeURIComponent(needle) + "*&select=id,product_name,brand_name,status,target_budget,admin_response,admin_quoted_price,created_at&order=created_at.desc.nullslast&limit=20", {
-          headers: sbHeaders()
-        });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const rows = await res.json();
+        let rows = [];
+        try {
+          const res = await fetch(sbUrl + "/rest/v1/pre_orders?customer_phone=ilike.*" + encodeURIComponent(needle) + "*&select=id,product_name,brand_name,status,target_budget,admin_response,admin_quoted_price,created_at&order=created_at.desc.nullslast&limit=20", {
+            headers: sbHeaders()
+          });
+          if (res.ok) rows = await res.json();
+        } catch (_) {}
+        if (!rows.length) {
+          const buckets = ["product-media", "shop-receipts"];
+          for (let i = 0; i < buckets.length; i++) {
+            try {
+              const sRes = await fetch(sbUrl + "/storage/v1/object/public/" + buckets[i] + "/system/pre_orders.json?t=" + Date.now());
+              if (sRes.ok) {
+                const arr = await sRes.json();
+                if (Array.isArray(arr)) {
+                  rows = arr.filter(function(item) {
+                    const p = String((item && (item.customerPhone || item.customer_phone)) || "").replace(/\D/g, "");
+                    return needle && p.indexOf(needle) >= 0;
+                  }).map(function(item) {
+                    return {
+                      id: item.id,
+                      product_name: item.productName || item.product_name,
+                      brand_name: item.brandName || item.brand_name,
+                      status: item.status || "PENDING",
+                      target_budget: item.targetBudget || item.target_budget || 0,
+                      admin_response: item.adminResponse || item.admin_response || "",
+                      admin_quoted_price: item.adminQuotedPrice || item.admin_quoted_price || 0
+                    };
+                  });
+                  if (rows.length) break;
+                }
+              }
+            } catch (_) {}
+          }
+        }
         if (!rows.length) {
           box.innerHTML = '<div class="empty">No pre-orders found for this phone number yet.</div>';
           return;
@@ -1524,6 +2165,9 @@ object WebPortalExporter {
       }
     }
 
+    applyPermanentCustomerCredentials();
+    updateWishlistBadge();
+    renderWishlist();
     updateCartBadge();
     loadLiveCatalog();
     verifyPaystackCallbackIfPresent();

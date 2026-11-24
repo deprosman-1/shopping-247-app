@@ -35,17 +35,185 @@ data class PaystackCheckoutUiState(
     val reference: String = "",
     val authorizationUrl: String = "",
     val statusMessage: String = "",
-    val isVerifiedPaid: Boolean = false
+    val isVerifiedPaid: Boolean = false,
+    val purpose: String = "ORDER_CHECKOUT",
+    val partnerId: String = "",
+    val hostingOffsetAppliedNaira: Double = 0.0
+)
+
+data class PaystackBankOption(
+    val name: String,
+    val code: String
+)
+
+data class PartnerPaystackSplitAllocation(
+    val partnerId: String,
+    val partnerName: String,
+    val subaccountCode: String,
+    val grossNaira: Double,
+    val commissionPercent: Double,
+    val commissionNaira: Double,
+    val hostingOffsetNaira: Double,
+    val partnerNetNaira: Double
+) {
+    val partnerNetKobo: Long get() = Math.round(partnerNetNaira * 100.0).coerceAtLeast(0L)
+    val commissionKobo: Long get() = Math.round(commissionNaira * 100.0).coerceAtLeast(0L)
+    val hostingOffsetKobo: Long get() = Math.round(hostingOffsetNaira * 100.0).coerceAtLeast(0L)
+}
+
+data class PaystackSplitPlan(
+    val splitMode: String = "STANDARD",
+    val totalAmountNaira: Double = 0.0,
+    val odiyaStoreItemsAndDeliveryNaira: Double = 0.0,
+    val odiyaCommissionNaira: Double = 0.0,
+    val hostingOffsetNaira: Double = 0.0,
+    val odiyaTotalShareNaira: Double = 0.0,
+    val totalPartnerNetNaira: Double = 0.0,
+    val allocations: List<PartnerPaystackSplitAllocation> = emptyList()
+) {
+    val hasActiveSubaccountSplit: Boolean
+        get() = allocations.any { it.subaccountCode.startsWith("ACCT_") && it.partnerNetKobo >= 100L }
+
+    val hasPartnerItems: Boolean
+        get() = allocations.isNotEmpty() || odiyaCommissionNaira > 0.0 || hostingOffsetNaira > 0.0
+
+    val odiyaTotalShareKobo: Long
+        get() = Math.round(odiyaTotalShareNaira * 100.0).coerceAtLeast(0L)
+
+    val odiyaCommissionKobo: Long
+        get() = Math.round(odiyaCommissionNaira * 100.0).coerceAtLeast(0L)
+
+    val hostingOffsetKobo: Long
+        get() = Math.round(hostingOffsetNaira * 100.0).coerceAtLeast(0L)
+
+    val totalPartnerNetKobo: Long
+        get() = Math.round(totalPartnerNetNaira * 100.0).coerceAtLeast(0L)
+}
+
+data class PaystackSubaccountResult(
+    val success: Boolean,
+    val subaccountCode: String = "",
+    val accountName: String = "",
+    val bankName: String = "",
+    val message: String = ""
 )
 
 /**
  * Supabase Edge Function-backed Paystack Merchant Gateway client.
  * Security Architecture:
  * - Secret Key (`sk_live_...` / `sk_test_...`) NEVER leaves Supabase Edge Functions.
- * - Client only communicates over HTTPS with Supabase Edge Functions (`paystack-init`, `paystack-verify`)
+ * - Client only communicates over HTTPS with Supabase Edge Functions (`paystack-init`, `paystack-verify`, `paystack-subaccount`)
  *   and opens the Paystack Hosted Checkout (`authorization_url`) in the system browser / Custom Tab.
  */
 class PaystackGatewayService {
+    companion object {
+        val SUPPORTED_NIGERIAN_SETTLEMENT_BANKS = listOf(
+            PaystackBankOption("OPay Digital Services (OPay)", "999992"),
+            PaystackBankOption("Moniepoint MFB", "50515"),
+            PaystackBankOption("PalmPay", "999991"),
+            PaystackBankOption("Kuda Bank", "50211"),
+            PaystackBankOption("Access Bank", "044"),
+            PaystackBankOption("Guaranty Trust Bank (GTBank)", "058"),
+            PaystackBankOption("First Bank of Nigeria", "011"),
+            PaystackBankOption("Zenith Bank", "057"),
+            PaystackBankOption("United Bank for Africa (UBA)", "033"),
+            PaystackBankOption("Fidelity Bank", "070"),
+            PaystackBankOption("Wema Bank", "035"),
+            PaystackBankOption("Stanbic IBTC Bank", "221"),
+            PaystackBankOption("Sterling Bank", "232"),
+            PaystackBankOption("Polaris Bank", "076"),
+            PaystackBankOption("Union Bank of Nigeria", "032")
+        )
+    }
+
+    fun calculatePaystackSplitPlan(
+        cartItems: List<com.example.data.model.CartItem>,
+        partners: List<com.example.data.model.PartnerOrganization>,
+        deliveryFeeNaira: Double,
+        couponDiscountNaira: Double = 0.0,
+        loyaltyDiscountNaira: Double = 0.0,
+        customBargainTotal: Double? = null,
+        applyDueHostingFeeOffset: Boolean = true
+    ): PaystackSplitPlan {
+        val rawSubtotal = cartItems.sumOf { it.unitPrice * it.quantity }.coerceAtLeast(0.0)
+        val safeCoupon = couponDiscountNaira.coerceIn(0.0, rawSubtotal)
+        val safeLoyalty = loyaltyDiscountNaira.coerceIn(0.0, (rawSubtotal - safeCoupon).coerceAtLeast(0.0))
+        val discountedItemsTotal = if (customBargainTotal != null) {
+            (customBargainTotal - deliveryFeeNaira).coerceAtLeast(0.0)
+        } else {
+            (rawSubtotal - safeCoupon - safeLoyalty).coerceAtLeast(0.0)
+        }
+        val discountFactor = if (rawSubtotal > 0.0) {
+            (discountedItemsTotal / rawSubtotal).coerceIn(0.0, 2.0)
+        } else 1.0
+
+        val totalPayableNaira = customBargainTotal ?: (discountedItemsTotal + deliveryFeeNaira.coerceAtLeast(0.0))
+        val storeOwnItemsNaira = cartItems
+            .filter { it.product.partnerId.isBlank() }
+            .sumOf { (it.unitPrice * it.quantity) * discountFactor }
+        val odiyaStoreAndDeliveryNaira = (storeOwnItemsNaira + deliveryFeeNaira.coerceAtLeast(0.0)).coerceAtLeast(0.0)
+
+        val partnerGroups = cartItems.filter { it.product.partnerId.isNotBlank() }.groupBy { it.product.partnerId }
+        val allocations = mutableListOf<PartnerPaystackSplitAllocation>()
+        var totalCommission = 0.0
+        var totalHostingOffset = 0.0
+        var totalPartnerNet = 0.0
+
+        partnerGroups.forEach { (partnerId, pItems) ->
+            val org = partners.find { it.id == partnerId }
+            val partnerName = org?.businessName ?: pItems.firstOrNull()?.product?.partnerName ?: "Partner Business"
+            val grossNaira = pItems.sumOf { (it.unitPrice * it.quantity) * discountFactor }
+            val commissionNaira = pItems.sumOf { item ->
+                val pct = item.product.partnerCommissionPercent.takeIf { it > 0.0 }
+                    ?: org?.stipulatedCommissionPercent
+                    ?: 10.0
+                ((item.unitPrice * item.quantity) * discountFactor) * (pct.coerceIn(0.0, 95.0) / 100.0)
+            }
+            val rawPartnerNet = (grossNaira - commissionNaira).coerceAtLeast(0.0)
+            val dueHosting = if (applyDueHostingFeeOffset && org?.autoDeductHostingFromPaystackSplit == true) {
+                org.pendingHostingFeeBalance.coerceAtLeast(0.0)
+            } else 0.0
+            val hostingOffset = minOf(rawPartnerNet, dueHosting)
+            val finalPartnerNet = (rawPartnerNet - hostingOffset).coerceAtLeast(0.0)
+            val effPct = if (grossNaira > 0.0) Math.round((commissionNaira / grossNaira) * 1000.0) / 10.0 else (org?.stipulatedCommissionPercent ?: 10.0)
+
+            totalCommission += commissionNaira
+            totalHostingOffset += hostingOffset
+            totalPartnerNet += finalPartnerNet
+
+            allocations.add(
+                PartnerPaystackSplitAllocation(
+                    partnerId = partnerId,
+                    partnerName = partnerName,
+                    subaccountCode = org?.paystackSubaccountCode?.trim().orEmpty(),
+                    grossNaira = grossNaira,
+                    commissionPercent = effPct,
+                    commissionNaira = commissionNaira,
+                    hostingOffsetNaira = hostingOffset,
+                    partnerNetNaira = finalPartnerNet
+                )
+            )
+        }
+
+        val activeSubAllocations = allocations.filter { it.subaccountCode.startsWith("ACCT_") && it.partnerNetKobo >= 100L }
+        val splitMode = when {
+            activeSubAllocations.size >= 2 -> "PARTNER_MULTI_SPLIT"
+            activeSubAllocations.size == 1 -> "PARTNER_SUBACCOUNT"
+            else -> "STANDARD"
+        }
+
+        val odiyaTotalShare = (totalPayableNaira - totalPartnerNet).coerceAtLeast(0.0)
+        return PaystackSplitPlan(
+            splitMode = splitMode,
+            totalAmountNaira = totalPayableNaira,
+            odiyaStoreItemsAndDeliveryNaira = odiyaStoreAndDeliveryNaira,
+            odiyaCommissionNaira = totalCommission,
+            hostingOffsetNaira = totalHostingOffset,
+            odiyaTotalShareNaira = odiyaTotalShare,
+            totalPartnerNetNaira = totalPartnerNet,
+            allocations = allocations
+        )
+    }
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
@@ -91,7 +259,12 @@ class PaystackGatewayService {
         customerPhone: String,
         supportEmail: String,
         callbackUrl: String = "depros://paystack-callback",
-        referenceOverride: String = ""
+        referenceOverride: String = "",
+        splitPlan: PaystackSplitPlan? = null,
+        purpose: String = "ORDER_CHECKOUT",
+        partnerId: String = "",
+        partnerName: String = "",
+        hostingFeeNaira: Double = 0.0
     ): PaystackInitResult = withContext(Dispatchers.IO) {
         if (amountNaira <= 0.0) {
             return@withContext PaystackInitResult(false, message = "Order amount must be greater than ₦0.")
@@ -106,6 +279,15 @@ class PaystackGatewayService {
         val ref = referenceOverride.ifBlank { generatePaystackReference(orderId) }
         val amountKobo = (amountNaira * 100.0).toLong().coerceAtLeast(100L)
         val safeEmail = buildCustomerReceiptEmail(customerPhone, supportEmail, ref)
+        val activeAllocations = splitPlan?.allocations
+            ?.filter { it.subaccountCode.startsWith("ACCT_") && it.partnerNetKobo >= 100L }
+            .orEmpty()
+        val resolvedPurpose = purpose.ifBlank { "ORDER_CHECKOUT" }
+        val resolvedSplitMode = when {
+            resolvedPurpose == "PARTNER_HOSTING_FEE" -> "HOSTING_FEE_100_ODIYA"
+            splitPlan != null && activeAllocations.isNotEmpty() -> splitPlan.splitMode
+            else -> "STANDARD"
+        }
 
         val payload = JSONObject().apply {
             put("order_id", orderId)
@@ -115,8 +297,63 @@ class PaystackGatewayService {
             put("currency", "NGN")
             put("email", safeEmail)
             put("callback_url", callbackUrl.ifBlank { "depros://paystack-callback" })
+            put("purpose", resolvedPurpose)
+            put("split_mode", resolvedSplitMode)
+            put("bearer", "account")
+
+            if (resolvedPurpose == "PARTNER_HOSTING_FEE") {
+                val hKobo = Math.round(hostingFeeNaira.coerceAtLeast(amountNaira) * 100.0).coerceAtLeast(amountKobo)
+                put("partner_id", partnerId)
+                put("partner_name", partnerName)
+                put("odiya_share_kobo", amountKobo)
+                put("hosting_fee_kobo", hKobo)
+                put("odiya_commission_kobo", 0L)
+            } else if (splitPlan != null && activeAllocations.isNotEmpty()) {
+                val primaryPartner = activeAllocations.first()
+                put("partner_id", partnerId.ifBlank { primaryPartner.partnerId })
+                put("partner_name", partnerName.ifBlank { primaryPartner.partnerName })
+                put("odiya_share_kobo", splitPlan.odiyaTotalShareKobo)
+                put("odiya_commission_kobo", splitPlan.odiyaCommissionKobo)
+                put("hosting_fee_kobo", splitPlan.hostingOffsetKobo)
+                if (activeAllocations.size == 1) {
+                    put("subaccount", primaryPartner.subaccountCode)
+                    val odiyaCharge = (amountKobo - primaryPartner.partnerNetKobo).coerceAtLeast(0L)
+                    if (odiyaCharge > 0L) {
+                        put("transaction_charge", odiyaCharge)
+                    }
+                }
+                put("split_allocations", JSONArray().apply {
+                    activeAllocations.forEach { alloc ->
+                        put(JSONObject().apply {
+                            put("partner_id", alloc.partnerId)
+                            put("partner_name", alloc.partnerName)
+                            put("subaccount", alloc.subaccountCode)
+                            put("partner_net_kobo", alloc.partnerNetKobo)
+                            put("commission_kobo", alloc.commissionKobo)
+                            put("hosting_offset_kobo", alloc.hostingOffsetKobo)
+                        })
+                    }
+                })
+            }
+
             put("metadata", JSONObject().apply {
                 put("order_id", orderId)
+                put("purpose", resolvedPurpose)
+                put("split_mode", resolvedSplitMode)
+                if (partnerId.isNotBlank() || activeAllocations.isNotEmpty()) {
+                    put("partner_id", partnerId.ifBlank { activeAllocations.first().partnerId })
+                    put("partner_name", partnerName.ifBlank { activeAllocations.first().partnerName })
+                }
+                if (splitPlan != null) {
+                    put("odiya_share_kobo", splitPlan.odiyaTotalShareKobo)
+                    put("odiya_commission_kobo", splitPlan.odiyaCommissionKobo)
+                    put("hosting_fee_kobo", splitPlan.hostingOffsetKobo)
+                    put("partner_net_kobo", splitPlan.totalPartnerNetKobo)
+                } else if (resolvedPurpose == "PARTNER_HOSTING_FEE") {
+                    put("odiya_share_kobo", amountKobo)
+                    put("hosting_fee_kobo", amountKobo)
+                    put("partner_net_kobo", 0L)
+                }
                 put("customer_name", AppDefenseManager.sanitizeTextInput(customerName, 80))
                 put("customer_phone", AppDefenseManager.sanitizeTextInput(customerPhone, 32))
                 put("store_brand", "Odiya")
@@ -282,22 +519,103 @@ class PaystackGatewayService {
         )
     }
 
+    suspend fun createOrUpdatePartnerSubaccount(
+        supabaseUrl: String,
+        supabaseAnonKey: String,
+        overrideEdgeBaseUrl: String,
+        partnerId: String,
+        businessName: String,
+        bankCode: String,
+        accountNumber: String,
+        commissionPercent: Double,
+        existingSubaccountCode: String = "",
+        contactEmail: String = "",
+        contactPhone: String = ""
+    ): PaystackSubaccountResult = withContext(Dispatchers.IO) {
+        val edgeBase = resolveEdgeBaseUrl(supabaseUrl, overrideEdgeBaseUrl)
+        if (edgeBase.isBlank() || supabaseAnonKey.isBlank()) {
+            return@withContext PaystackSubaccountResult(
+                success = false,
+                message = "Connect Supabase Cloud URL & Anon Key first to register Paystack subaccounts."
+            )
+        }
+        val cleanAcc = accountNumber.filter { it.isDigit() }
+        if (cleanAcc.length < 10 || bankCode.isBlank()) {
+            return@withContext PaystackSubaccountResult(
+                success = false,
+                message = "Select settlement bank and enter a valid 10-digit account number."
+            )
+        }
+        val endpoint = "$edgeBase/paystack-subaccount"
+        if (!AppDefenseManager.isTrustedHttpsUrl(endpoint)) {
+            return@withContext PaystackSubaccountResult(false, message = "Subaccount endpoint must use HTTPS.")
+        }
+        val payload = JSONObject().apply {
+            put("action", "create")
+            put("partner_id", partnerId)
+            put("business_name", AppDefenseManager.sanitizeTextInput(businessName, 80))
+            put("bank_code", bankCode.trim())
+            put("account_number", cleanAcc)
+            put("percentage_charge", commissionPercent.coerceIn(0.5, 95.0))
+            if (existingSubaccountCode.startsWith("ACCT_")) {
+                put("subaccount_code", existingSubaccountCode.trim())
+            }
+            if (contactEmail.contains("@")) put("primary_contact_email", contactEmail.trim())
+            if (contactPhone.isNotBlank()) put("primary_contact_phone", contactPhone.trim())
+        }
+        try {
+            val req = Request.Builder()
+                .url(endpoint)
+                .header("Authorization", "Bearer ${supabaseAnonKey.trim()}")
+                .header("apikey", supabaseAnonKey.trim())
+                .header("Content-Type", "application/json")
+                .post(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { resp ->
+                val raw = resp.body?.string().orEmpty()
+                val json = runCatching { JSONObject(raw.ifBlank { "{}" }) }.getOrDefault(JSONObject())
+                val dataObj = json.optJSONObject("data") ?: JSONObject()
+                val subCode = dataObj.optString("subaccount_code").ifBlank { existingSubaccountCode }.trim()
+                if (!resp.isSuccessful || !json.optBoolean("status", false) || subCode.isBlank()) {
+                    val hint = when (resp.code) {
+                        404 -> "Deploy 'paystack-subaccount' Edge Function in Supabase, or paste an ACCT_... subaccount code manually."
+                        else -> json.optString("message").ifBlank { "Paystack subaccount HTTP ${resp.code}" }
+                    }
+                    return@withContext PaystackSubaccountResult(false, message = hint)
+                }
+                PaystackSubaccountResult(
+                    success = true,
+                    subaccountCode = subCode,
+                    accountName = dataObj.optString("account_name"),
+                    bankName = dataObj.optString("settlement_bank"),
+                    message = "Paystack Split Subaccount active: $subCode"
+                )
+            }
+        } catch (e: Exception) {
+            PaystackSubaccountResult(
+                success = false,
+                message = "Could not reach paystack-subaccount Edge Function: ${e.message ?: "Network error"}"
+            )
+        }
+    }
+
     fun buildEdgeFunctionSetupGuide(): String {
         return """
-            === ODIYA PAYSTACK SUPABASE EDGE FUNCTIONS & WEBHOOK ===
+            === ODIYA PAYSTACK SPLIT & SUBACCOUNT EDGE FUNCTIONS ===
             1. In Supabase Dashboard -> Edge Functions -> Secrets (or CLI):
                supabase secrets set PAYSTACK_SECRET_KEY=sk_live_xxxxxxxxx
                (NEVER put sk_live_... inside GitHub or Android source code!)
 
-            2. Deploy the 3 Edge Functions (found in repo supabase/functions/):
+            2. Deploy the 4 Edge Functions (found in repo supabase/functions/):
                supabase functions deploy paystack-init --no-verify-jwt
                supabase functions deploy paystack-verify --no-verify-jwt
                supabase functions deploy paystack-webhook --no-verify-jwt
+               supabase functions deploy paystack-subaccount --no-verify-jwt
 
             3. Set Paystack Webhook URL in Paystack Dashboard -> Settings -> API Keys & Webhooks:
                https://<YOUR_PROJECT_REF>.supabase.co/functions/v1/paystack-webhook
-               ('paystack-webhook' verifies x-paystack-signature via HMAC-SHA512 using PAYSTACK_SECRET_KEY,
-                upserts public.paystack_transactions, and marks public.orders status = 'CONFIRMED'.)
+               ('paystack-init' routes ODIYA % commissions + due Hosting Fees to ODIYA's main account
+                and Partner's net share directly to Partner ACCT_... subaccounts automatically!)
         """.trimIndent()
     }
 }

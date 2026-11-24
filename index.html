@@ -395,6 +395,7 @@
               <span id="cartTotalText">₦0</span>
             </div>
             <div style="font-size:12px;color:#A7F3D0;margin-top:4px;">Instant sync to ODIYA Admin &amp; verified Paystack checkout</div>
+            <div id="webSplitBanner" style="display:none;margin-top:6px;font-size:11.5px;color:#FDE68A;font-weight:700;"></div>
           </div>
 
           <div class="field-grid">
@@ -590,13 +591,15 @@
     const ua = navigator.userAgent || "";
     const isAndroid = /Android/i.test(ua);
     const isIOS = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-    const isAltBrowser = /OPR|Opera|Opera Mini|UCBrowser|PHX|SamsungBrowser|MiuiBrowser|VivoBrowser|HeyTapBrowser|YaBrowser|Firefox|FxiOS|EdgA|wv\b/i.test(ua);
-    const isChromeAndroid = isAndroid && /\bChrome\/\d+/i.test(ua) && !isAltBrowser;
+    const isAltBrowser = /OPR|Opera|Opera Mini|UCBrowser|PHX|SamsungBrowser|MiuiBrowser|VivoBrowser|HeyTapBrowser|YaBrowser|Firefox|FxiOS|EdgA/i.test(ua);
+    const isWebView = /\bwv\b|Instagram|FBAN|FBAV|WhatsApp/i.test(ua);
+    const isChromeAndroid = isAndroid && /\bChrome\/\d+/i.test(ua) && !isAltBrowser && !isWebView;
 
     const apkBtn = document.getElementById("downloadApkBtn");
     const openBtn = document.getElementById("openAppBtn");
     const copyBtn = document.getElementById("copySyncBtn");
     const installBtn = document.getElementById("installWebBtn");
+    const statusNote = document.getElementById("syncStatusNote");
 
     if (isIOS) {
       apkBtn.style.display = "none";
@@ -605,6 +608,7 @@
       installBtn.innerText = "📱 Install ODIYA on iPhone (Safari)";
     } else {
       apkBtn.href = APK_DOWNLOAD_URL;
+      apkBtn.setAttribute("download", "Odiya_Official.apk");
       apkBtn.style.display = "flex";
     }
 
@@ -625,33 +629,45 @@
       ? ("intent://connect?sb_url=" + encodeURIComponent(sbUrl) + "&sb_key=" + encodeURIComponent(sbKey) + "#Intent;scheme=depros;package=" + ANDROID_PACKAGE + fbSuffix + ";end")
       : ("intent://open#Intent;scheme=depros;package=" + ANDROID_PACKAGE + fbSuffix + ";end");
 
-    openBtn.href = isChromeAndroid ? androidIntentLink : customSchemeLink;
+    openBtn.href = (isChromeAndroid || isWebView) ? androidIntentLink : customSchemeLink;
 
     openBtn.addEventListener("click", function(e) {
-      if (isAndroid && !isChromeAndroid) {
+      if (isAndroid) {
         e.preventDefault();
         let leftPage = false;
         const onHide = function() { if (document.hidden) leftPage = true; };
         document.addEventListener("visibilitychange", onHide, { once: true });
-        try { window.location.href = customSchemeLink; } catch (_) {}
+        try {
+          window.location.href = (isChromeAndroid || isWebView) ? androidIntentLink : customSchemeLink;
+        } catch (_) {}
+        if (!isChromeAndroid) {
+          setTimeout(function() {
+            if (!leftPage && !document.hidden) {
+              try { window.location.href = customSchemeLink; } catch (_) {}
+            }
+          }, 260);
+        }
         setTimeout(function() {
           document.removeEventListener("visibilitychange", onHide);
-          if (!leftPage && !document.hidden) {
-            const note = document.getElementById("syncStatusNote");
-            if (note) {
-              note.innerHTML = "⚠️ <strong>App not installed yet?</strong> Shop right here below on the web, or tap <strong>Download Android APK</strong> above.";
-            }
+          if (!leftPage && !document.hidden && statusNote) {
+            statusNote.innerHTML = "⚠️ <strong>App not opening from this browser?</strong> Tap <strong>Copy Store Sync Link</strong> above &rarr; paste inside ODIYA &rarr; <strong>Account &rarr; Link Now</strong>, or tap <strong>Download Android APK</strong> above.";
           }
-        }, 1200);
+        }, 1500);
       }
     });
 
     const stayOnWeb = params.get("web") === "1";
     const isHttpsOrigin = window.location.protocol === "https:" || window.location.protocol === "http:";
-    if (isChromeAndroid && isHttpsOrigin && !window.AndroidBridge && !stayOnWeb && (params.get("open_app") === "1" || params.has("sb_url"))) {
+    if (stayOnWeb && isAndroid && statusNote) {
+      statusNote.innerHTML = "⬇️ <strong>Update / APK Storefront Mode:</strong> Tap <strong>Download Android APK</strong> above to install the newest ODIYA build cleanly, or tap <strong>Open ODIYA Android App</strong> anytime.";
+    }
+    const wantsAutoLaunch = params.get("open_app") === "1" || params.has("sb_url") || params.get("open") === "1";
+    if (isAndroid && isHttpsOrigin && !window.AndroidBridge && !stayOnWeb && wantsAutoLaunch) {
       setTimeout(function() {
-        try { window.location.href = androidIntentLink; } catch (_) {}
-      }, 120);
+        try {
+          window.location.href = (isChromeAndroid || isWebView) ? androidIntentLink : customSchemeLink;
+        } catch (_) {}
+      }, 80);
     }
 
     if (!sbUrl || !sbKey) {
@@ -803,6 +819,7 @@
     }
 
     let allProducts = [];
+    let allPartners = [];
     let selectedCategory = "All";
     let modalProduct = null;
 
@@ -813,13 +830,21 @@
         return;
       }
       try {
-        const res = await fetch(sbUrl + "/rest/v1/products?select=id,title,category,brand,available_brands,available_sizes,available_colors,base_price,discount_percent,stock_quantity,image_url,description,is_catalog_locked&order=created_at.desc.nullslast&limit=100", {
+        const res = await fetch(sbUrl + "/rest/v1/products?select=id,title,category,brand,available_brands,available_sizes,available_colors,base_price,discount_percent,stock_quantity,image_url,description,is_catalog_locked,partner_id,partner_name,partner_commission_percent&order=created_at.desc.nullslast&limit=100", {
           headers: sbHeaders()
         });
         if (!res.ok) throw new Error("HTTP " + res.status);
         allProducts = await res.json();
+        try {
+          const pRes = await fetch(sbUrl + "/storage/v1/object/public/shop-receipts/partners_ledger.json?t=" + Date.now());
+          if (pRes.ok) {
+            const pJson = await pRes.json();
+            if (pJson && Array.isArray(pJson.organizations)) allPartners = pJson.organizations;
+          }
+        } catch (_) {}
         renderCategoryChips();
         renderProducts();
+        renderCart();
       } catch (err) {
         container.innerHTML = '<div class="empty">Could not load live catalog (' + escapeHtml(err.message) + '). Check internet connection and refresh.</div>';
       }
@@ -944,10 +969,93 @@
       });
       if (existing) {
         existing.qty = Number(existing.qty || 1) + qty;
+        existing.partnerId = p.partner_id || existing.partnerId || "";
+        existing.partnerName = p.partner_name || existing.partnerName || "";
+        existing.commissionPct = Number(p.partner_commission_percent || existing.commissionPct || 0);
       } else {
-        cart.push({ id: p.id, title: p.title, brand: brand, size: size, color: color, unitPrice: unitPrice, qty: qty });
+        cart.push({
+          id: p.id,
+          title: p.title,
+          brand: brand,
+          size: size,
+          color: color,
+          unitPrice: unitPrice,
+          qty: qty,
+          partnerId: p.partner_id || "",
+          partnerName: p.partner_name || "",
+          commissionPct: Number(p.partner_commission_percent || 0)
+        });
       }
       saveCart();
+    }
+
+    function computeWebPaystackSplit() {
+      const totalAmountNaira = cart.reduce(function(s, i) { return s + Number(i.unitPrice || 0) * Number(i.qty || 1); }, 0);
+      const groups = {};
+      cart.forEach(function(item) {
+        const prodMatch = allProducts.find(function(p) { return p.id === item.id; });
+        const pid = String(item.partnerId || (prodMatch && prodMatch.partner_id) || "").trim();
+        if (!pid) return;
+        if (!groups[pid]) groups[pid] = [];
+        groups[pid].push({ item: item, prod: prodMatch });
+      });
+      const allocations = [];
+      let totalCommission = 0;
+      let totalHostingOffset = 0;
+      let totalPartnerNet = 0;
+
+      Object.keys(groups).forEach(function(pid) {
+        const org = allPartners.find(function(o) { return o.id === pid; });
+        const entries = groups[pid];
+        const partnerName = (org && org.businessName) || (entries[0].item.partnerName) || (entries[0].prod && entries[0].prod.partner_name) || "Partner";
+        let grossNaira = 0;
+        let commNaira = 0;
+        entries.forEach(function(e) {
+          const line = Number(e.item.unitPrice || 0) * Number(e.item.qty || 1);
+          const pctRaw = Number(e.item.commissionPct || (e.prod && e.prod.partner_commission_percent) || (org && org.stipulatedCommissionPercent) || 10);
+          const pct = Math.max(0, Math.min(95, pctRaw));
+          grossNaira += line;
+          commNaira += line * (pct / 100);
+        });
+        const rawNet = Math.max(0, grossNaira - commNaira);
+        const dueHost = (org && org.autoDeductHostingFromPaystackSplit !== false) ? Math.max(0, Number(org.pendingHostingFeeBalance || 0)) : 0;
+        const hostOffset = Math.min(rawNet, dueHost);
+        const netNaira = Math.max(0, rawNet - hostOffset);
+        const subCode = org && org.paystackSubaccountCode ? String(org.paystackSubaccountCode).trim() : "";
+
+        totalCommission += commNaira;
+        totalHostingOffset += hostOffset;
+        totalPartnerNet += netNaira;
+
+        allocations.push({
+          partner_id: pid,
+          partner_name: partnerName,
+          subaccount: subCode,
+          partner_net_kobo: Math.max(0, Math.round(netNaira * 100)),
+          commission_kobo: Math.max(0, Math.round(commNaira * 100)),
+          hosting_offset_kobo: Math.max(0, Math.round(hostOffset * 100)),
+          partnerNetNaira: netNaira
+        });
+      });
+
+      const active = allocations.filter(function(a) { return a.subaccount.indexOf("ACCT_") === 0 && a.partner_net_kobo >= 100; });
+      const splitMode = active.length >= 2 ? "PARTNER_MULTI_SPLIT" : (active.length === 1 ? "PARTNER_SUBACCOUNT" : "STANDARD");
+      const amountKobo = Math.max(100, Math.round(totalAmountNaira * 100));
+      const odiyaShareNaira = Math.max(0, totalAmountNaira - totalPartnerNet);
+      return {
+        splitMode: splitMode,
+        amountKobo: amountKobo,
+        odiyaShareKobo: Math.max(0, Math.round(odiyaShareNaira * 100)),
+        odiyaCommissionKobo: Math.max(0, Math.round(totalCommission * 100)),
+        hostingFeeKobo: Math.max(0, Math.round(totalHostingOffset * 100)),
+        partnerNetKobo: Math.max(0, Math.round(totalPartnerNet * 100)),
+        odiyaShareNaira: odiyaShareNaira,
+        odiyaCommissionNaira: totalCommission,
+        hostingOffsetNaira: totalHostingOffset,
+        totalPartnerNetNaira: totalPartnerNet,
+        allocations: allocations,
+        activeAllocations: active
+      };
     }
 
     function changeCartQty(idx, delta) {
@@ -996,6 +1104,19 @@
         '</div>';
       }).join("");
       document.getElementById("cartTotalText").innerText = "₦" + Math.round(total).toLocaleString("en-NG");
+
+      const splitBanner = document.getElementById("webSplitBanner");
+      if (splitBanner) {
+        const sp = computeWebPaystackSplit();
+        if (sp.allocations.length > 0) {
+          splitBanner.style.display = "block";
+          splitBanner.innerText = (sp.activeAllocations.length > 0 ? "⚡ Paystack Auto-Split: " : "Partner Split Summary: ") +
+            "ODIYA ₦" + Math.round(sp.odiyaShareNaira).toLocaleString("en-NG") +
+            " • Partner Net ₦" + Math.round(sp.totalPartnerNetNaira).toLocaleString("en-NG");
+        } else {
+          splitBanner.style.display = "none";
+        }
+      }
 
       // Pre-fill remembered customer info
       if (!document.getElementById("coName").value) document.getElementById("coName").value = localStorage.getItem("odiya_customer_name") || "";
@@ -1089,18 +1210,54 @@
         if (method === "PAYSTACK") {
           btn.innerText = "🔒 Redirecting to Paystack...";
           const cleanBase = window.location.href.split("?")[0];
+          const splitPlan = computeWebPaystackSplit();
+          const primaryAlloc = splitPlan.activeAllocations[0] || splitPlan.allocations[0] || null;
+          const psBody = {
+            order_id: orderId,
+            reference: ref,
+            amount: splitPlan.amountKobo,
+            amount_naira: total,
+            currency: "NGN",
+            email: email,
+            callback_url: cleanBase + "?paystack_ref=" + encodeURIComponent(ref) + "&order_id=" + encodeURIComponent(orderId),
+            purpose: "ORDER_CHECKOUT",
+            split_mode: splitPlan.splitMode,
+            bearer: "account",
+            metadata: {
+              order_id: orderId,
+              purpose: "ORDER_CHECKOUT",
+              split_mode: splitPlan.splitMode,
+              odiya_share_kobo: splitPlan.odiyaShareKobo,
+              odiya_commission_kobo: splitPlan.odiyaCommissionKobo,
+              hosting_fee_kobo: splitPlan.hostingFeeKobo,
+              partner_net_kobo: splitPlan.partnerNetKobo,
+              customer_name: name,
+              customer_phone: phone,
+              platform: "web_ios_safari"
+            }
+          };
+          if (primaryAlloc) {
+            psBody.partner_id = primaryAlloc.partner_id;
+            psBody.partner_name = primaryAlloc.partner_name;
+            psBody.metadata.partner_id = primaryAlloc.partner_id;
+            psBody.metadata.partner_name = primaryAlloc.partner_name;
+          }
+          if (splitPlan.activeAllocations.length > 0) {
+            psBody.odiya_share_kobo = splitPlan.odiyaShareKobo;
+            psBody.odiya_commission_kobo = splitPlan.odiyaCommissionKobo;
+            psBody.hosting_fee_kobo = splitPlan.hostingFeeKobo;
+            psBody.split_allocations = splitPlan.activeAllocations;
+            if (splitPlan.activeAllocations.length === 1) {
+              const single = splitPlan.activeAllocations[0];
+              psBody.subaccount = single.subaccount;
+              const txCharge = Math.max(0, splitPlan.amountKobo - single.partner_net_kobo);
+              if (txCharge > 0) psBody.transaction_charge = txCharge;
+            }
+          }
           const initRes = await fetch(sbUrl + "/functions/v1/paystack-init", {
             method: "POST",
             headers: sbHeaders({ "Content-Type": "application/json" }),
-            body: JSON.stringify({
-              order_id: orderId,
-              reference: ref,
-              amount: Math.max(100, Math.round(total * 100)),
-              currency: "NGN",
-              email: email,
-              callback_url: cleanBase + "?paystack_ref=" + encodeURIComponent(ref) + "&order_id=" + encodeURIComponent(orderId),
-              metadata: { order_id: orderId, customer_name: name, customer_phone: phone, platform: "web_ios_safari" }
-            })
+            body: JSON.stringify(psBody)
           });
           const initJson = await initRes.json().catch(function() { return {}; });
           const authUrl = (initJson.data && initJson.data.authorization_url) || initJson.authorization_url || "";
@@ -1194,6 +1351,51 @@
       }
     }
 
+    async function mirrorPreOrderToStorage(payloadSnake) {
+      const camelObj = {
+        id: payloadSnake.id,
+        customerId: payloadSnake.customer_id || "guest",
+        customerName: payloadSnake.customer_name || "Valued Customer",
+        customerPhone: payloadSnake.customer_phone || "",
+        productName: payloadSnake.product_name || "",
+        brandName: payloadSnake.brand_name || "",
+        category: payloadSnake.category || "Clothes",
+        preferredSize: payloadSnake.preferred_size || "Standard",
+        preferredColor: payloadSnake.preferred_color || "Any",
+        targetBudget: Number(payloadSnake.target_budget || 0) || 0,
+        description: payloadSnake.description || "",
+        photoUrl: payloadSnake.photo_url || "",
+        status: payloadSnake.status || "PENDING",
+        createdAt: Number(payloadSnake.created_at || Date.now()),
+        adminResponse: payloadSnake.admin_response || "",
+        adminQuotedPrice: Number(payloadSnake.admin_quoted_price || 0) || 0,
+        customerReply: payloadSnake.customer_reply || ""
+      };
+      const buckets = ["product-media", "shop-receipts"];
+      let existing = [];
+      for (let i = 0; i < buckets.length; i++) {
+        try {
+          const r = await fetch(sbUrl + "/storage/v1/object/public/" + buckets[i] + "/system/pre_orders.json?t=" + Date.now());
+          if (r.ok) {
+            const arr = await r.json();
+            if (Array.isArray(arr)) { existing = arr; break; }
+          }
+        } catch (_) {}
+      }
+      const merged = [camelObj].concat(existing.filter(function(item) { return item && item.id !== camelObj.id; }));
+      for (let i = 0; i < buckets.length; i++) {
+        try {
+          const up = await fetch(sbUrl + "/storage/v1/object/" + buckets[i] + "/system/pre_orders.json", {
+            method: "POST",
+            headers: sbHeaders({ "Content-Type": "application/json", "x-upsert": "true" }),
+            body: JSON.stringify(merged)
+          });
+          if (up.ok) return true;
+        } catch (_) {}
+      }
+      return false;
+    }
+
     async function submitPreOrder() {
       if (navigator.onLine === false) {
         showGlobalAlert("You are offline. Reconnect to send your pre-order request.", false);
@@ -1232,14 +1434,26 @@
           admin_quoted_price: 0,
           customer_reply: ""
         };
-        const res = await fetch(sbUrl + "/rest/v1/pre_orders?on_conflict=id", {
-          method: "POST",
-          headers: sbHeaders({ "Content-Type": "application/json", "Prefer": "resolution=merge-duplicates,return=minimal" }),
-          body: JSON.stringify(payload)
-        });
-        if (!res.ok) {
-          const errTxt = await res.text();
-          throw new Error("HTTP " + res.status + ": " + errTxt.slice(0, 140));
+        let tableOk = false;
+        let tableErrMsg = "";
+        try {
+          const res = await fetch(sbUrl + "/rest/v1/pre_orders?on_conflict=id", {
+            method: "POST",
+            headers: sbHeaders({ "Content-Type": "application/json", "Prefer": "resolution=merge-duplicates,return=minimal" }),
+            body: JSON.stringify(payload)
+          });
+          if (res.ok) {
+            tableOk = true;
+          } else {
+            const errTxt = await res.text();
+            tableErrMsg = "HTTP " + res.status + ": " + errTxt.slice(0, 120);
+          }
+        } catch (netErr) {
+          tableErrMsg = netErr.message;
+        }
+        const storageOk = await mirrorPreOrderToStorage(payload);
+        if (!tableOk && !storageOk) {
+          throw new Error(tableErrMsg || "Pre-order cloud endpoint rejected write.");
         }
         document.getElementById("poProduct").value = "";
         document.getElementById("poDesc").value = "";
@@ -1265,11 +1479,41 @@
       try {
         const digits = q.replace(/\D/g, "");
         const needle = digits.length >= 7 ? digits.slice(-10) : q;
-        const res = await fetch(sbUrl + "/rest/v1/pre_orders?customer_phone=ilike.*" + encodeURIComponent(needle) + "*&select=id,product_name,brand_name,status,target_budget,admin_response,admin_quoted_price,created_at&order=created_at.desc.nullslast&limit=20", {
-          headers: sbHeaders()
-        });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const rows = await res.json();
+        let rows = [];
+        try {
+          const res = await fetch(sbUrl + "/rest/v1/pre_orders?customer_phone=ilike.*" + encodeURIComponent(needle) + "*&select=id,product_name,brand_name,status,target_budget,admin_response,admin_quoted_price,created_at&order=created_at.desc.nullslast&limit=20", {
+            headers: sbHeaders()
+          });
+          if (res.ok) rows = await res.json();
+        } catch (_) {}
+        if (!rows.length) {
+          const buckets = ["product-media", "shop-receipts"];
+          for (let i = 0; i < buckets.length; i++) {
+            try {
+              const sRes = await fetch(sbUrl + "/storage/v1/object/public/" + buckets[i] + "/system/pre_orders.json?t=" + Date.now());
+              if (sRes.ok) {
+                const arr = await sRes.json();
+                if (Array.isArray(arr)) {
+                  rows = arr.filter(function(item) {
+                    const p = String((item && (item.customerPhone || item.customer_phone)) || "").replace(/\D/g, "");
+                    return needle && p.indexOf(needle) >= 0;
+                  }).map(function(item) {
+                    return {
+                      id: item.id,
+                      product_name: item.productName || item.product_name,
+                      brand_name: item.brandName || item.brand_name,
+                      status: item.status || "PENDING",
+                      target_budget: item.targetBudget || item.target_budget || 0,
+                      admin_response: item.adminResponse || item.admin_response || "",
+                      admin_quoted_price: item.adminQuotedPrice || item.admin_quoted_price || 0
+                    };
+                  });
+                  if (rows.length) break;
+                }
+              }
+            } catch (_) {}
+          }
+        }
         if (!rows.length) {
           box.innerHTML = '<div class="empty">No pre-orders found for this phone number yet.</div>';
           return;

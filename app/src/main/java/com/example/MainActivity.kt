@@ -127,6 +127,7 @@ class MainActivity : ComponentActivity() {
     private val pendingCloudCredentials = kotlinx.coroutines.flow.MutableStateFlow<Pair<String, String>?>(null)
     private val pendingSharedReceiptPayload = kotlinx.coroutines.flow.MutableStateFlow<RawSharedReceiptPayload?>(null)
     private val pendingPaystackReference = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    private val pendingAppOpenSignal = kotlinx.coroutines.flow.MutableStateFlow(0L)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -171,7 +172,8 @@ class MainActivity : ComponentActivity() {
                 DeprosApp(
                     pendingCloudCredentials = pendingCloudCredentials,
                     pendingSharedReceiptPayload = pendingSharedReceiptPayload,
-                    pendingPaystackReference = pendingPaystackReference
+                    pendingPaystackReference = pendingPaystackReference,
+                    pendingAppOpenSignal = pendingAppOpenSignal
                 )
             }
         }
@@ -246,6 +248,7 @@ class MainActivity : ComponentActivity() {
 
             val sbUrl = data.getQueryParameter("sb_url")?.trim()
             val sbKey = data.getQueryParameter("sb_key")?.trim()
+            pendingAppOpenSignal.value = System.currentTimeMillis()
             if (!sbUrl.isNullOrBlank() && !sbKey.isNullOrBlank()) {
                 pendingCloudCredentials.value = sbUrl to sbKey
                 android.widget.Toast.makeText(
@@ -269,7 +272,8 @@ fun DeprosApp(
     viewModel: MainViewModel = viewModel(),
     pendingCloudCredentials: kotlinx.coroutines.flow.MutableStateFlow<Pair<String, String>?>? = null,
     pendingSharedReceiptPayload: kotlinx.coroutines.flow.MutableStateFlow<RawSharedReceiptPayload?>? = null,
-    pendingPaystackReference: kotlinx.coroutines.flow.MutableStateFlow<String?>? = null
+    pendingPaystackReference: kotlinx.coroutines.flow.MutableStateFlow<String?>? = null,
+    pendingAppOpenSignal: kotlinx.coroutines.flow.MutableStateFlow<Long>? = null
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val currentScreen by viewModel.currentScreen.collectAsState()
@@ -345,6 +349,17 @@ fun DeprosApp(
             pendingPaystackReference?.value = null
             viewModel.verifyPaystackPayment(reference = refToVerify) { _, msg ->
                 android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    val incomingAppOpenTs = pendingAppOpenSignal?.collectAsState()?.value ?: 0L
+    LaunchedEffect(incomingAppOpenTs) {
+        if (incomingAppOpenTs > 0L) {
+            showFullScreenBrandSplash = false
+            pendingAppOpenSignal?.value = 0L
+            if (currentScreen == AppScreen.AUTH || currentScreen == AppScreen.HELP_SUPPORT) {
+                viewModel.navigateToHome()
             }
         }
     }
@@ -670,11 +685,16 @@ fun DeprosApp(
             // Global Live App Update Prompt (appears immediately when Admin publishes a newer APK)
             if (updateAvailable) {
                 val installedVer = remember(viewModel) { viewModel.getInstalledAppVersion().second }
+                val storefrontPortal = remember(storeProfile.apkDownloadUrl) {
+                    com.example.util.WebPortalExporter.getSavedCustomPortalUrl(context)
+                        .ifBlank { com.example.util.WebPortalExporter.DEFAULT_LIVE_PORTAL_URL }
+                }
                 AppUpdateDialog(
                     latestVersionName = latestVersionName,
                     releaseNotes = releaseNotes,
                     updateUrl = updateDownloadUrl,
                     installedVersionName = installedVer,
+                    storefrontUrl = storefrontPortal,
                     onDismiss = { viewModel.dismissUpdateDialog() }
                 )
             }

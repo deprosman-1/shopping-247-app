@@ -367,4 +367,148 @@ class PartnerMouLifecycleTest {
         val postAuditProd = dao.getProductById(prod.id)
         assertEquals(3, postAuditProd!!.stockQuantity)
     }
+
+    @Test
+    fun paystackSplitCalculatesCommissionDeliveryAndDueHostingOffsetAccurately() = runBlocking {
+        val partnerAId = createAndFinalizePartner(
+            businessName = "Abuja Velvet Hub",
+            phone = "08022110099",
+            commissionPct = 20.0,
+            monthlyFee = 15000.0
+        )
+        viewModel.updatePartnerEditableTerms(
+            partnerId = partnerAId,
+            commissionPercent = 20.0,
+            agreedQtyPerPeriod = 20,
+            periodUnit = HostingPeriodUnit.PER_MONTH,
+            monthlyHostingPayment = 15000.0,
+            hostingDuration = "6 Months",
+            opayNumber = "8022110099",
+            opayName = "Abuja Velvet Hub",
+            moniepointNumber = "",
+            moniepointName = "",
+            paystackBankCode = "999992",
+            paystackAccountNumber = "8022110099",
+            paystackAccountName = "Abuja Velvet Hub",
+            paystackSubaccountCode = "ACCT_testpartnerA01",
+            pendingHostingFeeBalance = 10000.0,
+            autoDeductHostingFromPaystackSplit = true
+        )
+
+        val partnerBId = createAndFinalizePartner(
+            businessName = "Kano Leather Works",
+            phone = "08033221100",
+            commissionPct = 10.0,
+            monthlyFee = 12000.0
+        )
+        viewModel.updatePartnerEditableTerms(
+            partnerId = partnerBId,
+            commissionPercent = 10.0,
+            agreedQtyPerPeriod = 15,
+            periodUnit = HostingPeriodUnit.PER_MONTH,
+            monthlyHostingPayment = 12000.0,
+            hostingDuration = "6 Months",
+            opayNumber = "",
+            opayName = "",
+            moniepointNumber = "9033221100",
+            moniepointName = "Kano Leather Works",
+            paystackBankCode = "50515",
+            paystackAccountNumber = "9033221100",
+            paystackAccountName = "Kano Leather Works",
+            paystackSubaccountCode = "ACCT_testpartnerB02",
+            pendingHostingFeeBalance = 0.0,
+            autoDeductHostingFromPaystackSplit = true
+        )
+
+        val prodA = insertPartnerProduct(
+            id = "psk-split-prod-a",
+            partnerId = partnerAId,
+            partnerName = "Abuja Velvet Hub",
+            price = 50000.0,
+            stock = 5,
+            commissionPct = 20.0
+        )
+        val prodB = insertPartnerProduct(
+            id = "psk-split-prod-b",
+            partnerId = partnerBId,
+            partnerName = "Kano Leather Works",
+            price = 30000.0,
+            stock = 5,
+            commissionPct = 10.0
+        )
+
+        // Single-partner cart: ₦50,000 + ₦2,500 delivery = ₦52,500 total.
+        // 20% commission = ₦10,000 -> ODIYA; remaining raw net = ₦40,000 minus ₦10,000 due hosting = ₦30,000 -> Partner A.
+        // ODIYA total = ₦2,500 delivery + ₦10,000 comm + ₦10,000 hosting offset = ₦22,500.
+        viewModel.addToCart(prodA, brand = "CraftStandard", size = "M", color = ProductColor("Black", "#000000"), quantity = 1) { _, _ -> }
+        pumpLooper(4)
+        val singlePlan = viewModel.calculateCartPaystackSplitPlan(deliveryFeeAmount = 2500.0)
+        assertEquals("PARTNER_SUBACCOUNT", singlePlan.splitMode)
+        assertTrue(singlePlan.hasActiveSubaccountSplit)
+        assertEquals(52500.0, singlePlan.totalAmountNaira, 0.01)
+        assertEquals(10000.0, singlePlan.odiyaCommissionNaira, 0.01)
+        assertEquals(10000.0, singlePlan.hostingOffsetNaira, 0.01)
+        assertEquals(22500.0, singlePlan.odiyaTotalShareNaira, 0.01)
+        assertEquals(30000.0, singlePlan.totalPartnerNetNaira, 0.01)
+        assertEquals("ACCT_testpartnerA01", singlePlan.allocations.first().subaccountCode)
+
+        // Multi-partner cart: add Partner B (₦30,000, 10% comm = ₦3,000 ODIYA, ₦27,000 Partner B).
+        viewModel.addToCart(prodB, brand = "CraftStandard", size = "M", color = ProductColor("Black", "#000000"), quantity = 1) { _, _ -> }
+        pumpLooper(4)
+        val multiPlan = viewModel.calculateCartPaystackSplitPlan(deliveryFeeAmount = 2500.0)
+        assertEquals("PARTNER_MULTI_SPLIT", multiPlan.splitMode)
+        assertEquals(82500.0, multiPlan.totalAmountNaira, 0.01)
+        assertEquals(13000.0, multiPlan.odiyaCommissionNaira, 0.01)
+        assertEquals(10000.0, multiPlan.hostingOffsetNaira, 0.01)
+        assertEquals(25500.0, multiPlan.odiyaTotalShareNaira, 0.01)
+        assertEquals(57000.0, multiPlan.totalPartnerNetNaira, 0.01)
+        assertEquals(2, multiPlan.allocations.size)
+    }
+
+    @Test
+    fun partnerPaystackSubaccountAndSqlSplitSchemaPersistProperly() = runBlocking {
+        val partnerId = createAndFinalizePartner(
+            businessName = "Enugu Loom Studio",
+            phone = "08044556677",
+            commissionPct = 15.0,
+            monthlyFee = 18000.0
+        )
+        viewModel.updatePartnerEditableTerms(
+            partnerId = partnerId,
+            commissionPercent = 15.0,
+            agreedQtyPerPeriod = 20,
+            periodUnit = HostingPeriodUnit.PER_MONTH,
+            monthlyHostingPayment = 18000.0,
+            hostingDuration = "6 Months",
+            opayNumber = "8044556677",
+            opayName = "Enugu Loom Studio",
+            moniepointNumber = "",
+            moniepointName = "",
+            paystackBankCode = "058",
+            paystackAccountNumber = "0123456789",
+            paystackAccountName = "ENUGU LOOM LTD",
+            paystackSubaccountCode = "ACCT_enuguloom99",
+            pendingHostingFeeBalance = 18000.0,
+            autoDeductHostingFromPaystackSplit = false
+        )
+        pumpLooper(4)
+
+        val reloadedViewModel = MainViewModel(app)
+        pumpLooper(8)
+        val restored = reloadedViewModel.partnerOrganizations.value.firstOrNull { it.id == partnerId }
+        assertNotNull(restored)
+        assertEquals("ACCT_enuguloom99", restored!!.paystackSubaccountCode)
+        assertEquals("058", restored.paystackBankCode)
+        assertEquals("0123456789", restored.paystackAccountNumber)
+        assertEquals("ENUGU LOOM LTD", restored.paystackAccountName)
+        assertEquals(18000.0, restored.pendingHostingFeeBalance, 0.01)
+        assertFalse(restored.autoDeductHostingFromPaystackSplit)
+
+        val sql = com.example.data.remote.SupabaseSyncService().generateSupabaseSqlSchema()
+        assertTrue(sql.contains("split_mode TEXT"))
+        assertTrue(sql.contains("subaccount_code TEXT"))
+        assertTrue(sql.contains("odiya_share_kobo BIGINT"))
+        assertTrue(sql.contains("hosting_fee_kobo BIGINT"))
+        assertTrue(sql.contains("partner_net_kobo BIGINT"))
+    }
 }

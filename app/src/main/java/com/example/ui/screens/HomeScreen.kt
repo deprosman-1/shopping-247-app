@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -164,6 +165,7 @@ fun HomeScreen(
     val wishlistIds by viewModel.wishlistIds.collectAsState()
     val pendingSharedReceipt by viewModel.pendingSharedReceipt.collectAsState()
     val currentCustomer by viewModel.currentCustomer.collectAsState()
+    val savedDeliveryInfo by viewModel.savedDeliveryInfo.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     val isFullScreen by viewModel.isFullScreen.collectAsState()
     val adminPromo by viewModel.adminPromo.collectAsState()
@@ -509,6 +511,107 @@ fun HomeScreen(
                                 }
                             }
                         }
+                    }
+                }
+            }
+
+            // Permanent Customer Credentials Strip (Name, Phone & Delivery Address — Never Hidden, No Email/Gmail)
+            val credName = currentCustomer?.fullName?.takeIf { it.isNotBlank() } ?: savedDeliveryInfo.fullName.trim()
+            val credPhone = currentCustomer?.phoneNumber?.takeIf { it.isNotBlank() } ?: savedDeliveryInfo.phoneNumber.trim()
+            val credAddress = currentCustomer?.deliveryAddress?.takeIf { it.isNotBlank() } ?: savedDeliveryInfo.deliveryAddress.trim()
+            val hasCredentials = credName.isNotBlank() || credPhone.isNotBlank() || credAddress.isNotBlank()
+
+            Surface(
+                onClick = { viewModel.openCustomerAccountShortcut() },
+                shape = RoundedCornerShape(10.dp),
+                color = Color(0xFF052E16),
+                border = BorderStroke(
+                    1.dp,
+                    if (hasCredentials) SuccessGreen.copy(alpha = 0.65f) else AccentGold.copy(alpha = 0.5f)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 2.dp)
+                    .heightIn(min = 48.dp)
+                    .testTag("home_customer_credentials_bar")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (hasCredentials) SuccessGreen.copy(alpha = 0.2f)
+                                    else AccentGold.copy(alpha = 0.18f)
+                                )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = "Customer Credentials",
+                                tint = if (hasCredentials) SuccessGreen else AccentGold,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (hasCredentials) {
+                                    listOfNotNull(
+                                        credName.takeIf { it.isNotBlank() },
+                                        credPhone.takeIf { it.isNotBlank() }
+                                    ).joinToString(" • ").ifBlank { "Saved Customer" }
+                                } else {
+                                    "Customer Credentials"
+                                },
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Black,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.testTag("home_customer_credentials_title")
+                            )
+                            Text(
+                                text = if (hasCredentials) {
+                                    credAddress.ifBlank { "Tap to add or update delivery address" }
+                                } else {
+                                    "Tap to Sign In or save Name, Phone & Address"
+                                },
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (hasCredentials && credAddress.isNotBlank()) CyberCyan else AccentGold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.testTag("home_customer_credentials_subtitle")
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = (if (hasCredentials) SuccessGreen else AccentGold).copy(alpha = 0.16f),
+                        border = BorderStroke(
+                            0.8.dp,
+                            (if (hasCredentials) SuccessGreen else AccentGold).copy(alpha = 0.55f)
+                        )
+                    ) {
+                        Text(
+                            text = if (currentCustomer != null) "ACTIVE" else if (hasCredentials) "SAVED" else "SIGN IN",
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (hasCredentials) SuccessGreen else AccentGold,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                        )
                     }
                 }
             }

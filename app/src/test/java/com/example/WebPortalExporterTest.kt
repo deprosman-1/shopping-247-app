@@ -70,7 +70,54 @@ class WebPortalExporterTest {
         org.junit.Assert.assertTrue(html.contains("/functions/v1/paystack-init"))
         org.junit.Assert.assertTrue(html.contains("/functions/v1/paystack-verify"))
         org.junit.Assert.assertTrue(html.contains("if (navigator.clipboard && navigator.clipboard.writeText) {"))
+        org.junit.Assert.assertTrue(html.contains("mirrorPreOrderToStorage"))
+        org.junit.Assert.assertTrue(html.contains("androidIntentLink"))
+        org.junit.Assert.assertTrue(html.contains("Odiya_Official.apk"))
+        org.junit.Assert.assertTrue(html.replace("\\/", "/").contains(WebPortalExporter.DEFAULT_GITHUB_APK_RELEASE_URL))
         org.junit.Assert.assertFalse(html.contains("sk_live_"))
         org.junit.Assert.assertFalse(html.contains("PAYSTACK_SECRET_KEY"))
+        org.junit.Assert.assertFalse(html.contains("coEmail"))
+        org.junit.Assert.assertFalse(html.contains("Email Address (for Receipt)"))
+        org.junit.Assert.assertFalse(html.contains("odiya_customer_email"))
+        org.junit.Assert.assertTrue(html.contains("customerCredentialsPanel"))
+        org.junit.Assert.assertTrue(html.contains("applyPermanentCustomerCredentials"))
+        org.junit.Assert.assertTrue(html.contains("data-tab=\"wishlist\""))
+        org.junit.Assert.assertTrue(html.contains("id=\"panel-wishlist\""))
+        org.junit.Assert.assertTrue(html.contains("odiya_web_wishlist"))
+        org.junit.Assert.assertTrue(html.contains("toggleWishlistProduct"))
+        org.junit.Assert.assertTrue(html.contains("Add to Wishlist"))
+    }
+
+    @Test
+    fun withStayOnWebParamStripsOpenAppAndAppendsWebFlagOnlyOnPortals() {
+        val portal = WebPortalExporter.withStayOnWebParam(
+            "https://deprosman-1.github.io/shopping-247-app/?open_app=1&sb_url=https%3A%2F%2Ffoo.supabase.co&sb_key=abc"
+        )
+        org.junit.Assert.assertTrue(portal.contains("web=1"))
+        org.junit.Assert.assertTrue(portal.contains("sb_url="))
+        org.junit.Assert.assertFalse(portal.contains("open_app="))
+
+        val apk = WebPortalExporter.DEFAULT_GITHUB_APK_RELEASE_URL
+        assertEquals(apk, WebPortalExporter.withStayOnWebParam(apk))
+    }
+
+    @Test
+    fun qrCodeBitmapGenerationProducesCrispBitmapsForShortAndLongUrls() {
+        org.junit.Assert.assertNull(com.example.ui.components.generateQrBitmap("   "))
+
+        val shortQr = com.example.ui.components.generateQrBitmap("depros://open", 720)
+        org.junit.Assert.assertNotNull(shortQr)
+        org.junit.Assert.assertTrue((shortQr?.width ?: 0) >= 240)
+        assertEquals(shortQr?.width, shortQr?.height)
+
+        val longSyncUrl = "https://deprosman-1.github.io/shopping-247-app/?open_app=1&sb_url=https%3A%2F%2Fexampleproject.supabase.co&sb_key=sb_publishable_abcdefghijklmnopqrstuvwxyz0123456789"
+        val longQr = com.example.ui.components.generateQrBitmap(longSyncUrl, 720)
+        org.junit.Assert.assertNotNull(longQr)
+        org.junit.Assert.assertTrue((longQr?.width ?: 0) >= 240)
+
+        val poster = com.example.ui.components.generateShareableQrPosterBitmap(longSyncUrl, "ODIYA")
+        org.junit.Assert.assertNotNull(poster)
+        assertEquals(960, poster?.width)
+        assertEquals(1160, poster?.height)
     }
 }

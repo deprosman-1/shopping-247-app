@@ -1163,10 +1163,31 @@ class SupabaseSyncService(
                 channel TEXT DEFAULT 'card',
                 status TEXT DEFAULT 'initialized',
                 authorization_url TEXT DEFAULT '',
+                split_mode TEXT DEFAULT 'STANDARD',
+                partner_id TEXT DEFAULT '',
+                partner_name TEXT DEFAULT '',
+                subaccount_code TEXT DEFAULT '',
+                split_code TEXT DEFAULT '',
+                odiya_share_kobo BIGINT DEFAULT 0,
+                odiya_commission_kobo BIGINT DEFAULT 0,
+                hosting_fee_kobo BIGINT DEFAULT 0,
+                partner_net_kobo BIGINT DEFAULT 0,
+                split_breakdown_json TEXT DEFAULT '',
                 paid_at TIMESTAMPTZ,
                 verified_by TEXT DEFAULT 'edge_function',
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
+
+            ALTER TABLE public.paystack_transactions ADD COLUMN IF NOT EXISTS split_mode TEXT DEFAULT 'STANDARD';
+            ALTER TABLE public.paystack_transactions ADD COLUMN IF NOT EXISTS partner_id TEXT DEFAULT '';
+            ALTER TABLE public.paystack_transactions ADD COLUMN IF NOT EXISTS partner_name TEXT DEFAULT '';
+            ALTER TABLE public.paystack_transactions ADD COLUMN IF NOT EXISTS subaccount_code TEXT DEFAULT '';
+            ALTER TABLE public.paystack_transactions ADD COLUMN IF NOT EXISTS split_code TEXT DEFAULT '';
+            ALTER TABLE public.paystack_transactions ADD COLUMN IF NOT EXISTS odiya_share_kobo BIGINT DEFAULT 0;
+            ALTER TABLE public.paystack_transactions ADD COLUMN IF NOT EXISTS odiya_commission_kobo BIGINT DEFAULT 0;
+            ALTER TABLE public.paystack_transactions ADD COLUMN IF NOT EXISTS hosting_fee_kobo BIGINT DEFAULT 0;
+            ALTER TABLE public.paystack_transactions ADD COLUMN IF NOT EXISTS partner_net_kobo BIGINT DEFAULT 0;
+            ALTER TABLE public.paystack_transactions ADD COLUMN IF NOT EXISTS split_breakdown_json TEXT DEFAULT '';
 
             CREATE TABLE IF NOT EXISTS public.app_security_telemetry (
                 id TEXT PRIMARY KEY,
@@ -1964,6 +1985,14 @@ class SupabaseSyncService(
                 val statusStr = obj.optString("status", PreOrderStatus.PENDING.name)
                 val parsedStatus = PreOrderStatus.entries.firstOrNull { it.name == statusStr }
                     ?: PreOrderStatus.PENDING
+                val rawBudget = obj.optDouble(if (isSnakeCase) "target_budget" else "targetBudget", 0.0)
+                    .takeIf { !it.isNaN() && !it.isInfinite() } ?: 0.0
+                val rawQuote = obj.optDouble(if (isSnakeCase) "admin_quoted_price" else "adminQuotedPrice", 0.0)
+                    .takeIf { !it.isNaN() && !it.isInfinite() } ?: 0.0
+                val createdKey = if (isSnakeCase) "created_at" else "createdAt"
+                val parsedCreated = obj.optLong(createdKey, 0L).takeIf { it > 0L }
+                    ?: obj.optString(createdKey, "").toLongOrNull()
+                    ?: System.currentTimeMillis()
                 return PreOrderRequest(
                     id = id,
                     customerId = obj.optString(if (isSnakeCase) "customer_id" else "customerId", "guest"),
@@ -1974,13 +2003,13 @@ class SupabaseSyncService(
                     category = obj.optString("category", "Clothes"),
                     preferredSize = obj.optString(if (isSnakeCase) "preferred_size" else "preferredSize", "Standard"),
                     preferredColor = obj.optString(if (isSnakeCase) "preferred_color" else "preferredColor", "Any"),
-                    targetBudget = obj.optDouble(if (isSnakeCase) "target_budget" else "targetBudget", 0.0),
+                    targetBudget = rawBudget,
                     description = obj.optString("description", ""),
                     photoUrl = obj.optString(if (isSnakeCase) "photo_url" else "photoUrl", ""),
                     status = parsedStatus,
-                    createdAt = obj.optLong(if (isSnakeCase) "created_at" else "createdAt", System.currentTimeMillis()),
+                    createdAt = parsedCreated,
                     adminResponse = obj.optString(if (isSnakeCase) "admin_response" else "adminResponse", ""),
-                    adminQuotedPrice = obj.optDouble(if (isSnakeCase) "admin_quoted_price" else "adminQuotedPrice", 0.0),
+                    adminQuotedPrice = rawQuote,
                     customerReply = obj.optString(if (isSnakeCase) "customer_reply" else "customerReply", "")
                 )
             }
@@ -2114,31 +2143,30 @@ class SupabaseSyncService(
             var tableUploadOk = !needsTablePush
             var storageUploadOk = !needsStoragePush
 
-            // 4. Push to Postgres public.pre_orders table
+            // 4. Push to Postgres public.pre_orders table (with single-row fallback if batch hits a bad row)
             if (needsTablePush) {
+                fun toSnakeRowJson(r: PreOrderRequest): JSONObject = JSONObject().apply {
+                    put("id", r.id)
+                    put("customer_id", r.customerId)
+                    put("customer_name", r.customerName.ifBlank { "Valued Customer" })
+                    put("customer_phone", r.customerPhone)
+                    put("product_name", r.productName.ifBlank { "Special Request" })
+                    put("brand_name", r.brandName)
+                    put("category", r.category)
+                    put("preferred_size", r.preferredSize)
+                    put("preferred_color", r.preferredColor)
+                    put("target_budget", r.targetBudget.takeIf { !it.isNaN() && !it.isInfinite() } ?: 0.0)
+                    put("description", r.description)
+                    put("photo_url", r.photoUrl)
+                    put("status", r.status.name)
+                    put("created_at", r.createdAt)
+                    put("admin_response", r.adminResponse)
+                    put("admin_quoted_price", r.adminQuotedPrice.takeIf { !it.isNaN() && !it.isInfinite() } ?: 0.0)
+                    put("customer_reply", r.customerReply)
+                }
                 try {
                     val rowsArr = JSONArray()
-                    merged.forEach { r ->
-                        rowsArr.put(JSONObject().apply {
-                            put("id", r.id)
-                            put("customer_id", r.customerId)
-                            put("customer_name", r.customerName)
-                            put("customer_phone", r.customerPhone)
-                            put("product_name", r.productName)
-                            put("brand_name", r.brandName)
-                            put("category", r.category)
-                            put("preferred_size", r.preferredSize)
-                            put("preferred_color", r.preferredColor)
-                            put("target_budget", r.targetBudget)
-                            put("description", r.description)
-                            put("photo_url", r.photoUrl)
-                            put("status", r.status.name)
-                            put("created_at", r.createdAt)
-                            put("admin_response", r.adminResponse)
-                            put("admin_quoted_price", r.adminQuotedPrice)
-                            put("customer_reply", r.customerReply)
-                        })
-                    }
+                    merged.forEach { rowsArr.put(toSnakeRowJson(it)) }
                     val upsertReq = Request.Builder()
                         .url("$baseUrl/rest/v1/pre_orders?on_conflict=id")
                         .addSupabaseAuthHeaders()
@@ -2156,6 +2184,29 @@ class SupabaseSyncService(
                 } catch (e: Exception) {
                     lastWriteError = e.message ?: "Pre-order table upload error"
                 }
+                if (!tableUploadOk) {
+                    var singleSuccessCount = 0
+                    for (item in merged) {
+                        try {
+                            val singleReq = Request.Builder()
+                                .url("$baseUrl/rest/v1/pre_orders?on_conflict=id")
+                                .addSupabaseAuthHeaders()
+                                .header("Content-Type", "application/json")
+                                .header("Prefer", "resolution=merge-duplicates,return=minimal")
+                                .post(toSnakeRowJson(item).toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                                .build()
+                            client.newCall(singleReq).execute().use { resp ->
+                                if (resp.isSuccessful || resp.code in 200..299) {
+                                    singleSuccessCount++
+                                }
+                            }
+                        } catch (_: Exception) {
+                        }
+                    }
+                    if (singleSuccessCount > 0) {
+                        tableUploadOk = true
+                    }
+                }
             }
 
             // 5. Mirror to Storage buckets (secondary redundancy)
@@ -2172,13 +2223,13 @@ class SupabaseSyncService(
                         put("category", r.category)
                         put("preferredSize", r.preferredSize)
                         put("preferredColor", r.preferredColor)
-                        put("targetBudget", r.targetBudget)
+                        put("targetBudget", r.targetBudget.takeIf { !it.isNaN() && !it.isInfinite() } ?: 0.0)
                         put("description", r.description)
                         put("photoUrl", r.photoUrl)
                         put("status", r.status.name)
                         put("createdAt", r.createdAt)
                         put("adminResponse", r.adminResponse)
-                        put("adminQuotedPrice", r.adminQuotedPrice)
+                        put("adminQuotedPrice", r.adminQuotedPrice.takeIf { !it.isNaN() && !it.isInfinite() } ?: 0.0)
                         put("customerReply", r.customerReply)
                     })
                 }
@@ -2330,7 +2381,13 @@ class SupabaseSyncService(
                                 totalHostingFeesAutoDeducted = o.optDouble("totalHostingFeesAutoDeducted", 0.0),
                                 totalAutoDeducted247Share = o.optDouble("totalAutoDeducted247Share", 0.0),
                                 totalAutoPartnerNetDeposited = o.optDouble("totalAutoPartnerNetDeposited", 0.0),
-                                totalAccruedOfflinePenalty = o.optDouble("totalAccruedOfflinePenalty", 0.0)
+                                totalAccruedOfflinePenalty = o.optDouble("totalAccruedOfflinePenalty", 0.0),
+                                paystackSubaccountCode = o.optString("paystackSubaccountCode", ""),
+                                paystackBankCode = o.optString("paystackBankCode", ""),
+                                paystackAccountNumber = o.optString("paystackAccountNumber", ""),
+                                paystackAccountName = o.optString("paystackAccountName", ""),
+                                pendingHostingFeeBalance = o.optDouble("pendingHostingFeeBalance", 0.0),
+                                autoDeductHostingFromPaystackSplit = o.optBoolean("autoDeductHostingFromPaystackSplit", true)
                             )
                         )
                     }
@@ -2439,7 +2496,15 @@ class SupabaseSyncService(
                         totalHostingFeesAutoDeducted = maxOf(primary.totalHostingFeesAutoDeducted, secondary.totalHostingFeesAutoDeducted),
                         totalAutoDeducted247Share = maxOf(primary.totalAutoDeducted247Share, secondary.totalAutoDeducted247Share),
                         totalAutoPartnerNetDeposited = maxOf(primary.totalAutoPartnerNetDeposited, secondary.totalAutoPartnerNetDeposited),
-                        totalAccruedOfflinePenalty = maxOf(primary.totalAccruedOfflinePenalty, secondary.totalAccruedOfflinePenalty)
+                        totalAccruedOfflinePenalty = maxOf(primary.totalAccruedOfflinePenalty, secondary.totalAccruedOfflinePenalty),
+                        paystackSubaccountCode = primary.paystackSubaccountCode.ifBlank { secondary.paystackSubaccountCode },
+                        paystackBankCode = primary.paystackBankCode.ifBlank { secondary.paystackBankCode },
+                        paystackAccountNumber = primary.paystackAccountNumber.ifBlank { secondary.paystackAccountNumber },
+                        paystackAccountName = primary.paystackAccountName.ifBlank { secondary.paystackAccountName },
+                        pendingHostingFeeBalance = minOf(
+                            maxOf(primary.pendingHostingFeeBalance, secondary.pendingHostingFeeBalance),
+                            maxOf(primary.monthlyHostingPayment * 24, primary.pendingHostingFeeBalance + secondary.pendingHostingFeeBalance)
+                        )
                     )
                 }
             }
@@ -2515,6 +2580,12 @@ class SupabaseSyncService(
                                 put("totalAutoDeducted247Share", o.totalAutoDeducted247Share)
                                 put("totalAutoPartnerNetDeposited", o.totalAutoPartnerNetDeposited)
                                 put("totalAccruedOfflinePenalty", o.totalAccruedOfflinePenalty)
+                                put("paystackSubaccountCode", o.paystackSubaccountCode)
+                                put("paystackBankCode", o.paystackBankCode)
+                                put("paystackAccountNumber", o.paystackAccountNumber)
+                                put("paystackAccountName", o.paystackAccountName)
+                                put("pendingHostingFeeBalance", o.pendingHostingFeeBalance)
+                                put("autoDeductHostingFromPaystackSplit", o.autoDeductHostingFromPaystackSplit)
                             })
                         }
                     })

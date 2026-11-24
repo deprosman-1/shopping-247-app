@@ -17,7 +17,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -5935,12 +5938,19 @@ private fun SupabaseCloudTab(
                         modifier = Modifier.padding(14.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        QrCodeView(
-                            content = qrTarget,
-                            modifier = Modifier
-                                .size(176.dp)
-                                .testTag("admin_qr_code_view")
-                        )
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = Color.White,
+                            border = BorderStroke(1.5.dp, CyberCyan.copy(alpha = 0.4f))
+                        ) {
+                            QrCodeView(
+                                content = qrTarget.trim(),
+                                modifier = Modifier
+                                    .size(192.dp)
+                                    .padding(6.dp)
+                                    .testTag("admin_qr_code_view")
+                            )
+                        }
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = if (liveWebCustomerLink != null) "QR Target: Live Store Web Link" else "QR Target: ODIYA Direct App Link",
@@ -8770,6 +8780,7 @@ private fun AdminPreOrdersTab(viewModel: MainViewModel) {
     val context = LocalContext.current
     val preOrders by viewModel.preOrderRequests.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val isSupabaseConnected by viewModel.isSupabaseConnected.collectAsState()
     val nairaFormat = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "NG")).apply { maximumFractionDigits = 0 }
     }
@@ -8777,11 +8788,21 @@ private fun AdminPreOrdersTab(viewModel: MainViewModel) {
 
     var lastSyncMessage by remember { mutableStateOf<String?>(null) }
     var lastSyncSuccess by remember { mutableStateOf(true) }
+    var expandWideWorkspace by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         viewModel.syncPreOrdersNow { ok, msg ->
             lastSyncSuccess = ok
-            if (!ok) lastSyncMessage = msg
+            lastSyncMessage = msg
+        }
+        while (true) {
+            kotlinx.coroutines.delay(15_000L)
+            if (!viewModel.isRefreshing.value) {
+                viewModel.syncPreOrdersNow { ok, msg ->
+                    lastSyncSuccess = ok
+                    lastSyncMessage = msg
+                }
+            }
         }
     }
 
@@ -8801,215 +8822,274 @@ private fun AdminPreOrdersTab(viewModel: MainViewModel) {
         }
     }
 
-    LazyColumn(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .testTag("admin_preorders_viewport")
     ) {
-        // Summary Header Card
-        item {
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                modifier = Modifier.fillMaxWidth()
+        val viewportWidth = maxWidth
+        val canvasWidth = if (expandWideWorkspace) maxOf(viewportWidth, 740.dp) else viewportWidth
+        val isWideSplitLayout = canvasWidth >= 600.dp
+
+        val listContent: @Composable (Modifier) -> Unit = { listMod ->
+            LazyColumn(
+                modifier = listMod,
+                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Column(modifier = Modifier.padding(18.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                // Full-Width Summary Header Card
+                item {
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Surface(
-                                shape = CircleShape,
-                                color = CyberCyan.copy(alpha = 0.2f),
-                                modifier = Modifier.size(44.dp)
+                        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Default.NewReleases, contentDescription = null, tint = CyberCyan)
+                                Surface(
+                                    shape = CircleShape,
+                                    color = CyberCyan.copy(alpha = 0.2f),
+                                    modifier = Modifier.size(42.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Default.NewReleases, contentDescription = null, tint = CyberCyan)
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Customer Pre-Orders & Special Requests",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                    Text(
+                                        text = "Respond, quote prices, and manage custom product requests in full-width view",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                             }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "Customer Pre-Orders & Special Requests",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = "Respond, quote prices, and update status for custom requests",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = { expandWideWorkspace = !expandWideWorkspace },
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (expandWideWorkspace) CyberCyan else MaterialTheme.colorScheme.outline
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp)
+                                        .testTag("admin_preorders_expand_width_button")
+                                ) {
+                                    Icon(
+                                        Icons.Default.OpenWith,
+                                        contentDescription = "Toggle Wider Pre-Orders View",
+                                        tint = if (expandWideWorkspace) CyberCyan else MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = if (expandWideWorkspace) "Compact Width" else "Wider View",
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (expandWideWorkspace) CyberCyan else MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+
+                                OutlinedButton(
+                                    enabled = !isRefreshing,
+                                    onClick = triggerPreOrderRefresh,
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp)
+                                        .testTag("admin_preorders_refresh_button")
+                                ) {
+                                    if (isRefreshing) {
+                                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                    } else {
+                                        Icon(Icons.Default.Refresh, contentDescription = "Refresh Pre-Orders", modifier = Modifier.size(18.dp))
+                                    }
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Refresh", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                }
                             }
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        OutlinedButton(
-                            enabled = !isRefreshing,
-                            onClick = triggerPreOrderRefresh,
-                            shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                            modifier = Modifier
-                                .height(48.dp)
-                                .testTag("admin_preorders_refresh_button")
-                        ) {
-                            if (isRefreshing) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                            } else {
-                                Icon(Icons.Default.Refresh, contentDescription = "Refresh Pre-Orders", modifier = Modifier.size(18.dp))
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("TOTAL REQUESTS", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text("${preOrders.size}", fontSize = 18.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = AccentGold.copy(alpha = 0.15f),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("PENDING ACTION", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AccentGold)
+                                        Text("$pendingCount", fontSize = 18.sp, fontWeight = FontWeight.Black, color = AccentGold)
+                                    }
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = CyberCyan.copy(alpha = 0.15f),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("IN PROGRESS", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CyberCyan)
+                                        Text("$processingCount", fontSize = 18.sp, fontWeight = FontWeight.Black, color = CyberCyan)
+                                    }
+                                }
                             }
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Refresh", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Button(
+                                enabled = !isRefreshing,
+                                onClick = triggerPreOrderRefresh,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .testTag("admin_sync_preorders_button")
+                            ) {
+                                if (isRefreshing) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Refreshing Pre-Orders from Cloud...", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                } else {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Refresh & Sync Pre-Orders from Cloud", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            lastSyncMessage?.let { msg ->
+                                Spacer(modifier = Modifier.height(8.dp))
+                                val tint = if (lastSyncSuccess && isSupabaseConnected) SuccessGreen else AccentGold
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = tint.copy(alpha = 0.12f),
+                                    border = BorderStroke(1.dp, tint.copy(alpha = 0.4f)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = msg,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = tint,
+                                        modifier = Modifier.padding(10.dp)
+                                    )
+                                }
+                            }
                         }
                     }
+                }
 
-                    Spacer(modifier = Modifier.height(14.dp))
-
+                // Filter Chips
+                item {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("TOTAL REQUESTS", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text("${preOrders.size}", fontSize = 18.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
-                            }
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = AccentGold.copy(alpha = 0.15f),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("PENDING ACTION", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AccentGold)
-                                Text("$pendingCount", fontSize = 18.sp, fontWeight = FontWeight.Black, color = AccentGold)
-                            }
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = CyberCyan.copy(alpha = 0.15f),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("IN PROGRESS", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CyberCyan)
-                                Text("$processingCount", fontSize = 18.sp, fontWeight = FontWeight.Black, color = CyberCyan)
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Button(
-                        enabled = !isRefreshing,
-                        onClick = triggerPreOrderRefresh,
-                        shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(48.dp)
-                            .testTag("admin_sync_preorders_button")
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        if (isRefreshing) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Refreshing Pre-Orders from Cloud...", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        } else {
-                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Refresh & Sync Pre-Orders from Cloud", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    lastSyncMessage?.let { msg ->
-                        Spacer(modifier = Modifier.height(8.dp))
-                        val tint = if (lastSyncSuccess) SuccessGreen else AccentGold
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = tint.copy(alpha = 0.12f),
-                            border = BorderStroke(1.dp, tint.copy(alpha = 0.4f)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = msg,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = tint,
-                                modifier = Modifier.padding(10.dp)
+                        FilterChip(
+                            selected = filterStatus == null,
+                            onClick = { filterStatus = null },
+                            label = { Text("All (${preOrders.size})") }
+                        )
+                        PreOrderStatus.values().forEach { st ->
+                            val cnt = preOrders.count { it.status == st }
+                            FilterChip(
+                                selected = filterStatus == st,
+                                onClick = { filterStatus = if (filterStatus == st) null else st },
+                                label = { Text("${st.label} ($cnt)") }
                             )
                         }
                     }
                 }
-            }
-        }
 
-        // Filter Chips
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FilterChip(
-                    selected = filterStatus == null,
-                    onClick = { filterStatus = null },
-                    label = { Text("All (${preOrders.size})") }
-                )
-                PreOrderStatus.values().forEach { st ->
-                    val cnt = preOrders.count { it.status == st }
-                    FilterChip(
-                        selected = filterStatus == st,
-                        onClick = { filterStatus = if (filterStatus == st) null else st },
-                        label = { Text("${st.label} ($cnt)") }
+                if (filteredPreOrders.isEmpty()) {
+                    item {
+                        Card(
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Box(modifier = Modifier.fillMaxWidth().padding(28.dp), contentAlignment = Alignment.Center) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(Icons.Default.NewReleases, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(40.dp))
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text("No pre-order requests match the selected filter.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                items(filteredPreOrders, key = { it.id }) { req ->
+                    AdminPreOrderItemCard(
+                        req = req,
+                        viewModel = viewModel,
+                        nairaFormat = nairaFormat,
+                        dateFormat = dateFormat,
+                        context = context,
+                        isWideLayout = isWideSplitLayout
                     )
                 }
             }
         }
 
-        if (filteredPreOrders.isEmpty()) {
-            item {
-                Card(
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.NewReleases, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(40.dp))
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text("No pre-order requests match the selected filter.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
+        if (expandWideWorkspace) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .horizontalScroll(rememberScrollState())
+            ) {
+                listContent(
+                    Modifier
+                        .width(canvasWidth)
+                        .fillMaxHeight()
+                )
             }
-        }
-
-        items(filteredPreOrders, key = { it.id }) { req ->
-            AdminPreOrderItemCard(
-                req = req,
-                viewModel = viewModel,
-                nairaFormat = nairaFormat,
-                dateFormat = dateFormat,
-                context = context
-            )
+        } else {
+            listContent(Modifier.fillMaxSize())
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun AdminPreOrderItemCard(
     req: PreOrderRequest,
     viewModel: MainViewModel,
     nairaFormat: NumberFormat,
     dateFormat: SimpleDateFormat,
-    context: Context
+    context: Context,
+    isWideLayout: Boolean = false
 ) {
     var selectedStatus by remember(req) { mutableStateOf(req.status) }
     var quotedPriceInput by remember(req) { mutableStateOf(if (req.adminQuotedPrice > 0) req.adminQuotedPrice.toInt().toString() else "") }
@@ -9025,301 +9105,329 @@ private fun AdminPreOrderItemCard(
     }
 
     Card(
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(14.dp),
         border = BorderStroke(1.5.dp, statusColor),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("admin_preorder_card_${req.id}")
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            // Header Row: Product Name & Status Badge
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = req.productName,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Black
-                    )
-                    Text(
-                        text = "Brand: ${req.brandName} • Category: ${req.category}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = statusColor.copy(alpha = 0.18f)
-                ) {
-                    Text(
-                        text = req.status.label,
-                        color = statusColor,
-                        fontWeight = FontWeight.Black,
-                        fontSize = 11.sp,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Specs Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (req.preferredSize.isNotBlank()) {
-                    Surface(shape = RoundedCornerShape(6.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                        Text("Size: ${req.preferredSize}", fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
-                    }
-                }
-                if (req.preferredColor.isNotBlank()) {
-                    Surface(shape = RoundedCornerShape(6.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                        Text("Color: ${req.preferredColor}", fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
-                    }
-                }
-                if (req.targetBudget > 0) {
-                    Surface(shape = RoundedCornerShape(6.dp), color = AccentGold.copy(alpha = 0.15f)) {
-                        Text("Target: ${nairaFormat.format(req.targetBudget)}", fontSize = 11.sp, fontWeight = FontWeight.Black, color = AccentGold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
-                    }
-                }
-            }
-
-            if (req.description.isNotBlank()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Customer Details: \"${req.description}\"",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            }
-
-            if (req.photoUrl.isNotBlank()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(110.dp)
-                        .clickable {
-                            try {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(req.photoUrl)).apply {
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                }
-                                context.startActivity(intent)
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "Could not open attached media", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        AsyncImage(
-                            model = req.photoUrl,
-                            contentDescription = "Attached media",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                        Surface(
-                            shape = CircleShape,
-                            color = Color.Black.copy(alpha = 0.6f),
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = "Play/View Media", tint = Color.White)
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (req.customerReply.isNotBlank()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = AccentGold.copy(alpha = 0.15f),
-                    border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.4f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(10.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, tint = AccentGold, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("CUSTOMER FEEDBACK REPLY", fontWeight = FontWeight.Black, fontSize = 10.5.sp, color = AccentGold)
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(req.customerReply, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Customer Info & Communication Row
-            Surface(
-                shape = RoundedCornerShape(10.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                modifier = Modifier.fillMaxWidth()
-            ) {
+        val detailsSection: @Composable (Modifier) -> Unit = { mod ->
+            Column(modifier = mod) {
+                // Header Row: Product Name & Status Badge
                 Row(
-                    modifier = Modifier.padding(10.dp).fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Customer: ${req.customerName}",
+                            text = req.productName,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Black
+                        )
+                        Text(
+                            text = "Brand: ${req.brandName} • Category: ${req.category}",
                             style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Phone: ${req.customerPhone.ifBlank { "Not provided" }}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "Requested: ${dateFormat.format(Date(req.createdAt))}",
-                            style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
 
-                    if (req.customerPhone.isNotBlank()) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            // Dial Phone
-                            IconButton(
-                                onClick = {
-                                    try {
-                                        val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${req.customerPhone.trim()}"))
-                                        context.startActivity(intent)
-                                    } catch (e: Exception) {
-                                        Toast.makeText(context, "Could not open dialer", Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                                modifier = Modifier.size(34.dp)
-                            ) {
-                                Icon(Icons.Default.Call, contentDescription = "Call Customer", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                            }
+                    Spacer(modifier = Modifier.width(8.dp))
 
-                            // WhatsApp Customer
-                            IconButton(
-                                onClick = {
-                                    try {
-                                        val clean = req.customerPhone.replace("+", "").replace(" ", "").replace("-", "")
-                                        val waUri = Uri.parse("https://api.whatsapp.com/send?phone=$clean&text=${Uri.encode("Hello ${req.customerName}, regarding your pre-order request for ${req.productName} (${req.brandName}).")}")
-                                        context.startActivity(Intent(Intent.ACTION_VIEW, waUri))
-                                    } catch (e: Exception) {
-                                        Toast.makeText(context, "Could not open WhatsApp", Toast.LENGTH_SHORT).show()
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = statusColor.copy(alpha = 0.18f)
+                    ) {
+                        Text(
+                            text = req.status.label,
+                            color = statusColor,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Specs FlowRow (wraps cleanly without crowding)
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (req.preferredSize.isNotBlank()) {
+                        Surface(shape = RoundedCornerShape(6.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                            Text("Size: ${req.preferredSize}", fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                        }
+                    }
+                    if (req.preferredColor.isNotBlank()) {
+                        Surface(shape = RoundedCornerShape(6.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                            Text("Color: ${req.preferredColor}", fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                        }
+                    }
+                    if (req.targetBudget > 0) {
+                        Surface(shape = RoundedCornerShape(6.dp), color = AccentGold.copy(alpha = 0.15f)) {
+                            Text("Target: ${nairaFormat.format(req.targetBudget)}", fontSize = 11.sp, fontWeight = FontWeight.Black, color = AccentGold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                        }
+                    }
+                }
+
+                if (req.description.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Customer Details: \"${req.description}\"",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+
+                if (req.photoUrl.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(110.dp)
+                            .clickable {
+                                try {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(req.photoUrl)).apply {
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                     }
-                                },
-                                modifier = Modifier.size(34.dp)
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Could not open attached media", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            AsyncImage(
+                                model = req.photoUrl,
+                                contentDescription = "Attached media",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                            Surface(
+                                shape = CircleShape,
+                                color = Color.Black.copy(alpha = 0.6f),
+                                modifier = Modifier.size(40.dp)
                             ) {
-                                Icon(Icons.Default.Chat, contentDescription = "WhatsApp Customer", tint = SuccessGreen, modifier = Modifier.size(18.dp))
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Default.PlayArrow, contentDescription = "Play/View Media", tint = Color.White)
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Admin Response Form
-            Text(
-                text = "ADMIN RESPONSE & PRICE QUOTATION",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.primary
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                // Status Dropdown
-                ExposedDropdownMenuBox(
-                    expanded = statusDropdownExpanded,
-                    onExpandedChange = { statusDropdownExpanded = !statusDropdownExpanded },
-                    modifier = Modifier.weight(1.2f)
-                ) {
-                    OutlinedTextField(
-                        value = selectedStatus.label,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Status") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = statusDropdownExpanded) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = statusDropdownExpanded,
-                        onDismissRequest = { statusDropdownExpanded = false },
-                        containerColor = Color.White
+                if (req.customerReply.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = AccentGold.copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.4f)),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        PreOrderStatus.entries.forEach { st ->
-                            val isSelected = selectedStatus == st
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = st.label,
-                                        fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
-                                        color = if (isSelected) Color(0xFFB91C1C) else Color(0xFF111827)
-                                    )
-                                },
-                                onClick = {
-                                    selectedStatus = st
-                                    statusDropdownExpanded = false
-                                }
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, tint = AccentGold, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("CUSTOMER FEEDBACK REPLY", fontWeight = FontWeight.Black, fontSize = 10.5.sp, color = AccentGold)
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(req.customerReply, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Customer Info & Communication Row
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Customer: ${req.customerName}",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Phone: ${req.customerPhone.ifBlank { "Not provided" }}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "Requested: ${dateFormat.format(Date(req.createdAt))}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+
+                        if (req.customerPhone.isNotBlank()) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                IconButton(
+                                    onClick = {
+                                        try {
+                                            val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${req.customerPhone.trim()}"))
+                                            context.startActivity(intent)
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, "Could not open dialer", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    modifier = Modifier.size(48.dp)
+                                ) {
+                                    Icon(Icons.Default.Call, contentDescription = "Call Customer", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        try {
+                                            val clean = req.customerPhone.replace("+", "").replace(" ", "").replace("-", "")
+                                            val waUri = Uri.parse("https://api.whatsapp.com/send?phone=$clean&text=${Uri.encode("Hello ${req.customerName}, regarding your pre-order request for ${req.productName} (${req.brandName}).")}")
+                                            context.startActivity(Intent(Intent.ACTION_VIEW, waUri))
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, "Could not open WhatsApp", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    modifier = Modifier.size(48.dp)
+                                ) {
+                                    Icon(Icons.Default.Chat, contentDescription = "WhatsApp Customer", tint = SuccessGreen, modifier = Modifier.size(20.dp))
+                                }
+                            }
+                        }
                     }
                 }
-
-                // Quoted Price Input
-                OutlinedTextField(
-                    value = quotedPriceInput,
-                    onValueChange = { quotedPriceInput = it },
-                    label = { Text("Quoted Price (₦)") },
-                    placeholder = { Text("e.g. 85000") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true,
-                    modifier = Modifier.weight(1f)
-                )
             }
+        }
 
-            Spacer(modifier = Modifier.height(8.dp))
+        val responseSection: @Composable (Modifier) -> Unit = { mod ->
+            Column(modifier = mod) {
+                Text(
+                    text = "ADMIN RESPONSE & PRICE QUOTATION",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary
+                )
 
-            OutlinedTextField(
-                value = adminResponseText,
-                onValueChange = { adminResponseText = it },
-                label = { Text("Admin Note / Response to Customer") },
-                placeholder = { Text("e.g. We have located this Gucci pair! It will arrive in 2 business days.") },
-                minLines = 2,
-                modifier = Modifier.fillMaxWidth()
-            )
+                Spacer(modifier = Modifier.height(8.dp))
 
-            Spacer(modifier = Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    // Status Dropdown
+                    ExposedDropdownMenuBox(
+                        expanded = statusDropdownExpanded,
+                        onExpandedChange = { statusDropdownExpanded = !statusDropdownExpanded },
+                        modifier = Modifier.weight(1.15f)
+                    ) {
+                        OutlinedTextField(
+                            value = selectedStatus.label,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Status") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = statusDropdownExpanded) },
+                            modifier = Modifier.menuAnchor().fillMaxWidth()
+                        )
+                        ExposedDropdownMenu(
+                            expanded = statusDropdownExpanded,
+                            onDismissRequest = { statusDropdownExpanded = false },
+                            containerColor = Color.White
+                        ) {
+                            PreOrderStatus.entries.forEach { st ->
+                                val isSelected = selectedStatus == st
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = st.label,
+                                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
+                                            color = if (isSelected) Color(0xFFB91C1C) else Color(0xFF111827)
+                                        )
+                                    },
+                                    onClick = {
+                                        selectedStatus = st
+                                        statusDropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
 
-            Button(
-                onClick = {
-                    val price = quotedPriceInput.toDoubleOrNull() ?: 0.0
-                    viewModel.updatePreOrderResponse(
-                        requestId = req.id,
-                        status = selectedStatus,
-                        adminResponseText = adminResponseText,
-                        quotedPrice = price
+                    // Quoted Price Input
+                    OutlinedTextField(
+                        value = quotedPriceInput,
+                        onValueChange = { quotedPriceInput = it },
+                        label = { Text("Quoted Price (₦)") },
+                        placeholder = { Text("e.g. 85000") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
                     )
-                    Toast.makeText(context, "✅ Response saved & sent to customer!", Toast.LENGTH_SHORT).show()
-                },
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                modifier = Modifier.fillMaxWidth().height(46.dp)
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = adminResponseText,
+                    onValueChange = { adminResponseText = it },
+                    label = { Text("Admin Note / Response to Customer") },
+                    placeholder = { Text("e.g. We have located this Gucci pair! It will arrive in 2 business days.") },
+                    minLines = 2,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Button(
+                    onClick = {
+                        val price = quotedPriceInput.toDoubleOrNull() ?: 0.0
+                        viewModel.updatePreOrderResponse(
+                            requestId = req.id,
+                            status = selectedStatus,
+                            adminResponseText = adminResponseText,
+                            quotedPrice = price
+                        )
+                        Toast.makeText(context, "✅ Response saved & sent to customer!", Toast.LENGTH_SHORT).show()
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("save_preorder_response_${req.id}")
+                ) {
+                    Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("SAVE & RESPOND TO CUSTOMER", fontWeight = FontWeight.Bold, fontSize = 11.5.sp)
+                }
+            }
+        }
+
+        if (isWideLayout) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.Top
             ) {
-                Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("SAVE & RESPOND TO CUSTOMER", fontWeight = FontWeight.Bold, fontSize = 11.5.sp)
+                detailsSection(Modifier.weight(1.05f))
+                responseSection(Modifier.weight(1f))
+            }
+        } else {
+            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 14.dp)) {
+                detailsSection(Modifier.fillMaxWidth())
+                Spacer(modifier = Modifier.height(12.dp))
+                responseSection(Modifier.fillMaxWidth())
             }
         }
     }
@@ -9904,18 +10012,23 @@ private fun AdminSecuritySettingsTab(
                         onClick = {
                             isPublishingUpdate = true
                             val targetCode = latestVersionCodeInput.toIntOrNull()?.coerceAtLeast(1) ?: 1
-                            val cleanApkUrl = com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(apkDownloadUrlInput)
-                            if (apkDownloadUrlInput.trim().isNotEmpty() && cleanApkUrl.isEmpty()) {
+                            val rawUrl = apkDownloadUrlInput.trim()
+                            val cleanApkUrl = if (rawUrl.isEmpty()) {
+                                com.example.util.WebPortalExporter.DEFAULT_GITHUB_APK_RELEASE_URL
+                            } else {
+                                com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(rawUrl)
+                            }
+                            if (rawUrl.isNotEmpty() && cleanApkUrl.isEmpty()) {
                                 apkDownloadUrlInput = ""
                                 Toast.makeText(context, "⚠️ Invalid HTML/link removed from APK URL field.", Toast.LENGTH_SHORT).show()
-                            } else if (cleanApkUrl != apkDownloadUrlInput.trim() && cleanApkUrl.isNotEmpty()) {
+                            } else if (cleanApkUrl != rawUrl && cleanApkUrl.isNotEmpty()) {
                                 apkDownloadUrlInput = cleanApkUrl
                             }
                             viewModel.publishAppUpdateNotice(
                                 versionCode = targetCode,
                                 versionName = latestVersionNameInput,
                                 releaseNotes = updateNotesInput,
-                                apkDownloadUrl = cleanApkUrl
+                                apkDownloadUrl = cleanApkUrl.ifBlank { com.example.util.WebPortalExporter.DEFAULT_GITHUB_APK_RELEASE_URL }
                             ) { _, msg ->
                                 isPublishingUpdate = false
                                 Toast.makeText(context, msg, Toast.LENGTH_LONG).show()

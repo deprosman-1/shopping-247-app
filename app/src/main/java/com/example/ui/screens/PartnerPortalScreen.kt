@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
@@ -72,6 +73,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -108,6 +110,7 @@ import com.example.data.model.PartnerSubmissionStatus
 import com.example.data.model.PartnerTransactionType
 import com.example.data.model.ProductCategory
 import com.example.data.model.ProductColor
+import com.example.data.remote.PaystackGatewayService
 import com.example.ui.components.DualAxisScrollContainer
 import com.example.ui.components.SignaturePadBox
 import com.example.ui.components.SignaturePreviewBox
@@ -117,6 +120,8 @@ import com.example.ui.theme.AccentGold
 import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.MoniepointBlue
 import com.example.ui.theme.OPayGreen
+import com.example.ui.theme.PaystackNavy
+import com.example.ui.theme.PaystackTeal
 import com.example.ui.theme.SuccessGreen
 import com.example.util.PartnerDocumentExporter
 import com.example.util.ProductImageHelper
@@ -295,6 +300,10 @@ fun PartnerPortalScreen(
                     var opayName by rememberSaveable { mutableStateOf("") }
                     var monieNumber by rememberSaveable { mutableStateOf("") }
                     var monieName by rememberSaveable { mutableStateOf("") }
+                    var paystackBankCode by rememberSaveable { mutableStateOf("999992") }
+                    var paystackAccountNum by rememberSaveable { mutableStateOf("") }
+                    var paystackAccountName by rememberSaveable { mutableStateOf("") }
+                    var autoDeductHostingSplit by rememberSaveable { mutableStateOf(true) }
 
                     // Dual Signatures
                     var partnerSignatoryName by rememberSaveable { mutableStateOf("") }
@@ -726,6 +735,61 @@ fun PartnerPortalScreen(
                                         modifier = Modifier.weight(1f)
                                     )
                                 }
+                                HorizontalDivider()
+                                Text(
+                                    text = "Paystack Automated Split Settlement Bank",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = PaystackTeal
+                                )
+                                Row(
+                                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    PaystackGatewayService.SUPPORTED_NIGERIAN_SETTLEMENT_BANKS.forEach { bank ->
+                                        FilterChip(
+                                            selected = paystackBankCode == bank.code,
+                                            onClick = { paystackBankCode = bank.code },
+                                            label = { Text(bank.name.substringBefore(" ("), fontSize = 10.5.sp) },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = PaystackTeal,
+                                                selectedLabelColor = PaystackNavy
+                                            )
+                                        )
+                                    }
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedTextField(
+                                        value = paystackAccountNum,
+                                        onValueChange = { paystackAccountNum = it.filter { c -> c.isDigit() }.take(10) },
+                                        label = { Text("Paystack 10-Digit Acct") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f).testTag("partner_paystack_account_input")
+                                    )
+                                    OutlinedTextField(
+                                        value = paystackAccountName,
+                                        onValueChange = { paystackAccountName = it },
+                                        label = { Text("Account Name") },
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Auto-deduct due Monthly Hosting Fee in Paystack sales split",
+                                        fontSize = 11.sp,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Switch(
+                                        checked = autoDeductHostingSplit,
+                                        onCheckedChange = { autoDeductHostingSplit = it }
+                                    )
+                                }
                             }
                         }
 
@@ -821,7 +885,11 @@ fun PartnerPortalScreen(
                                     monthlyHostingPayment = hostingFee,
                                     stipulatedCommissionPercent = comm,
                                     partnerSignatureName = partnerSignatoryName.ifBlank { ownerName },
-                                    partnerSignatureStrokes = partnerSignatureStrokes
+                                    partnerSignatureStrokes = partnerSignatureStrokes,
+                                    paystackBankCode = paystackBankCode,
+                                    paystackAccountNumber = paystackAccountNum.ifBlank { opayNumber.ifBlank { monieNumber } },
+                                    paystackAccountName = paystackAccountName.ifBlank { opayName.ifBlank { monieName.ifBlank { businessName } } },
+                                    autoDeductHostingFromPaystackSplit = autoDeductHostingSplit
                                 ) { created ->
                                     selectedPartnerId = created.id
                                     uploadCategory = primaryCategory
@@ -1413,6 +1481,94 @@ fun PartnerPortalScreen(
                         if (loggedPartner != null) {
                             val partnerProducts = remember(allProducts, loggedPartner.id) {
                                 allProducts.filter { it.partnerId == loggedPartner.id }
+                            }
+                            val partnerPaystackState by viewModel.paystackCheckoutState.collectAsState()
+
+                            // Paystack Split & Monthly Hosting Fee Direct Payment Card
+                            Card(
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                border = BorderStroke(1.5.dp, PaystackTeal.copy(alpha = 0.65f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("partner_paystack_hosting_card")
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.CreditCard, contentDescription = null, tint = PaystackTeal, modifier = Modifier.size(18.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("PAYSTACK SPLIT & HOSTING FEE", fontWeight = FontWeight.Black, fontSize = 12.sp, color = PaystackTeal)
+                                        }
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = if (loggedPartner.paystackSubaccountCode.startsWith("ACCT_")) SuccessGreen.copy(alpha = 0.16f) else AccentGold.copy(alpha = 0.18f)
+                                        ) {
+                                            Text(
+                                                text = if (loggedPartner.paystackSubaccountCode.startsWith("ACCT_")) loggedPartner.paystackSubaccountCode else "PENDING ACCT_",
+                                                fontSize = 9.5.sp,
+                                                fontWeight = FontWeight.Black,
+                                                color = if (loggedPartner.paystackSubaccountCode.startsWith("ACCT_")) SuccessGreen else AccentGold,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                            )
+                                        }
+                                    }
+                                    val netPct = (100.0 - loggedPartner.stipulatedCommissionPercent).coerceIn(0.0, 100.0)
+                                    Text(
+                                        text = "Product Split: ${String.format(Locale.US, "%.1f", loggedPartner.stipulatedCommissionPercent)}% ODIYA / ${String.format(Locale.US, "%.1f", netPct)}% ${loggedPartner.businessName} • Monthly Hosting: ${nairaFormat.format(loggedPartner.monthlyHostingPayment)}" +
+                                            (if (loggedPartner.pendingHostingFeeBalance > 0.0) " (Due: ${nairaFormat.format(loggedPartner.pendingHostingFeeBalance)})" else ""),
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    val dueHostingToPay = loggedPartner.pendingHostingFeeBalance.takeIf { it > 0.0 } ?: loggedPartner.monthlyHostingPayment
+                                    Button(
+                                        enabled = !partnerPaystackState.isLoading && dueHostingToPay >= 100.0,
+                                        onClick = {
+                                            viewModel.startPaystackHostingFeeCheckout(
+                                                partnerId = loggedPartner.id,
+                                                amountOverrideNaira = dueHostingToPay,
+                                                onReadyToOpenUrl = { url, ref ->
+                                                    Toast.makeText(context, "Opening Paystack Hosting Checkout ($ref)...", Toast.LENGTH_LONG).show()
+                                                    com.example.util.WebPortalExporter.openExternalUrl(context, url)
+                                                },
+                                                onFailure = { err ->
+                                                    Toast.makeText(context, err, Toast.LENGTH_LONG).show()
+                                                }
+                                            )
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = PaystackTeal, contentColor = PaystackNavy),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(48.dp)
+                                            .testTag("partner_pay_hosting_paystack_button")
+                                    ) {
+                                        Text(
+                                            text = "Pay Hosting Fee via Paystack (${nairaFormat.format(dueHostingToPay)} → 100% ODIYA)",
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.Black
+                                        )
+                                    }
+                                    if (partnerPaystackState.purpose == "PARTNER_HOSTING_FEE" && partnerPaystackState.partnerId == loggedPartner.id && partnerPaystackState.reference.isNotBlank()) {
+                                        OutlinedButton(
+                                            enabled = !partnerPaystackState.isLoading,
+                                            onClick = {
+                                                viewModel.verifyPaystackPayment(partnerPaystackState.reference) { _, msg ->
+                                                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                                }
+                                            },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(48.dp)
+                                                .testTag("partner_verify_hosting_paystack_button")
+                                        ) {
+                                            Text("Verify Hosting Payment (${partnerPaystackState.reference})", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
                             }
 
                             if (loggedPartner.status == PartnerAgreementStatus.TERMINATED) {

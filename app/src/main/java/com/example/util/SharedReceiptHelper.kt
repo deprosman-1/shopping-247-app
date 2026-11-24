@@ -106,9 +106,9 @@ object SharedReceiptHelper {
 
         if (trimmed.contains("sb_url=") || trimmed.contains("sb_key=")) {
             try {
-                val embeddedLink = Regex("""(https?://|depros://|deprosboutique://)[^\s]+""", RegexOption.IGNORE_CASE)
+                val embeddedLink = Regex("""(https?://|depros://|deprosboutique://)[^\s<>"']+""", RegexOption.IGNORE_CASE)
                     .findAll(trimmed)
-                    .map { it.value.trimEnd('.', ',', ';', ')', ']') }
+                    .map { it.value.trimEnd('.', ',', ';', ')', ']', '*', '_') }
                     .firstOrNull { it.contains("sb_url=") || it.contains("sb_key=") }
                 val candidateUri = when {
                     embeddedLink != null -> Uri.parse(embeddedLink)

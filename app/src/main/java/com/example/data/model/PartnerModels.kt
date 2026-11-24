@@ -77,7 +77,13 @@ data class PartnerOrganization(
     val totalHostingFeesAutoDeducted: Double = 0.0,
     val totalAutoDeducted247Share: Double = 0.0,
     val totalAutoPartnerNetDeposited: Double = 0.0,
-    val totalAccruedOfflinePenalty: Double = 0.0
+    val totalAccruedOfflinePenalty: Double = 0.0,
+    val paystackSubaccountCode: String = "",
+    val paystackBankCode: String = "",
+    val paystackAccountNumber: String = "",
+    val paystackAccountName: String = "",
+    val pendingHostingFeeBalance: Double = 0.0,
+    val autoDeductHostingFromPaystackSplit: Boolean = true
 )
 
 data class PartnerProductSubmission(

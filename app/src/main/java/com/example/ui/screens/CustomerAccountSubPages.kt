@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LocalOffer
 import androidx.compose.material.icons.filled.LocalShipping
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Loyalty
@@ -99,9 +100,11 @@ fun WelcomeCustomerOnlyPage(
     onShowQr: () -> Unit
 ) {
     val context = LocalContext.current
+    val savedDeliveryInfo by viewModel.savedDeliveryInfo.collectAsState()
+    val resolvedAddress = customer.deliveryAddress.ifBlank { savedDeliveryInfo.deliveryAddress }.trim()
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        // Strictly Customer Name & Phone Number ONLY
+        // Customer Name, Phone Number & Delivery Address ONLY (No Email/Gmail)
         Card(
             shape = RoundedCornerShape(22.dp),
             colors = CardDefaults.cardColors(
@@ -169,7 +172,56 @@ fun WelcomeCustomerOnlyPage(
                         modifier = Modifier.testTag("welcome_customer_phone_only")
                     )
                 }
+
+                if (resolvedAddress.isNotBlank()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.LocationOn,
+                            contentDescription = "Customer Delivery Address",
+                            tint = SuccessGreen,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = resolvedAddress,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.testTag("welcome_customer_address_only")
+                        )
+                    }
+                }
             }
+        }
+
+        Button(
+            onClick = { viewModel.navigateToHome() },
+            colors = ButtonDefaults.buttonColors(
+                containerColor = SuccessGreen,
+                contentColor = Color(0xFF052E16)
+            ),
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .testTag("welcome_start_shopping_button")
+        ) {
+            Icon(
+                imageVector = Icons.Default.ShoppingBag,
+                contentDescription = "Start Shopping",
+                tint = Color(0xFF052E16),
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Start Shopping",
+                fontWeight = FontWeight.Black,
+                fontSize = 15.sp,
+                color = Color(0xFF052E16)
+            )
         }
 
         Button(

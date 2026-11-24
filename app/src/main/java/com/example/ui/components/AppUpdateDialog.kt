@@ -48,6 +48,7 @@ fun AppUpdateDialog(
     releaseNotes: String,
     updateUrl: String,
     installedVersionName: String = "1.0",
+    storefrontUrl: String = com.example.util.WebPortalExporter.DEFAULT_LIVE_PORTAL_URL,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -130,20 +131,17 @@ fun AppUpdateDialog(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // Action Buttons
+                // Primary Update Action -> opens strictly in external browser (APK download or web=1 storefront)
                 Button(
                     onClick = {
                         val target = com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(updateUrl)
                             .ifBlank { com.example.util.WebPortalExporter.DEFAULT_GITHUB_APK_RELEASE_URL }
-                        try {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(target)).apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            context.startActivity(intent)
-                            onDismiss()
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "Could not open update link: ${e.message}", Toast.LENGTH_SHORT).show()
-                        }
+                        com.example.util.WebPortalExporter.openInExternalBrowserOnly(
+                            context = context,
+                            url = target,
+                            forceStayOnWebIfPortal = true
+                        )
+                        onDismiss()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = Color.White),
                     shape = RoundedCornerShape(14.dp),
@@ -157,9 +155,32 @@ fun AppUpdateDialog(
                     Text("UPDATE APP NOW", fontWeight = FontWeight.Black, fontSize = 14.sp)
                 }
 
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Secondary Live Storefront Web Fallback -> guarantees access to APK download & web storefront
+                OutlinedButton(
+                    onClick = {
+                        val resolvedPortal = com.example.util.WebPortalExporter.normalizePortalUrl(storefrontUrl)
+                            .ifBlank { com.example.util.WebPortalExporter.DEFAULT_LIVE_PORTAL_URL }
+                        com.example.util.WebPortalExporter.openInExternalBrowserOnly(
+                            context = context,
+                            url = resolvedPortal,
+                            forceStayOnWebIfPortal = true
+                        )
+                        onDismiss()
+                    },
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("open_live_storefront_update_button")
+                ) {
+                    Text("Open Live Storefront (APK / Web)", fontWeight = FontWeight.Bold, fontSize = 12.5.sp, color = CyberCyan)
+                }
+
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Store items & prices already sync automatically. Tap above once to download and install the new app version.",
+                    text = "Opens in your phone browser so you can download & install the new APK cleanly.",
                     fontSize = 10.5.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center

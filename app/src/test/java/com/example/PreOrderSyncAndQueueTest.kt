@@ -257,4 +257,122 @@ class PreOrderSyncAndQueueTest {
         assertTrue(flushed >= 1)
         assertTrue(capturedTablePosts.any { it.contains("Custom Ankara Agbada") && it.contains("Seyi Ogunleye") })
     }
+
+    @Test
+    fun syncPreOrdersWithCloud_fallsBackToSingleRowUpsertWhenBatchFails() = runBlocking {
+        // Reject batch array payloads, accept single-object row upsert
+        val customServer = HttpServer.create(InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 0)
+        val port = customServer.address.port
+        val singleRowBodies = CopyOnWriteArrayList<String>()
+        customServer.createContext("/rest/v1/pre_orders") { exchange ->
+            val method = exchange.requestMethod.uppercase()
+            val body = exchange.requestBody.bufferedReader().use { it.readText() }
+            if (method == "POST") {
+                if (body.trimStart().startsWith("[")) {
+                    val err = """{"message":"batch payload rejected"}""".toByteArray(Charsets.UTF_8)
+                    exchange.responseHeaders.add("Content-Type", "application/json")
+                    exchange.sendResponseHeaders(400, err.size.toLong())
+                    exchange.responseBody.use { it.write(err) }
+                } else {
+                    singleRowBodies.add(body)
+                    val ok = "[]".toByteArray(Charsets.UTF_8)
+                    exchange.responseHeaders.add("Content-Type", "application/json")
+                    exchange.sendResponseHeaders(201, ok.size.toLong())
+                    exchange.responseBody.use { it.write(ok) }
+                }
+            } else {
+                val ok = "[]".toByteArray(Charsets.UTF_8)
+                exchange.responseHeaders.add("Content-Type", "application/json")
+                exchange.sendResponseHeaders(200, ok.size.toLong())
+                exchange.responseBody.use { it.write(ok) }
+            }
+        }
+        customServer.createContext("/storage/v1/object") { exchange ->
+            val err = """{"error":"not_found"}""".toByteArray(Charsets.UTF_8)
+            exchange.sendResponseHeaders(404, err.size.toLong())
+            exchange.responseBody.use { it.write(err) }
+        }
+        customServer.start()
+        try {
+            val syncService = SupabaseSyncService(
+                SupabaseConfig(
+                    url = "http://127.0.0.1:$port",
+                    anonKey = "sb_publishable_test_key_odiya",
+                    isConnected = true
+                )
+            )
+            val req = PreOrderRequest(
+                id = "REQ-FALLBACK01",
+                customerId = "cust-fb",
+                customerName = "Adaeze Obi",
+                customerPhone = "+2348055566677",
+                productName = "Bespoke Lace Dress",
+                brandName = "Odiya Couture",
+                targetBudget = Double.NaN
+            )
+            val res = syncService.syncPreOrdersWithCloud(listOf(req), preferLocalIds = setOf("REQ-FALLBACK01"))
+            assertTrue("Expected success, got ${res.exceptionOrNull()?.message}", res.isSuccess)
+            assertTrue(
+                singleRowBodies.any {
+                    it.contains("REQ-FALLBACK01") &&
+                        it.contains("Adaeze Obi") &&
+                        (it.contains("\"target_budget\":0") || it.contains("\"target_budget\":0.0"))
+                }
+            )
+        } finally {
+            customServer.stop(0)
+        }
+    }
+
+    @Test
+    fun adminSyncPreOrdersNow_pullsRemoteCustomerPreOrderIntoAdminState() = runBlocking {
+        val now = System.currentTimeMillis()
+        tableGetBody = """
+            [
+              {
+                "id": "REQ-WEB99",
+                "customer_id": "web-guest",
+                "customer_name": "Chidi Okonkwo",
+                "customer_phone": "+2348011223344",
+                "product_name": "Limited Velvet Loafers",
+                "brand_name": "Prada",
+                "category": "Shoes",
+                "preferred_size": "44",
+                "preferred_color": "Black",
+                "target_budget": 95000.0,
+                "description": "From Web Storefront",
+                "photo_url": "",
+                "status": "PENDING",
+                "created_at": $now,
+                "admin_response": "",
+                "admin_quoted_price": 0.0,
+                "customer_reply": ""
+              }
+            ]
+        """.trimIndent()
+
+        assertTrue(viewModel.verifyAdminPassword(viewModel.adminPassword.value))
+        viewModel.repository.supabaseSync.updateConfig(
+            SupabaseConfig(
+                url = "http://127.0.0.1:$serverPort",
+                anonKey = "sb_publishable_test_key_odiya",
+                isConnected = true
+            )
+        )
+
+        val latch = java.util.concurrent.CountDownLatch(1)
+        var syncOk = false
+        viewModel.syncPreOrdersNow { ok, _ ->
+            syncOk = ok
+            latch.countDown()
+        }
+        repeat(40) {
+            Shadows.shadowOf(Looper.getMainLooper()).idle()
+            if (latch.count == 0L) return@repeat
+            delay(50)
+        }
+
+        assertTrue(syncOk)
+        assertTrue(viewModel.preOrderRequests.value.any { it.id == "REQ-WEB99" && it.customerName == "Chidi Okonkwo" })
+    }
 }

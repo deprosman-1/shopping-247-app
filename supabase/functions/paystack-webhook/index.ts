@@ -73,10 +73,20 @@ Deno.serve(async (req: Request) => {
     }
 
     const supabase = createClient(supabaseUrl, serviceRoleKey);
-    const amountKobo = Number(data?.amount ?? 0);
-    const amountNaira = Math.round(amountKobo) / 100;
+    const amountKobo = Math.round(Number(data?.amount ?? 0));
+    const amountNaira = amountKobo / 100;
     const channel = String(data?.channel ?? "paystack");
     const status = String(data?.status ?? (eventName === "charge.success" ? "success" : "pending")).toLowerCase();
+    const purpose = String(data?.metadata?.purpose ?? "ORDER_CHECKOUT").toUpperCase();
+    const splitMode = String(data?.metadata?.split_mode ?? "STANDARD");
+    const partnerId = String(data?.metadata?.partner_id ?? "");
+    const partnerName = String(data?.metadata?.partner_name ?? "");
+    const subaccountCode = String(data?.subaccount?.subaccount_code ?? data?.metadata?.subaccount_code ?? "");
+    const splitCode = String(data?.split?.split_code ?? data?.metadata?.split_code ?? "");
+    const odiyaShareKobo = Math.round(Number(data?.metadata?.odiya_share_kobo ?? amountKobo));
+    const odiyaCommissionKobo = Math.round(Number(data?.metadata?.odiya_commission_kobo ?? 0));
+    const hostingFeeKobo = Math.round(Number(data?.metadata?.hosting_fee_kobo ?? 0));
+    const partnerNetKobo = Math.round(Number(data?.metadata?.partner_net_kobo ?? 0));
 
     let orderId = String(data?.metadata?.order_id ?? "").trim();
     if (!orderId) {
@@ -94,18 +104,27 @@ Deno.serve(async (req: Request) => {
         order_id: orderId || reference,
         customer_phone: String(data?.metadata?.customer_phone ?? data?.customer?.phone ?? ""),
         customer_name: String(data?.metadata?.customer_name ?? ""),
-        amount_kobo: Math.round(amountKobo),
+        amount_kobo: amountKobo,
         amount_naira: amountNaira,
         currency: String(data?.currency ?? "NGN"),
         channel,
         status: eventName === "charge.success" ? "success" : status,
+        split_mode: splitMode,
+        partner_id: partnerId,
+        partner_name: partnerName,
+        subaccount_code: subaccountCode,
+        split_code: splitCode,
+        odiya_share_kobo: odiyaShareKobo,
+        odiya_commission_kobo: odiyaCommissionKobo,
+        hosting_fee_kobo: hostingFeeKobo,
+        partner_net_kobo: partnerNetKobo,
         paid_at: data?.paid_at ?? new Date().toISOString(),
         verified_by: "paystack_webhook",
       },
       { onConflict: "reference" },
     );
 
-    if (eventName === "charge.success" && orderId) {
+    if (eventName === "charge.success" && orderId && purpose !== "PARTNER_HOSTING_FEE") {
       const nowMs = Date.now();
       const { data: existingOrder } = await supabase
         .from("orders")
@@ -114,7 +133,10 @@ Deno.serve(async (req: Request) => {
         .maybeSingle();
 
       const existingUpdates = String(existingOrder?.status_updates_json ?? "").trim();
-      const note = `Paystack webhook verified (${channel}) • ₦${amountNaira.toLocaleString("en-NG")} • Ref ${reference}`;
+      const splitTag = partnerNetKobo > 0
+        ? ` • Split: ODIYA ₦${Math.round(odiyaShareKobo / 100).toLocaleString("en-NG")} / Partner ₦${Math.round(partnerNetKobo / 100).toLocaleString("en-NG")}`
+        : "";
+      const note = `Paystack webhook verified (${channel}) • ₦${amountNaira.toLocaleString("en-NG")} • Ref ${reference}${splitTag}`;
       const newEntry = `CONFIRMED|${nowMs}|${note}`;
       const nextUpdates = existingUpdates
         ? (existingUpdates.includes(reference) ? existingUpdates : `${existingUpdates};${newEntry}`)

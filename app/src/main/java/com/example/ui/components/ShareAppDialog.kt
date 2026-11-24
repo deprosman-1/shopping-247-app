@@ -30,7 +30,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.InstallMobile
 import androidx.compose.material.icons.filled.QrCode2
@@ -210,7 +209,6 @@ fun ShareAppDialog(
             append("🛍️ ${storeName.uppercase()}\n${storeProfile.tagline}\n")
             val allPhones = listOf(storeProfile.phoneNumber, storeProfile.secondaryPhoneNumber).filter { it.isNotBlank() }.joinToString(" / ")
             if (allPhones.isNotBlank()) append("📞 Phone: $allPhones\n")
-            if (storeProfile.supportEmail.isNotBlank()) append("✉️ Email: ${storeProfile.supportEmail}\n")
             if (storeProfile.storeAddress.isNotBlank()) append("📍 Address: ${storeProfile.storeAddress}\n")
             append("\n")
             if (isLiveWeb) {
@@ -558,7 +556,11 @@ fun ShareAppDialog(
                                     color = CyberCyan
                                 )
                                 Text(
-                                    text = if (includeCloudCreds) "ON: Customer signups & orders sync directly to your Admin Control Room." else "OFF: Sharing portal URL only.",
+                                    text = if (includeCloudCreds) {
+                                        "ON: Auto-links new phones to cloud. Tip: Turn OFF for a simpler, faster-scanning QR code."
+                                    } else {
+                                        "OFF: Short portal link & ultra-fast camera QR scan (uses embedded store cloud)."
+                                    },
                                     fontSize = 9.5.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -573,16 +575,16 @@ fun ShareAppDialog(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // High-Precision Scannable QR Code (ISO/IEC 18004 Level H)
+                // High-Precision Scannable QR Code (ISO/IEC 18004)
                 Box(
                     modifier = Modifier
-                        .size(216.dp)
+                        .size(224.dp)
                         .clip(RoundedCornerShape(20.dp))
                         .border(2.dp, SuccessGreen.copy(alpha = 0.65f), RoundedCornerShape(20.dp))
                         .padding(4.dp)
                 ) {
                     QrCodeView(
-                        content = activeShareUrl,
+                        content = activeShareUrl.trim(),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -780,35 +782,23 @@ fun ShareAppDialog(
                         Text("WhatsApp", color = Color.White, fontWeight = FontWeight.Bold)
                     }
 
-                    // Email Share
+                    // Copy Full Invite Message
                     Button(
                         onClick = {
-                            val emailIntent = Intent(Intent.ACTION_SENDTO).apply {
-                                data = Uri.parse("mailto:")
-                                putExtra(Intent.EXTRA_SUBJECT, "$storeName - Install on Android & Computer")
-                                putExtra(Intent.EXTRA_TEXT, shareTextPayload)
-                            }
-                            try {
-                                context.startActivity(emailIntent)
-                            } catch (_: Exception) {
-                                val fallbackIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "message/rfc822"
-                                    putExtra(Intent.EXTRA_SUBJECT, "$storeName - Install on Android & Computer")
-                                    putExtra(Intent.EXTRA_TEXT, shareTextPayload)
-                                }
-                                context.startActivity(Intent.createChooser(fallbackIntent, "Send App Link via Email"))
-                            }
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("$storeName Invite", shareTextPayload))
+                            Toast.makeText(context, "✅ Storefront Invite Copied!", Toast.LENGTH_SHORT).show()
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .weight(1f)
                             .height(48.dp)
-                            .testTag("share_email_button")
+                            .testTag("share_copy_invite_button")
                     ) {
-                        Icon(Icons.Default.Email, contentDescription = "Email", tint = Color.White, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy Invite", tint = Color.White, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Email", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("Copy Invite", color = Color.White, fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -902,24 +892,22 @@ fun ShareAppDialog(
                 var isCheckingApkUpdate by remember { mutableStateOf(false) }
                 Button(
                     onClick = {
-                        val configuredApkUrl = com.example.util.WebPortalExporter.normalizeWebUrl(storeProfile.apkDownloadUrl)
+                        val configuredApkUrl = com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(storeProfile.apkDownloadUrl)
+                            .ifBlank { com.example.util.WebPortalExporter.getSavedCustomPortalUrl(context) }
+                            .ifBlank { DEPROS_DOWNLOAD_URL }
                         if (viewModel != null) {
                             isCheckingApkUpdate = true
-                            viewModel.checkForAppUpdates(showPopupIfFound = true) { isLatest, msg ->
+                            viewModel.checkForAppUpdates(showPopupIfFound = true) { isLatest, _ ->
                                 isCheckingApkUpdate = false
                                 if (!isLatest) {
                                     onDismiss()
-                                } else if (configuredApkUrl.isNotBlank()) {
-                                    Toast.makeText(context, "⬇️ Opening Official APK Download Link...", Toast.LENGTH_SHORT).show()
-                                    openInWebBrowser(context, configuredApkUrl)
                                 } else {
-                                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, "⬇️ Opening Live Storefront & APK Download...", Toast.LENGTH_SHORT).show()
+                                    openInWebBrowser(context, configuredApkUrl)
                                 }
                             }
-                        } else if (configuredApkUrl.isNotBlank()) {
-                            openInWebBrowser(context, configuredApkUrl)
                         } else {
-                            Toast.makeText(context, "Running v${installedVerPair.second} (latest build).", Toast.LENGTH_SHORT).show()
+                            openInWebBrowser(context, configuredApkUrl)
                         }
                     },
                     enabled = !isCheckingApkUpdate,
@@ -1188,14 +1176,6 @@ fun ShareAppDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = FontWeight.Bold
                 )
-                if (storeProfile.supportEmail.isNotBlank()) {
-                    Text(
-                        text = storeProfile.supportEmail,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
                 val footerPhones = listOf(storeProfile.phoneNumber, storeProfile.secondaryPhoneNumber).filter { it.isNotBlank() }.joinToString(" / ")
                 if (footerPhones.isNotBlank() || storeProfile.storeAddress.isNotBlank()) {
                     val footerContact = listOfNotNull(
@@ -1265,32 +1245,31 @@ fun openInWebBrowser(context: Context, url: String) {
         url.startsWith("http://", ignoreCase = true) ||
         url.startsWith("https://", ignoreCase = true)
     ) {
-        url
+        url.trim()
     } else {
-        "https://$url"
+        "https://${url.trim()}"
+    }
+    if (cleanUrl.startsWith("http://", ignoreCase = true) ||
+        cleanUrl.startsWith("https://", ignoreCase = true)
+    ) {
+        com.example.util.WebPortalExporter.openInExternalBrowserOnly(
+            context = context,
+            url = cleanUrl,
+            forceStayOnWebIfPortal = true
+        )
+        return
     }
     val uri = Uri.parse(cleanUrl)
     try {
-        val baseIntent = Intent(Intent.ACTION_VIEW, uri).apply {
-            addCategory(Intent.CATEGORY_BROWSABLE)
+        val directIntent = Intent(Intent.ACTION_VIEW, uri).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        val chooserIntent = Intent.createChooser(baseIntent, "Open Link").apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        context.startActivity(chooserIntent)
-    } catch (e: Exception) {
-        try {
-            val directIntent = Intent(Intent.ACTION_VIEW, uri).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(directIntent)
-        } catch (e2: Exception) {
-            Toast.makeText(context, "Link copied to clipboard! Paste into App → Account → Link Now.", Toast.LENGTH_LONG).show()
-            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            val clip = ClipData.newPlainText("App Link", cleanUrl)
-            clipboard.setPrimaryClip(clip)
-        }
+        context.startActivity(directIntent)
+    } catch (e2: Exception) {
+        Toast.makeText(context, "Link copied to clipboard! Paste into App → Account → Link Now.", Toast.LENGTH_LONG).show()
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = ClipData.newPlainText("App Link", cleanUrl)
+        clipboard.setPrimaryClip(clip)
     }
 }
 
@@ -1341,7 +1320,7 @@ fun shareCleanApkFile(context: Context, fallbackUrl: String = DEPROS_DOWNLOAD_UR
             )
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(shareIntent, "Send Official APK via WhatsApp / Drive / Email"))
+        context.startActivity(Intent.createChooser(shareIntent, "Send Official APK via WhatsApp / Drive"))
     } catch (e: Exception) {
         Toast.makeText(context, "Sharing download link instead: ${e.message}", Toast.LENGTH_LONG).show()
         val shareIntent = Intent(Intent.ACTION_SEND).apply {

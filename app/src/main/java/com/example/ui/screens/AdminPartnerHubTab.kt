@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
@@ -64,6 +65,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -98,6 +100,7 @@ import com.example.data.model.PartnerSubmissionStatus
 import com.example.data.model.PartnerTransactionType
 import com.example.data.model.ProductCategory
 import com.example.data.model.SalesReportPeriod
+import com.example.data.remote.PaystackGatewayService
 import com.example.ui.components.SignaturePadBox
 import com.example.ui.components.SignaturePreviewBox
 import com.example.ui.components.ZoomableImageDialog
@@ -105,6 +108,8 @@ import com.example.ui.theme.AccentGold
 import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.MoniepointBlue
 import com.example.ui.theme.OPayGreen
+import com.example.ui.theme.PaystackNavy
+import com.example.ui.theme.PaystackTeal
 import com.example.ui.theme.SuccessGreen
 import com.example.util.PartnerDocumentExporter
 import com.example.util.ProductImageHelper
@@ -361,7 +366,59 @@ fun AdminPartnerHubTab(
                             viewModel.collectUnreportedOfflineSalePenalty(activeFolder.id, prodId, qty, reason) { _, msg ->
                                 Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                             }
-                        }
+                        },
+                        onSavePaystackSplitSettings = { bankCode, acctNum, acctNm, subCode, dueHostAmt, autoDeduct ->
+                            viewModel.updatePartnerEditableTerms(
+                                partnerId = activeFolder.id,
+                                commissionPercent = activeFolder.stipulatedCommissionPercent,
+                                agreedQtyPerPeriod = activeFolder.agreedQuantityPerPeriod,
+                                periodUnit = activeFolder.periodUnit,
+                                monthlyHostingPayment = activeFolder.monthlyHostingPayment,
+                                hostingDuration = activeFolder.hostingDuration,
+                                opayNumber = activeFolder.opayAccountNumber,
+                                opayName = activeFolder.opayAccountName,
+                                moniepointNumber = activeFolder.moniepointAccountNumber,
+                                moniepointName = activeFolder.moniepointAccountName,
+                                paystackBankCode = bankCode,
+                                paystackAccountNumber = acctNum,
+                                paystackAccountName = acctNm,
+                                paystackSubaccountCode = subCode,
+                                pendingHostingFeeBalance = dueHostAmt,
+                                autoDeductHostingFromPaystackSplit = autoDeduct
+                            )
+                            Toast.makeText(context, "Paystack Split settings saved for ${activeFolder.businessName}!", Toast.LENGTH_SHORT).show()
+                        },
+                        onRegisterPaystackSubaccount = { bankCode, acctNum, subCode ->
+                            viewModel.registerPartnerPaystackSubaccount(
+                                partnerId = activeFolder.id,
+                                businessName = activeFolder.businessName,
+                                bankCode = bankCode,
+                                accountNumber = acctNum,
+                                commissionPercent = activeFolder.stipulatedCommissionPercent,
+                                existingSubaccountCode = subCode
+                            ) { _, msg ->
+                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        onPayHostingViaPaystack = { amtOverride ->
+                            viewModel.startPaystackHostingFeeCheckout(
+                                partnerId = activeFolder.id,
+                                amountOverrideNaira = amtOverride,
+                                onReadyToOpenUrl = { url, ref ->
+                                    Toast.makeText(context, "Opening Paystack Hosting Checkout ($ref)...", Toast.LENGTH_LONG).show()
+                                    com.example.util.WebPortalExporter.openExternalUrl(context, url)
+                                },
+                                onFailure = { err ->
+                                    Toast.makeText(context, err, Toast.LENGTH_LONG).show()
+                                }
+                            )
+                        },
+                        onVerifyPaystackHosting = { ref ->
+                            viewModel.verifyPaystackPayment(reference = ref) { _, msg ->
+                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        paystackState = viewModel.paystackCheckoutState.collectAsState().value
                     )
                 }
             }
@@ -1115,7 +1172,12 @@ private fun AdminSinglePartnerFolderAnalytics(
     onRenewContract: (String, Double?) -> Unit,
     onTerminateAndDelete: (String) -> Unit,
     onBillNextHostingCycleNow: () -> Unit,
-    onCollectOfflinePenalty: (String, Int, String) -> Unit
+    onCollectOfflinePenalty: (String, Int, String) -> Unit,
+    onSavePaystackSplitSettings: (String, String, String, String, Double, Boolean) -> Unit,
+    onRegisterPaystackSubaccount: (String, String, String) -> Unit,
+    onPayHostingViaPaystack: (Double?) -> Unit,
+    onVerifyPaystackHosting: (String) -> Unit,
+    paystackState: com.example.data.remote.PaystackCheckoutUiState
 ) {
     val context = LocalContext.current
     var reportPeriod by remember { mutableStateOf(SalesReportPeriod.DAILY) }
@@ -1123,6 +1185,36 @@ private fun AdminSinglePartnerFolderAnalytics(
     var opayNm by remember(folder.id) { mutableStateOf(folder.opayAccountName) }
     var monieNum by remember(folder.id) { mutableStateOf(folder.moniepointAccountNumber) }
     var monieNm by remember(folder.id) { mutableStateOf(folder.moniepointAccountName) }
+    var psBankCode by remember(folder.id, folder.paystackBankCode) {
+        mutableStateOf(
+            folder.paystackBankCode.ifBlank {
+                when {
+                    folder.opayAccountNumber.isNotBlank() -> "999992"
+                    folder.moniepointAccountNumber.isNotBlank() -> "50515"
+                    else -> "999992"
+                }
+            }
+        )
+    }
+    var psAccountNum by remember(folder.id, folder.paystackAccountNumber) {
+        mutableStateOf(
+            folder.paystackAccountNumber.ifBlank {
+                folder.opayAccountNumber.ifBlank { folder.moniepointAccountNumber }
+            }
+        )
+    }
+    var psAccountNm by remember(folder.id, folder.paystackAccountName) {
+        mutableStateOf(folder.paystackAccountName.ifBlank { folder.businessName })
+    }
+    var psSubaccountCode by remember(folder.id, folder.paystackSubaccountCode) {
+        mutableStateOf(folder.paystackSubaccountCode)
+    }
+    var psDueHostingAmt by remember(folder.id, folder.pendingHostingFeeBalance) {
+        mutableStateOf(folder.pendingHostingFeeBalance.toInt().toString())
+    }
+    var psAutoDeductHosting by remember(folder.id, folder.autoDeductHostingFromPaystackSplit) {
+        mutableStateOf(folder.autoDeductHostingFromPaystackSplit)
+    }
     var zoomReceipt by remember { mutableStateOf<String?>(null) }
 
     var renewDuration by remember(folder.id, folder.hostingDuration) { mutableStateOf(folder.hostingDuration) }
@@ -1556,9 +1648,177 @@ private fun AdminSinglePartnerFolderAnalytics(
             Button(
                 onClick = { onUpdateAccounts(opayNum, opayNm, monieNum, monieNm) },
                 colors = ButtonDefaults.buttonColors(containerColor = OPayGreen, contentColor = Color.White),
-                modifier = Modifier.fillMaxWidth().height(44.dp)
+                modifier = Modifier.fillMaxWidth().height(48.dp)
             ) {
                 Text("Save Folder Settlement Accounts", fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+
+    // Paystack Split Settlement & Hosting Fee Auto-Deduction Card
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.5.dp, PaystackTeal.copy(alpha = 0.7f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("admin_paystack_split_card")
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.CreditCard, contentDescription = null, tint = PaystackTeal, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("PAYSTACK SPLIT SETTLEMENT", fontWeight = FontWeight.Black, fontSize = 12.5.sp, color = PaystackTeal)
+                }
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (psSubaccountCode.startsWith("ACCT_")) SuccessGreen.copy(alpha = 0.16f) else AccentGold.copy(alpha = 0.18f)
+                ) {
+                    Text(
+                        text = if (psSubaccountCode.startsWith("ACCT_")) "SUBACCOUNT ACTIVE" else "NEEDS ACCT_ CODE",
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Black,
+                        color = if (psSubaccountCode.startsWith("ACCT_")) SuccessGreen else AccentGold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+            }
+            Text(
+                text = "Splits customer Paystack payments: ODIYA main account receives ${folder.stipulatedCommissionPercent}% commission + due Hosting Fee offset; Partner Subaccount (${psSubaccountCode.ifBlank { "unregistered" }}) receives Partner Net payout.",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text("Settlement Bank:", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                PaystackGatewayService.SUPPORTED_NIGERIAN_SETTLEMENT_BANKS.forEach { bank ->
+                    FilterChip(
+                        selected = psBankCode == bank.code,
+                        onClick = { psBankCode = bank.code },
+                        label = { Text(bank.name.substringBefore(" ("), fontSize = 10.5.sp) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = PaystackTeal,
+                            selectedLabelColor = PaystackNavy
+                        )
+                    )
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = psAccountNum,
+                    onValueChange = { psAccountNum = it.filter { c -> c.isDigit() }.take(10) },
+                    label = { Text("10-Digit Account No.") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.weight(1f).testTag("admin_paystack_account_input")
+                )
+                OutlinedTextField(
+                    value = psAccountNm,
+                    onValueChange = { psAccountNm = it },
+                    label = { Text("Account Name") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            OutlinedTextField(
+                value = psSubaccountCode,
+                onValueChange = { psSubaccountCode = it.trim() },
+                label = { Text("Paystack Subaccount Code (ACCT_...)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().testTag("admin_paystack_subaccount_input")
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { onRegisterPaystackSubaccount(psBankCode, psAccountNum, psSubaccountCode) },
+                    colors = ButtonDefaults.buttonColors(containerColor = PaystackTeal, contentColor = PaystackNavy),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .testTag("admin_register_paystack_subaccount_button")
+                ) {
+                    Text("Register Subaccount", fontSize = 11.sp, fontWeight = FontWeight.Black)
+                }
+                OutlinedButton(
+                    onClick = {
+                        onSavePaystackSplitSettings(
+                            psBankCode,
+                            psAccountNum,
+                            psAccountNm,
+                            psSubaccountCode,
+                            psDueHostingAmt.toDoubleOrNull() ?: 0.0,
+                            psAutoDeductHosting
+                        )
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .testTag("admin_save_paystack_split_button")
+                ) {
+                    Text("Save Split Settings", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            HorizontalDivider()
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = psDueHostingAmt,
+                    onValueChange = { psDueHostingAmt = it.filter { c -> c.isDigit() || c == '.' } },
+                    label = { Text("Due Hosting Fee ₦") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.weight(1f).testTag("admin_pending_hosting_input")
+                )
+                OutlinedButton(
+                    onClick = { psDueHostingAmt = folder.monthlyHostingPayment.toInt().toString() },
+                    modifier = Modifier.height(48.dp)
+                ) {
+                    Text("Load Monthly (${nairaFormat.format(folder.monthlyHostingPayment)})", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Auto-Deduct Due Hosting Fee in Paystack Split", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                    Text("Routes due hosting fee into ODIYA's share during product sales.", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(
+                    checked = psAutoDeductHosting,
+                    onCheckedChange = { psAutoDeductHosting = it },
+                    modifier = Modifier.testTag("admin_auto_deduct_hosting_switch")
+                )
+            }
+            Button(
+                enabled = !paystackState.isLoading,
+                onClick = { onPayHostingViaPaystack(psDueHostingAmt.toDoubleOrNull()) },
+                colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = Color.Black),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("admin_pay_hosting_paystack_button")
+            ) {
+                Text(
+                    text = "Pay Monthly Hosting Fee via Paystack (100% ODIYA)",
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Black
+                )
+            }
+            if (paystackState.purpose == "PARTNER_HOSTING_FEE" && paystackState.partnerId == folder.id && paystackState.reference.isNotBlank()) {
+                OutlinedButton(
+                    enabled = !paystackState.isLoading,
+                    onClick = { onVerifyPaystackHosting(paystackState.reference) },
+                    modifier = Modifier.fillMaxWidth().height(48.dp).testTag("admin_verify_hosting_paystack_button")
+                ) {
+                    Text("Verify Hosting Payment (${paystackState.reference})", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
     }

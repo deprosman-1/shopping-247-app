@@ -161,10 +161,31 @@ CREATE TABLE IF NOT EXISTS public.paystack_transactions (
     channel TEXT DEFAULT 'card',
     status TEXT DEFAULT 'initialized',
     authorization_url TEXT DEFAULT '',
+    split_mode TEXT DEFAULT 'STANDARD',
+    partner_id TEXT DEFAULT '',
+    partner_name TEXT DEFAULT '',
+    subaccount_code TEXT DEFAULT '',
+    split_code TEXT DEFAULT '',
+    odiya_share_kobo BIGINT DEFAULT 0,
+    odiya_commission_kobo BIGINT DEFAULT 0,
+    hosting_fee_kobo BIGINT DEFAULT 0,
+    partner_net_kobo BIGINT DEFAULT 0,
+    split_breakdown_json TEXT DEFAULT '',
     paid_at TIMESTAMPTZ,
     verified_by TEXT DEFAULT 'edge_function',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE public.paystack_transactions ADD COLUMN IF NOT EXISTS split_mode TEXT DEFAULT 'STANDARD';
+ALTER TABLE public.paystack_transactions ADD COLUMN IF NOT EXISTS partner_id TEXT DEFAULT '';
+ALTER TABLE public.paystack_transactions ADD COLUMN IF NOT EXISTS partner_name TEXT DEFAULT '';
+ALTER TABLE public.paystack_transactions ADD COLUMN IF NOT EXISTS subaccount_code TEXT DEFAULT '';
+ALTER TABLE public.paystack_transactions ADD COLUMN IF NOT EXISTS split_code TEXT DEFAULT '';
+ALTER TABLE public.paystack_transactions ADD COLUMN IF NOT EXISTS odiya_share_kobo BIGINT DEFAULT 0;
+ALTER TABLE public.paystack_transactions ADD COLUMN IF NOT EXISTS odiya_commission_kobo BIGINT DEFAULT 0;
+ALTER TABLE public.paystack_transactions ADD COLUMN IF NOT EXISTS hosting_fee_kobo BIGINT DEFAULT 0;
+ALTER TABLE public.paystack_transactions ADD COLUMN IF NOT EXISTS partner_net_kobo BIGINT DEFAULT 0;
+ALTER TABLE public.paystack_transactions ADD COLUMN IF NOT EXISTS split_breakdown_json TEXT DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS public.app_security_telemetry (
     id TEXT PRIMARY KEY,
