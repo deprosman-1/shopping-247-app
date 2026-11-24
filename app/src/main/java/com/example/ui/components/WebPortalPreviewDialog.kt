@@ -65,7 +65,7 @@ private class WebPortalJsBridge(private val context: Context) {
     @JavascriptInterface
     fun copySyncLink(link: String) {
         val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        cb.setPrimaryClip(ClipData.newPlainText("24/7 Store Sync Link", link))
+        cb.setPrimaryClip(ClipData.newPlainText("Odiya Store Sync Link", link))
         android.os.Handler(android.os.Looper.getMainLooper()).post {
             Toast.makeText(context, "✅ Store Sync Link copied!", Toast.LENGTH_SHORT).show()
         }
@@ -77,7 +77,7 @@ private class WebPortalJsBridge(private val context: Context) {
 fun WebPortalPreviewDialog(
     sbUrl: String,
     sbKey: String,
-    storeName: String = "24/7 SHOPPING",
+    storeName: String = "ODIYA",
     storePhone: String = "",
     storeAddress: String = "",
     storeEmail: String = "",
@@ -245,7 +245,7 @@ fun WebPortalPreviewDialog(
                     OutlinedButton(
                         onClick = {
                             val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            cb.setPrimaryClip(ClipData.newPlainText("247 Shopping index.html", portalHtml))
+                            cb.setPrimaryClip(ClipData.newPlainText("Odiya index.html", portalHtml))
                             Toast.makeText(context, "✅ HTML copied to clipboard!", Toast.LENGTH_SHORT).show()
                         },
                         modifier = Modifier.weight(1f).height(48.dp).testTag("preview_copy_html_button")

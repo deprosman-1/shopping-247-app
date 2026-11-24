@@ -49,7 +49,7 @@ object PdfInvoiceExporter {
             maximumFractionDigits = 0
         }
         val dateStr = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date(order.createdAt))
-        val storeTitle = storeProfile.storeName.ifBlank { "24/7 SHOPPING" }.uppercase()
+        val storeTitle = storeProfile.storeName.ifBlank { "ODIYA" }.uppercase()
         val lines = listOf(
             "$storeTitle - OFFICIAL PURCHASE INVOICE",
             "Target Recipient: $storeTitle OFFICIAL RECIPIENT",
@@ -121,19 +121,19 @@ object PdfInvoiceExporter {
         val headerPaint = Paint().apply { color = Color.parseColor("#065F46") }
         canvas.drawRect(0f, 0f, 595f, 118f, headerPaint)
 
-        // 24/7 SHOPPING Target Recipient Seal Badge (Top-Right)
+        // ODIYA Target Recipient Seal Badge (Top-Right)
         val badgeBg = Paint().apply { color = Color.parseColor("#F59E0B"); isAntiAlias = true }
         canvas.drawCircle(525f, 58f, 36f, badgeBg)
         val badgeInner = Paint().apply { color = Color.parseColor("#052E16"); isAntiAlias = true }
         canvas.drawCircle(525f, 58f, 32f, badgeInner)
         val badgeTitle = Paint().apply {
             color = Color.parseColor("#F59E0B")
-            textSize = 11f
+            textSize = 10.5f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             textAlign = Paint.Align.CENTER
             isAntiAlias = true
         }
-        canvas.drawText("24/7", 525f, 53f, badgeTitle)
+        canvas.drawText("ODIYA", 525f, 53f, badgeTitle)
         val badgeSub = Paint().apply {
             color = Color.WHITE
             textSize = 7.2f

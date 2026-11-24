@@ -85,7 +85,7 @@ import com.example.ui.theme.SuccessGreen
 import java.io.File
 import java.io.FileOutputStream
 
-// Live Public GitHub Pages Store Portal (opens installed 24/7 SHOPPING app automatically, or shows live catalog + APK download)
+// Live Public GitHub Pages Store Portal (opens installed ODIYA app automatically, or shows live catalog + APK download)
 const val DEPROS_DOWNLOAD_URL = com.example.util.WebPortalExporter.DEFAULT_LIVE_PORTAL_URL
 const val DEPROS_DEV_URL = com.example.util.WebPortalExporter.DEFAULT_LIVE_PORTAL_URL
 
@@ -96,7 +96,7 @@ fun ShareAppDialog(
 ) {
     val context = LocalContext.current
     val storeProfile = viewModel?.storeProfile?.collectAsState()?.value ?: StoreProfileConfig()
-    val storeName = storeProfile.storeName.ifBlank { "24/7 SHOPPING" }
+    val storeName = storeProfile.storeName.ifBlank { "ODIYA" }
 
     LaunchedEffect(Unit) {
         com.example.util.WebPortalExporter.purgeLegacyApkUrlPref(context)
@@ -386,7 +386,7 @@ fun ShareAppDialog(
                                     linkMode = 0
                                     sharePrefs.edit().putInt("share_link_mode", 0).apply()
                                 },
-                                label = { Text("24/7 Cloud Web Link", fontSize = 11.sp) }
+                                label = { Text("Odiya Cloud Web Link", fontSize = 11.sp) }
                             )
                         }
 
@@ -399,7 +399,7 @@ fun ShareAppDialog(
                                     com.example.util.WebPortalExporter.saveCustomPortalUrl(context, it)
                                 },
                                 label = { Text("Your GitHub Pages URL (or Custom https://)") },
-                                placeholder = { Text("https://yourusername.github.io/247-shopping/") },
+                                placeholder = { Text("https://yourusername.github.io/odiya-store/") },
                                 singleLine = true,
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier
@@ -698,7 +698,7 @@ fun ShareAppDialog(
                 Button(
                     onClick = {
                         val broadcastText = "🚀 *INVITATION TO JOIN $storeName*\n\n" +
-                            "Hello friends, customers & partners! You're invited to install and use *${storeName}* — your 24/7 digital store with live catalog browsing, instant pre-orders, secure offline/online payments (OPay, Moniepoint, POS), and real-time delivery tracking.\n\n" +
+                            "Hello friends, customers & partners! You're invited to install and use *${storeName}* — your always-on digital store with live catalog browsing, instant pre-orders, secure offline/online payments (Paystack, OPay, Moniepoint, PalmPay, POS), and real-time delivery tracking.\n\n" +
                             "📲 *Download & Open Portal:* $activeShareUrl\n\n" +
                             "Tap the link above or open the app to shop anytime!"
                         val sendIntent = Intent(Intent.ACTION_SEND).apply {
@@ -1218,7 +1218,7 @@ fun ShareAppDialog(
  * Generates and shares a crisp printable/scannable QR Poster PNG via FileProvider
  * so users can send the QR code to WhatsApp, printers, Instagram, or flyers.
  */
-fun shareQrCodeImage(context: Context, qrTargetUrl: String, storeTitle: String = "24/7 SHOPPING") {
+fun shareQrCodeImage(context: Context, qrTargetUrl: String, storeTitle: String = "ODIYA") {
     try {
         val posterBitmap = generateShareableQrPosterBitmap(qrTargetUrl, title = storeTitle)
         if (posterBitmap == null) {
@@ -1227,7 +1227,7 @@ fun shareQrCodeImage(context: Context, qrTargetUrl: String, storeTitle: String =
         }
         val qrFolder = File(context.cacheDir, "qr_share")
         if (!qrFolder.exists()) qrFolder.mkdirs()
-        val qrFile = File(qrFolder, "247_Shopping_QR_Poster.png")
+        val qrFile = File(qrFolder, "Odiya_QR_Poster.png")
         FileOutputStream(qrFile).use { out ->
             posterBitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
         }
@@ -1308,7 +1308,7 @@ fun shareCleanApkFile(context: Context, fallbackUrl: String = DEPROS_DOWNLOAD_UR
                 type = "text/plain"
                 putExtra(
                     Intent.EXTRA_TEXT,
-                    "🛍️ Download 24/7 SHOPPING:\n$fallbackUrl\n\n📌 In Play Protect, tap 'More details' -> 'Install anyway'!"
+                    "🛍️ Download ODIYA:\n$fallbackUrl\n\n📌 In Play Protect, tap 'More details' -> 'Install anyway'!"
                 )
             }
             context.startActivity(Intent.createChooser(shareIntent, "Share Download Link"))
@@ -1317,7 +1317,7 @@ fun shareCleanApkFile(context: Context, fallbackUrl: String = DEPROS_DOWNLOAD_UR
 
         val shareFolder = File(context.cacheDir, "apk_share")
         if (!shareFolder.exists()) shareFolder.mkdirs()
-        val targetApk = File(shareFolder, "247_Shopping_Official.apk")
+        val targetApk = File(shareFolder, "Odiya_Official.apk")
 
         sourceApk.copyTo(targetApk, overwrite = true)
 
@@ -1330,10 +1330,10 @@ fun shareCleanApkFile(context: Context, fallbackUrl: String = DEPROS_DOWNLOAD_UR
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
             type = "application/vnd.android.package-archive"
             putExtra(Intent.EXTRA_STREAM, apkUri)
-            putExtra(Intent.EXTRA_SUBJECT, "24/7 SHOPPING - Official App APK")
+            putExtra(Intent.EXTRA_SUBJECT, "ODIYA - Official App APK")
             putExtra(
                 Intent.EXTRA_TEXT,
-                "🛍️ 24/7 SHOPPING Official App APK\n\n" +
+                "🛍️ ODIYA Official App APK\n\n" +
                     "📌 EASY INSTALLATION (Android & Computer Emulators):\n" +
                     "1. Tap to open the APK file.\n" +
                     "2. When prompted 'This app may be harmful', tap 'More details' ➡️ 'Install anyway'.\n" +
@@ -1348,7 +1348,7 @@ fun shareCleanApkFile(context: Context, fallbackUrl: String = DEPROS_DOWNLOAD_UR
             type = "text/plain"
             putExtra(
                 Intent.EXTRA_TEXT,
-                "🛍️ Download 24/7 SHOPPING Official App:\n$fallbackUrl\n\nTap 'More details' -> 'Install anyway'!"
+                "🛍️ Download ODIYA Official App:\n$fallbackUrl\n\nTap 'More details' -> 'Install anyway'!"
             )
         }
         context.startActivity(Intent.createChooser(shareIntent, "Share Official Download Link"))

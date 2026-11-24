@@ -12,8 +12,6 @@ import com.example.data.model.PartnerTransactionType
 import com.example.data.model.PaymentMethod
 import com.example.data.model.Product
 import com.example.data.model.ProductColor
-import com.google.firebase.FirebaseApp
-import com.google.firebase.FirebaseOptions
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -39,16 +37,6 @@ class PartnerMouLifecycleTest {
     @Before
     fun setup() = runBlocking {
         app = ApplicationProvider.getApplicationContext()
-        if (FirebaseApp.getApps(app).isEmpty()) {
-            FirebaseApp.initializeApp(
-                app,
-                FirebaseOptions.Builder()
-                    .setApplicationId("1:1234567890:android:abcdef123456")
-                    .setProjectId("test-project")
-                    .setApiKey("fake-api-key")
-                    .build()
-            )
-        }
         app.getSharedPreferences("smartshop_prefs", Context.MODE_PRIVATE).edit().clear().commit()
         dao = DeprosDatabase.getDatabase(app).dao()
         viewModel = MainViewModel(app)
@@ -96,7 +84,7 @@ class PartnerMouLifecycleTest {
         var finalizedOk = false
         viewModel.finalizePartnerAgreement(
             partnerId = partnerId,
-            adminSignatoryName = "24/7 SHOPPING Admin",
+            adminSignatoryName = "ODIYA Admin",
             adminStrokes = "0.2,0.2;0.7,0.8",
             commissionPercent = commissionPct,
             agreedQtyPerPeriod = 20,
@@ -178,7 +166,7 @@ class PartnerMouLifecycleTest {
         assertEquals(3, after30d.hostingCyclesBilled)
         assertEquals(90000.0, after30d.totalHostingFeesAutoDeducted, 0.01)
 
-        // Add partner product (₦25,000 x 2 = ₦50,000 gross; 20% = ₦10,000 to 24/7 SHOPPING, ₦40,000 to Partner)
+        // Add partner product (₦25,000 x 2 = ₦50,000 gross; 20% = ₦10,000 to ODIYA, ₦40,000 to Partner)
         val prod = insertPartnerProduct(
             id = "ptr-prod-split-1",
             partnerId = partnerId,

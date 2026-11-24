@@ -62,6 +62,7 @@ import com.example.ui.theme.CodOrange
 import com.example.ui.theme.MoniepointBlue
 import com.example.ui.theme.OPayGreen
 import com.example.ui.theme.PalmPayPurple
+import com.example.ui.theme.PaystackTeal
 import com.example.ui.theme.PosPurple
 import com.example.ui.theme.SuccessGreen
 import java.text.NumberFormat
@@ -80,6 +81,7 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.Replay
@@ -137,6 +139,12 @@ fun OrdersReceiptsScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = { viewModel.openOrderTracking() },
+                        modifier = Modifier.testTag("orders_open_tracking_button")
+                    ) {
+                        Icon(Icons.Default.LocalShipping, contentDescription = "Live Order Tracking", tint = SuccessGreen)
+                    }
                     IconButton(
                         onClick = { showPreOrderDialog = true },
                         modifier = Modifier.testTag("new_preorder_appbar_button")
@@ -274,14 +282,58 @@ fun OrdersReceiptsScreen(
                     PreOrderRequestCard(viewModel = viewModel)
                 }
 
-                // Section 2: Order Receipts History
+                // Section 2: Live Supabase Order Tracking Shortcut & Order Receipts History
+                item {
+                    Card(
+                        onClick = { viewModel.openOrderTracking() },
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = SuccessGreen.copy(alpha = 0.11f)),
+                        border = BorderStroke(1.2.dp, SuccessGreen.copy(alpha = 0.55f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("orders_live_tracking_banner")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Icon(Icons.Default.LocalShipping, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(22.dp))
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = "LIVE ORDER TRACKING (SUPABASE)",
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 12.sp,
+                                        color = SuccessGreen
+                                    )
+                                    Text(
+                                        text = "Pull real-time statuses & milestones from 'orders' or search by Order ID",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "TRACK →",
+                                fontWeight = FontWeight.Black,
+                                fontSize = 11.5.sp,
+                                color = CyberCyan
+                            )
+                        }
+                    }
+                }
+
                 item {
                     Text(
                         text = "ORDER & PAYMENT RECEIPTS (${orders.size})",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Black,
                         color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 8.dp)
+                        modifier = Modifier.padding(top = 4.dp)
                     )
                 }
 
@@ -339,6 +391,7 @@ fun OrdersReceiptsScreen(
                         OrderReceiptCard(
                             order = order,
                             existingReturn = existingReturn,
+                            onTrackOrder = { viewModel.openOrderTracking(order.orderId) },
                             onViewReceipt = { viewModel.showReceipt(order) },
                             onReorder = {
                                 val (added, skipped) = viewModel.reorderFromOrder(order)
@@ -406,6 +459,7 @@ fun OrdersReceiptsScreen(
 private fun OrderReceiptCard(
     order: Order,
     existingReturn: ReturnRefundRequest? = null,
+    onTrackOrder: () -> Unit = {},
     onViewReceipt: () -> Unit,
     onReorder: () -> Unit = {},
     onCancelOrder: () -> Unit = {},
@@ -420,6 +474,7 @@ private fun OrderReceiptCard(
     val dateFormat = remember { SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()) }
 
     val paymentColor = when (order.paymentMethod) {
+        PaymentMethod.PAYSTACK -> PaystackTeal
         PaymentMethod.OPAY -> OPayGreen
         PaymentMethod.MONIEPOINT -> MoniepointBlue
         PaymentMethod.PALMPAY -> PalmPayPurple
@@ -588,6 +643,17 @@ private fun OrderReceiptCard(
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Return", fontSize = 11.5.sp, color = AccentGold)
                         }
+                    }
+
+                    OutlinedButton(
+                        onClick = onTrackOrder,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, CyberCyan.copy(alpha = 0.65f)),
+                        modifier = Modifier.testTag("track_order_button_${order.orderId}")
+                    ) {
+                        Icon(Icons.Default.LocalShipping, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(15.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Track Live", fontSize = 11.5.sp, color = CyberCyan)
                     }
 
                     OutlinedButton(

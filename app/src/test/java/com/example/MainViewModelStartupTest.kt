@@ -3,8 +3,6 @@ package com.example
 import android.app.Application
 import androidx.test.core.app.ApplicationProvider
 import com.example.util.SecurityUtils
-import com.google.firebase.FirebaseApp
-import com.google.firebase.FirebaseOptions
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertFalse
@@ -23,16 +21,6 @@ class MainViewModelStartupTest {
     @Test
     fun mainViewModelInitializesWithoutNullStateFlowCrash() = runBlocking {
         val app = ApplicationProvider.getApplicationContext<Application>()
-        if (FirebaseApp.getApps(app).isEmpty()) {
-            FirebaseApp.initializeApp(
-                app,
-                FirebaseOptions.Builder()
-                    .setApplicationId("1:1234567890:android:abcdef123456")
-                    .setProjectId("test-project")
-                    .setApiKey("fake-api-key")
-                    .build()
-            )
-        }
         val viewModel = MainViewModel(app)
 
         // Pump main looper so StateFlow collectors inside MainViewModel.init execute

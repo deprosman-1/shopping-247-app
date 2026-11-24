@@ -47,6 +47,7 @@ object SharedReceiptHelper {
 
         val lower = combined.lowercase()
         val detectedMethod = when {
+            lower.contains("paystack") -> PaymentMethod.PAYSTACK
             lower.contains("opay") || lower.contains("paycom") -> PaymentMethod.OPAY
             lower.contains("moniepoint") || lower.contains("monie") -> PaymentMethod.MONIEPOINT
             lower.contains("palmpay") || lower.contains("palm pay") -> PaymentMethod.PALMPAY
@@ -54,6 +55,7 @@ object SharedReceiptHelper {
             else -> null
         }
         val sourceLabel = when (detectedMethod) {
+            PaymentMethod.PAYSTACK -> "Paystack"
             PaymentMethod.OPAY -> "OPay"
             PaymentMethod.MONIEPOINT -> "Moniepoint"
             PaymentMethod.PALMPAY -> "PalmPay"

@@ -664,9 +664,9 @@ fun PartnerPortalScreen(
                                 OutlinedTextField(
                                     value = commissionPercent,
                                     onValueChange = { commissionPercent = it.filter { c -> c.isDigit() || c == '.' } },
-                                    label = { Text("Stipulated % Offer Paid to 24/7 SHOPPING per Product (Editable)") },
+                                    label = { Text("Stipulated % Offer Paid to ODIYA per Product (Editable)") },
                                     supportingText = {
-                                        Text("Example: 10% paid to 24/7 SHOPPING per unit sold; editable per product during upload or Admin verification.")
+                                        Text("Example: 10% paid to ODIYA per unit sold; editable per product during upload or Admin verification.")
                                     },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                     singleLine = true,
@@ -688,7 +688,7 @@ fun PartnerPortalScreen(
                                     Text("4. Partner Folder Settlement Accounts", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
                                 }
                                 Text(
-                                    text = "Each Partner Folder holds separate OPay & Moniepoint accounts with automated payment alerts to both 24/7 SHOPPING & your business.",
+                                    text = "Each Partner Folder holds separate OPay & Moniepoint accounts with automated payment alerts to both ODIYA & your business.",
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -783,9 +783,9 @@ fun PartnerPortalScreen(
 
                                 SignaturePreviewBox(
                                     strokesData = activePartner?.adminCounterSignatureStrokes ?: "",
-                                    signerName = activePartner?.adminCounterSignatureName?.ifBlank { "24/7 SHOPPING Management (Signs in Admin Control Room)" }
-                                        ?: "24/7 SHOPPING Management (Counter-signs upon review)",
-                                    roleLabel = "24/7 SHOPPING COUNTER-SIGNATURE STATUS"
+                                    signerName = activePartner?.adminCounterSignatureName?.ifBlank { "ODIYA Management (Signs in Admin Control Room)" }
+                                        ?: "ODIYA Management (Counter-signs upon review)",
+                                    roleLabel = "ODIYA COUNTER-SIGNATURE STATUS"
                                 )
                             }
                         }
@@ -835,7 +835,7 @@ fun PartnerPortalScreen(
                                     uploadCommissionPercent = commissionPercent
                                     Toast.makeText(
                                         context,
-                                        "MOU Signed & Submitted (${created.id})! Awaiting 24/7 SHOPPING counter-signature in Admin Control Room.",
+                                        "MOU Signed & Submitted (${created.id})! Awaiting ODIYA counter-signature in Admin Control Room.",
                                         Toast.LENGTH_LONG
                                     ).show()
                                     selectedTab = 1
@@ -893,7 +893,7 @@ fun PartnerPortalScreen(
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Text("No Partner Application Found", fontWeight = FontWeight.Bold)
                                     Text(
-                                        "Complete & sign the Categorized Partnership MOU form first. Once 24/7 SHOPPING counter-signs & finalizes it, product upload unlocks here.",
+                                        "Complete & sign the Categorized Partnership MOU form first. Once ODIYA counter-signs & finalizes it, product upload unlocks here.",
                                         fontSize = 12.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -981,7 +981,7 @@ fun PartnerPortalScreen(
                                                 isTerminated -> "CONTRACT TERMINATED — PRODUCT IMAGES & RECORDS DELETED"
                                                 partner.isCatalogLocked -> "CATALOG LOCKED BY ADMIN — DISPLAY ONLY UNTIL RENEWAL"
                                                 isFinalized -> "MOU FINALIZED — ADMIN CONTROL ROOM UPLOAD ACTIVE"
-                                                else -> "LOCKED: AWAITING 24/7 SHOPPING COUNTER-SIGNATURE"
+                                                else -> "LOCKED: AWAITING ODIYA COUNTER-SIGNATURE"
                                             },
                                             fontWeight = FontWeight.Black,
                                             fontSize = 12.sp,
@@ -1095,7 +1095,7 @@ fun PartnerPortalScreen(
                                             OutlinedTextField(
                                                 value = uploadCommissionPercent,
                                                 onValueChange = { uploadCommissionPercent = it.filter { c -> c.isDigit() || c == '.' } },
-                                                label = { Text("% Offer to 24/7 SHOPPING (Editable)") },
+                                                label = { Text("% Offer to ODIYA (Editable)") },
                                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                                 singleLine = true,
                                                 modifier = Modifier.weight(1f)
@@ -1261,7 +1261,7 @@ fun PartnerPortalScreen(
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
                                                 Text(
-                                                    "24/7 Fee: ${sub.commissionPercent}% • Batch: ${sub.batchNumber}",
+                                                    "ODIYA Fee: ${sub.commissionPercent}% • Batch: ${sub.batchNumber}",
                                                     fontSize = 10.5.sp,
                                                     color = CyberCyan,
                                                     fontWeight = FontWeight.SemiBold

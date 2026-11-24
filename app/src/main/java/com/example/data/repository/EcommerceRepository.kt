@@ -49,6 +49,13 @@ data class CloudSyncSummary(
     val errors: List<String> = emptyList()
 )
 
+data class OrderTrackingSyncResult(
+    val orders: List<Order> = emptyList(),
+    val syncedFromSupabase: Boolean = false,
+    val message: String = "",
+    val syncedAtMillis: Long = System.currentTimeMillis()
+)
+
 private fun normalizePhoneKey(phone: String): String {
     val digits = phone.filter { it.isDigit() }
     return if (digits.length >= 10) digits.takeLast(10) else digits
@@ -62,7 +69,6 @@ class EcommerceRepository(
     private val db = DeprosDatabase.getDatabase(appContext)
     private val dao: DeprosDao = db.dao()
     val supabaseSync = SupabaseSyncService()
-    val firebaseRepo = com.example.data.remote.FirebaseRepository(appContext)
     @Volatile
     var lastCloudSyncError: String? = null
         private set
@@ -529,7 +535,7 @@ class EcommerceRepository(
                         id = finalOrder.customerId,
                         fullName = finalOrder.customerName.ifBlank { "Valued Customer" },
                         email = finalOrder.customerEmail.ifBlank {
-                            "cust_${finalOrder.customerPhone.filter { it.isDigit() }.ifBlank { finalOrder.customerId.take(6) }}@247shopping.local"
+                            "cust_${finalOrder.customerPhone.filter { it.isDigit() }.ifBlank { finalOrder.customerId.take(6) }}@odiya.local"
                         },
                         phoneNumber = finalOrder.customerPhone,
                         deliveryAddress = finalOrder.deliveryAddress
@@ -562,14 +568,6 @@ class EcommerceRepository(
                 }
             } else {
                 lastCloudSyncError = "Store Cloud Sync link is not configured on this device yet."
-            }
-
-            scope.launch {
-                try {
-                    firebaseRepo.syncOrder(finalOrder)
-                } catch (e: Exception) {
-                    Log.e("EcommerceRepository", "Firebase mirror sync skipped for order ${finalOrder.orderId}: ${e.message}")
-                }
             }
             Result.success(finalOrder)
         } catch (e: Exception) {
@@ -692,7 +690,6 @@ class EcommerceRepository(
                     if (res.isFailure) {
                         Log.e("EcommerceRepository", "Supabase order status sync failed: ${res.exceptionOrNull()?.message}")
                     }
-                    firebaseRepo.syncOrder(updatedOrder)
                 } catch (e: Exception) {
                     Log.e("EcommerceRepository", "Cloud sync failed for order update", e)
                 }
@@ -712,7 +709,6 @@ class EcommerceRepository(
             scope.launch {
                 try {
                     supabaseSync.syncOrderToCloud(updatedOrder)
-                    firebaseRepo.syncOrder(updatedOrder)
                 } catch (e: Exception) {
                     Log.e("EcommerceRepository", "Cloud sync failed for dispatch rider update", e)
                 }
@@ -721,6 +717,204 @@ class EcommerceRepository(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    private suspend fun mergeRemoteOrderIntoRoom(cloudOrder: Order): Pair<Order, Boolean> {
+        val localExisting = dao.getOrderById(cloudOrder.orderId)?.toDomain()
+        val resolvedCreatedAt = when {
+            localExisting != null && localExisting.createdAt > 0L && cloudOrder.createdAt > 0L -> minOf(localExisting.createdAt, cloudOrder.createdAt)
+            cloudOrder.createdAt > 0L -> cloudOrder.createdAt
+            localExisting != null && localExisting.createdAt > 0L -> localExisting.createdAt
+            else -> System.currentTimeMillis()
+        }
+        val baseUpdates = cloudOrder.statusUpdates.ifEmpty { localExisting?.statusUpdates ?: emptyList() }
+        val resolvedUpdates = if (baseUpdates.none { it.status == cloudOrder.status }) {
+            baseUpdates + StatusUpdate(
+                status = cloudOrder.status,
+                timestamp = System.currentTimeMillis(),
+                note = cloudOrder.verificationNote.ifBlank { "Status updated in Supabase 'orders'" }
+            )
+        } else {
+            baseUpdates
+        }
+
+        val mergedOrder = if (localExisting != null) {
+            cloudOrder.copy(
+                customerName = cloudOrder.customerName.ifBlank { localExisting.customerName },
+                customerEmail = cloudOrder.customerEmail.ifBlank { localExisting.customerEmail },
+                customerPhone = cloudOrder.customerPhone.ifBlank { localExisting.customerPhone },
+                deliveryAddress = cloudOrder.deliveryAddress.ifBlank { localExisting.deliveryAddress },
+                itemsSummary = cloudOrder.itemsSummary.ifBlank { localExisting.itemsSummary },
+                senderName = cloudOrder.senderName.ifBlank { localExisting.senderName },
+                receiptImageUrl = cloudOrder.receiptImageUrl.ifBlank { localExisting.receiptImageUrl },
+                verificationNote = cloudOrder.verificationNote.ifBlank { localExisting.verificationNote },
+                statusUpdates = resolvedUpdates,
+                dispatchRiderWhatsapp = cloudOrder.dispatchRiderWhatsapp.ifBlank { localExisting.dispatchRiderWhatsapp },
+                createdAt = resolvedCreatedAt
+            )
+        } else {
+            cloudOrder.copy(
+                createdAt = resolvedCreatedAt,
+                statusUpdates = resolvedUpdates
+            )
+        }
+        dao.insertOrder(mergedOrder.toEntity())
+        return mergedOrder to (localExisting == null)
+    }
+
+    private fun filterLocalOrdersForCustomer(
+        localOrders: List<Order>,
+        customerId: String,
+        customerPhone: String,
+        customerEmail: String
+    ): List<Order> {
+        val phoneKey = normalizePhoneKey(customerPhone)
+        val cleanEmail = customerEmail.trim().lowercase()
+        val hasCustomerIdentity = customerId.isNotBlank() || phoneKey.isNotBlank() ||
+            (cleanEmail.isNotBlank() && !cleanEmail.endsWith("@247shopping.local") && !cleanEmail.endsWith("@ozich.local") && !cleanEmail.endsWith("@odiya.local"))
+        if (!hasCustomerIdentity) return localOrders
+        return localOrders.filter { ord ->
+            (customerId.isNotBlank() && ord.customerId == customerId) ||
+                (phoneKey.isNotBlank() && normalizePhoneKey(ord.customerPhone) == phoneKey) ||
+                (cleanEmail.isNotBlank() && !cleanEmail.endsWith("@247shopping.local") && !cleanEmail.endsWith("@ozich.local") && !cleanEmail.endsWith("@odiya.local") && ord.customerEmail.trim().lowercase() == cleanEmail)
+        }
+    }
+
+    suspend fun refreshCustomerOrdersFromSupabase(
+        customerId: String,
+        customerPhone: String,
+        customerEmail: String = ""
+    ): OrderTrackingSyncResult = withContext(Dispatchers.IO) {
+        val localSnapshot = dao.getAllOrdersList().map { it.toDomain() }
+        val localMatched = filterLocalOrdersForCustomer(localSnapshot, customerId, customerPhone, customerEmail)
+        if (supabaseSync.isPlaceholderConfig()) {
+            return@withContext OrderTrackingSyncResult(
+                orders = localMatched,
+                syncedFromSupabase = false,
+                message = "Showing ${localMatched.size} cached order(s). Link Supabase Store Cloud for live 'orders' status."
+            )
+        }
+
+        val remoteRes = if (customerId.isBlank() && customerPhone.isBlank() && customerEmail.isBlank()) {
+            supabaseSync.fetchOrdersFromCloud()
+        } else {
+            supabaseSync.fetchCustomerOrdersFromCloud(customerId, customerPhone, customerEmail)
+        }
+
+        remoteRes.fold(
+            onSuccess = { remoteOrders ->
+                val mergedList = remoteOrders.map { mergeRemoteOrderIntoRoom(it).first }
+                val combinedById = (localMatched + mergedList).associateBy { it.orderId }
+                    .values
+                    .sortedByDescending { it.createdAt }
+                OrderTrackingSyncResult(
+                    orders = combinedById,
+                    syncedFromSupabase = true,
+                    message = "Synced ${remoteOrders.size} order(s) live from Supabase 'orders' table."
+                )
+            },
+            onFailure = { err ->
+                OrderTrackingSyncResult(
+                    orders = localMatched,
+                    syncedFromSupabase = false,
+                    message = "Live sync unavailable (${err.message ?: "network error"}). Showing cached order status."
+                )
+            }
+        )
+    }
+
+    suspend fun trackOrdersByQueryFromSupabase(query: String): OrderTrackingSyncResult = withContext(Dispatchers.IO) {
+        val cleanQuery = query.trim()
+        val localAll = dao.getAllOrdersList().map { it.toDomain() }
+        fun matchesLocal(ord: Order): Boolean {
+            if (cleanQuery.isBlank()) return true
+            val qLower = cleanQuery.lowercase()
+            val qDigits = normalizePhoneKey(cleanQuery)
+            return ord.orderId.lowercase().contains(qLower) ||
+                ord.paymentReference.lowercase().contains(qLower) ||
+                ord.customerName.lowercase().contains(qLower) ||
+                ord.customerPhone.lowercase().contains(qLower) ||
+                ord.customerEmail.lowercase().contains(qLower) ||
+                (qDigits.length >= 7 && normalizePhoneKey(ord.customerPhone) == qDigits)
+        }
+
+        if (supabaseSync.isPlaceholderConfig()) {
+            val matched = localAll.filter(::matchesLocal)
+            return@withContext OrderTrackingSyncResult(
+                orders = matched,
+                syncedFromSupabase = false,
+                message = "Supabase not linked. Found ${matched.size} matching order(s) in local storage."
+            )
+        }
+
+        val res = supabaseSync.trackOrdersFromCloud(cleanQuery)
+        res.fold(
+            onSuccess = { cloudMatches ->
+                val mergedRemote = cloudMatches.map { mergeRemoteOrderIntoRoom(it).first }
+                val localMatches = localAll.filter(::matchesLocal)
+                val mergedMap = (localMatches + mergedRemote).associateBy { it.orderId }
+                    .values
+                    .sortedByDescending { it.createdAt }
+                OrderTrackingSyncResult(
+                    orders = mergedMap,
+                    syncedFromSupabase = true,
+                    message = if (mergedMap.isEmpty()) {
+                        "No matching orders found in Supabase 'orders' table for \"$cleanQuery\"."
+                    } else {
+                        "Pulled ${mergedRemote.size} live match(es) from Supabase 'orders' table."
+                    }
+                )
+            },
+            onFailure = { err ->
+                val matched = localAll.filter(::matchesLocal)
+                OrderTrackingSyncResult(
+                    orders = matched,
+                    syncedFromSupabase = false,
+                    message = "Cloud lookup failed (${err.message ?: "network"}). Showing ${matched.size} local match(es)."
+                )
+            }
+        )
+    }
+
+    suspend fun refreshSingleOrderFromSupabase(orderId: String): OrderTrackingSyncResult = withContext(Dispatchers.IO) {
+        val cleanId = orderId.trim()
+        if (cleanId.isBlank()) {
+            return@withContext OrderTrackingSyncResult(emptyList(), false, "Invalid Order ID.")
+        }
+        val localOrder = dao.getOrderById(cleanId)?.toDomain()
+        if (supabaseSync.isPlaceholderConfig()) {
+            return@withContext OrderTrackingSyncResult(
+                orders = listOfNotNull(localOrder),
+                syncedFromSupabase = false,
+                message = "Supabase not linked. Showing local status for $cleanId."
+            )
+        }
+        val res = supabaseSync.fetchSingleOrderStatusFromCloud(cleanId)
+        res.fold(
+            onSuccess = { cloudOrder ->
+                if (cloudOrder != null) {
+                    val (merged, _) = mergeRemoteOrderIntoRoom(cloudOrder)
+                    OrderTrackingSyncResult(
+                        orders = listOf(merged),
+                        syncedFromSupabase = true,
+                        message = "Updated $cleanId live from Supabase 'orders': ${merged.status.label}."
+                    )
+                } else {
+                    OrderTrackingSyncResult(
+                        orders = listOfNotNull(localOrder),
+                        syncedFromSupabase = true,
+                        message = "$cleanId not yet in Supabase 'orders'; showing local record."
+                    )
+                }
+            },
+            onFailure = { err ->
+                OrderTrackingSyncResult(
+                    orders = listOfNotNull(localOrder),
+                    syncedFromSupabase = false,
+                    message = "Could not refresh $cleanId (${err.message ?: "network error"})."
+                )
+            }
+        )
     }
 
     suspend fun fetchAndSyncAllFromCloudDetailed(): Result<CloudSyncSummary> = withContext(Dispatchers.IO) {
@@ -844,31 +1038,9 @@ class EcommerceRepository(
             val cloudOrders = oRes.getOrNull() ?: emptyList()
             if (oRes.isSuccess) {
                 cloudOrders.forEach { cloudOrder ->
-                    val localExisting = dao.getOrderById(cloudOrder.orderId)?.toDomain()
-                    val resolvedCreatedAt = when {
-                        localExisting != null && localExisting.createdAt > 0L && cloudOrder.createdAt > 0L -> minOf(localExisting.createdAt, cloudOrder.createdAt)
-                        cloudOrder.createdAt > 0L -> cloudOrder.createdAt
-                        localExisting != null && localExisting.createdAt > 0L -> localExisting.createdAt
-                        else -> 0L
-                    }
-                    val mergedOrder = if (localExisting != null) {
-                        cloudOrder.copy(
-                            customerName = cloudOrder.customerName.ifBlank { localExisting.customerName },
-                            customerEmail = cloudOrder.customerEmail.ifBlank { localExisting.customerEmail },
-                            customerPhone = cloudOrder.customerPhone.ifBlank { localExisting.customerPhone },
-                            deliveryAddress = cloudOrder.deliveryAddress.ifBlank { localExisting.deliveryAddress },
-                            senderName = cloudOrder.senderName.ifBlank { localExisting.senderName },
-                            receiptImageUrl = cloudOrder.receiptImageUrl.ifBlank { localExisting.receiptImageUrl },
-                            statusUpdates = cloudOrder.statusUpdates.ifEmpty { localExisting.statusUpdates },
-                            dispatchRiderWhatsapp = cloudOrder.dispatchRiderWhatsapp.ifBlank { localExisting.dispatchRiderWhatsapp },
-                            createdAt = resolvedCreatedAt
-                        )
-                    } else {
-                        cloudOrder.copy(createdAt = resolvedCreatedAt)
-                    }
-                    dao.insertOrder(mergedOrder.toEntity())
+                    val (mergedOrder, isNewRemote) = mergeRemoteOrderIntoRoom(cloudOrder)
                     syncedOrders++
-                    if (cloudOrder.orderId !in existingOrderIds) {
+                    if (isNewRemote || cloudOrder.orderId !in existingOrderIds) {
                         newRemoteOrders++
                         newRemoteOrderList.add(mergedOrder)
                     }
@@ -967,7 +1139,7 @@ class EcommerceRepository(
                 if (!matchesExisting && (ord.customerName.isNotBlank() || ord.customerPhone.isNotBlank())) {
                     val synthId = ord.customerId.ifBlank { "cust-${ord.orderId}" }
                     val synthEmail = ord.customerEmail.ifBlank {
-                        "cust_${ord.customerPhone.filter { it.isDigit() }.ifBlank { synthId.take(6) }}@247shopping.local"
+                        "cust_${ord.customerPhone.filter { it.isDigit() }.ifBlank { synthId.take(6) }}@odiya.local"
                     }
                     val synthEntity = CustomerEntity(
                         id = synthId,
@@ -1044,7 +1216,7 @@ class EcommerceRepository(
             if (existing != null) {
                 return@withContext Result.failure(Exception("An account with this phone number already exists. Please use Sign In instead."))
             }
-            val effectiveEmail = email.ifBlank { "cust_${cleanPhone.filter { it.isDigit() }.ifBlank { UUID.randomUUID().toString().take(6) }}@247shopping.local" }
+            val effectiveEmail = email.ifBlank { "cust_${cleanPhone.filter { it.isDigit() }.ifBlank { UUID.randomUUID().toString().take(6) }}@odiya.local" }
             val hashedPassword = SecurityUtils.hashPassword(password)
             val customer = Customer(
                 id = UUID.randomUUID().toString(),
@@ -1391,7 +1563,6 @@ class EcommerceRepository(
             dao.updateCustomerWishlist(customerId, updatedStr)
             // Sync with Supabase Cloud user profile in database
             supabaseSync.syncCustomerWishlistToCloud(customerId, currentList)
-            firebaseRepo.setWishlistProduct(productId, currentList.contains(productId))
             Result.success(currentList)
         } catch (e: Exception) {
             Result.failure(e)

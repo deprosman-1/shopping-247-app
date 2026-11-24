@@ -14,7 +14,7 @@ class ExampleUnitTest {
   }
 
   @Test
-  fun verify_all_seven_categories_are_defined() {
+  fun verify_all_categories_are_defined() {
     val categories = ProductCategory.values().map { it.displayName }
     assertTrue(categories.contains("Clothes"))
     assertTrue(categories.contains("Shoes"))
@@ -23,7 +23,7 @@ class ExampleUnitTest {
     assertTrue(categories.contains("Electronics"))
     assertTrue(categories.contains("Food"))
     assertTrue(categories.contains("Beverages"))
-    assertEquals(7, categories.size)
+    assertEquals(23, categories.size)
   }
 
   @Test

@@ -15,6 +15,8 @@ val MoniepointBlue = Color(0xFF0B63F8)
 val PalmPayPurple = Color(0xFF7C3AED)
 val PosPurple = Color(0xFF8B5CF6)
 val CodOrange = Color(0xFFF97316)
+val PaystackTeal = Color(0xFF00C3F7)
+val PaystackNavy = Color(0xFF011B33)
 
 // Dark theme colors (Green with White write-ups)
 val DarkBackground = Color(0xFF052E16)

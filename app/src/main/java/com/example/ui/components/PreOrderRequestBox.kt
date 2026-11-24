@@ -84,7 +84,7 @@ import java.util.Locale
 
 /**
  * Rectangular Box Component for Customers to Pre-Order & Request
- * any Product or Brand not currently available in the 24/7 SHOPPING Catalog.
+ * any Product or Brand not currently available in the ODIYA Catalog.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -96,6 +96,8 @@ fun PreOrderRequestCard(
     val context = LocalContext.current
     val currentCustomer by viewModel.currentCustomer.collectAsState()
     val savedDeliveryInfo by viewModel.savedDeliveryInfo.collectAsState()
+    val isOnline by viewModel.isOnline.collectAsState()
+    val isSupabaseConnected by viewModel.isSupabaseConnected.collectAsState()
 
     var customerNameInput by remember(currentCustomer?.id, savedDeliveryInfo.fullName) {
         mutableStateOf(
@@ -415,7 +417,12 @@ fun PreOrderRequestCard(
                         customerPhoneOverride = customerPhoneInput.trim()
                     )
                     if (success) {
-                        Toast.makeText(context, "✅ Pre-Order Request Sent & Synced to Admin File!", Toast.LENGTH_LONG).show()
+                        val statusToast = if (isOnline && isSupabaseConnected) {
+                            "✅ Pre-Order Request Sent & Synced to Admin Cloud!"
+                        } else {
+                            "✅ Pre-Order Saved & Queued — will auto-sync to Admin as soon as Supabase / Internet is live."
+                        }
+                        Toast.makeText(context, statusToast, Toast.LENGTH_LONG).show()
                         productName = ""
                         brandName = ""
                         sizeInput = ""

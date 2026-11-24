@@ -242,7 +242,7 @@ fun ProductDetailScreen(
 
                     IconButton(
                         onClick = {
-                            val storeTitle = storeProfile.storeName.ifBlank { "24/7 SHOPPING" }
+                            val storeTitle = storeProfile.storeName.ifBlank { "ODIYA" }
                             val portalBase = com.example.util.WebPortalExporter.getSavedCustomPortalUrl(context)
                                 .ifBlank {
                                     com.example.util.WebPortalExporter.normalizePortalUrl(storeProfile.apkDownloadUrl)
@@ -555,7 +555,7 @@ fun ProductDetailScreen(
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = "24/7 SHOPPING",
+                                        text = "ODIYA",
                                         color = Color.White,
                                         fontWeight = FontWeight.Black,
                                         fontSize = 12.sp,
@@ -826,7 +826,7 @@ fun ProductDetailScreen(
                                                 )
                                                 Spacer(modifier = Modifier.width(2.dp))
                                                 Text(
-                                                    text = "24/7 SHOPPING",
+                                                    text = "ODIYA",
                                                     color = Color.White,
                                                     fontSize = 11.sp,
                                                     fontWeight = FontWeight.Black

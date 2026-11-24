@@ -148,11 +148,11 @@ object PartnerDocumentExporter {
         val clausePaint = Paint().apply { color = Color.parseColor("#111827"); textSize = 9.5f; isAntiAlias = true }
         val clauses = listOf(
             "a) Partner uploads products & images strictly to Admin Control Room; verified items sync to Cloud.",
-            "b) Automated Split: On customer payment, 24/7 SHOPPING % deducts automatically; balance credits Partner.",
-            "c) Monthly Hosting Fee deducts automatically every 30-day cycle from Partner to 24/7 SHOPPING account.",
+            "b) Automated Split: On customer payment, ODIYA % deducts automatically; balance credits Partner.",
+            "c) Monthly Hosting Fee deducts automatically every 30-day cycle from Partner to ODIYA account.",
             "d) End of Hosting Period: Admin activates Catalog Lock (display-only; customer Add-to-Cart disabled).",
             "e) Renewal unlocks Catalog Lock; Termination authorizes Admin to delete all product images & info outright.",
-            "f) Offline Sales: Partner must log in & use Offline Add-to-Cart to remove sold qty, else 24/7 collects unit % fee."
+            "f) Offline Sales: Partner must log in & use Offline Add-to-Cart to remove sold qty, else ODIYA collects unit % fee."
         )
         clauses.forEach { clause ->
             canvas.drawText(clause.take(98), 36f, y, clausePaint)
@@ -171,7 +171,7 @@ object PartnerDocumentExporter {
         drawSerializedSignature(canvas, partner.partnerSignatureStrokes, 44f, y + 22f, 224f, 52f)
         canvas.drawText("Signed: ${partner.partnerSignatureName.ifBlank { partner.ownerName }}", 44f, y + 90f, valuePaint)
 
-        // Right box: 24/7 SHOPPING Admin signature
+        // Right box: ODIYA Admin signature
         canvas.drawRect(310f, y, 559f, y + 100f, boxPaint)
         canvas.drawText("FOR: ${storeProfile.storeName.uppercase()}", 318f, y + 16f, labelPaint)
         drawSerializedSignature(canvas, partner.adminCounterSignatureStrokes, 318f, y + 22f, 228f, 52f)
@@ -255,7 +255,7 @@ object PartnerDocumentExporter {
         sb.appendLine("• Transactions / Alerts: ${periodSales.size}")
         sb.appendLine("• Online Units Sold: $totalUnitsSold | Offline Removals: $totalOfflineUnits")
         sb.appendLine("• Gross Sales Volume: ${naira.format(grossRevenue)}")
-        sb.appendLine("• 24/7 SHOPPING Auto-Deducted % Share: ${naira.format(totalCommissionProfit)}")
+        sb.appendLine("• ODIYA Auto-Deducted % Share: ${naira.format(totalCommissionProfit)}")
         sb.appendLine("• Partner Net Credited: ${naira.format(totalPartnerNet)}")
         sb.appendLine("• Hosting Plan (30-Day Auto-Debit): ${naira.format(partner.monthlyHostingPayment)} (${partner.hostingCyclesBilled} cycles billed | Total: ${naira.format(partner.totalHostingFeesAutoDeducted)})")
         if (partner.totalAccruedOfflinePenalty > 0.0) {
@@ -335,7 +335,7 @@ object PartnerDocumentExporter {
 
         canvas.drawText("FINANCIAL & STOCK SUMMARY", 32f, y, secPaint); y += 20f
         canvas.drawText("Sales Orders (${period.shortLabel}): ${periodSales.size}  |  Units Sold: ${periodSales.sumOf { it.quantity }}", 32f, y, bodyPaint); y += 17f
-        canvas.drawText("Gross Sales: ${naira.format(gross)}  |  24/7 Auto-Split: ${naira.format(profit)}  |  Partner Net: ${naira.format(net)}", 32f, y, bodyPaint); y += 17f
+        canvas.drawText("Gross Sales: ${naira.format(gross)}  |  ODIYA Auto-Split: ${naira.format(profit)}  |  Partner Net: ${naira.format(net)}", 32f, y, bodyPaint); y += 17f
         canvas.drawText("30-Day Hosting: ${naira.format(partner.monthlyHostingPayment)} (${partner.hostingCyclesBilled} cycles billed: ${naira.format(partner.totalHostingFeesAutoDeducted)})  |  Stock: $remainingStock", 32f, y, bodyPaint); y += 24f
 
         canvas.drawText("RECENT SALES TRANSACTIONS (NO CUSTOMER EMAIL)", 32f, y, secPaint); y += 18f
@@ -348,7 +348,7 @@ object PartnerDocumentExporter {
                     val dt = dateFmt.format(Date(txn.timestamp))
                     canvas.drawText("${txn.orderId.ifBlank { txn.id }} • $dt • ${txn.customerName} (${txn.customerPhone})", 32f, y, bodyPaint)
                     y += 14f
-                    canvas.drawText("Gross: ${naira.format(txn.grossAmount)} | 24/7 Profit: ${naira.format(txn.commissionProfitAmount)} | Acct: ${txn.paymentAccount.take(34)}", 42f, y, subPaint)
+                    canvas.drawText("Gross: ${naira.format(txn.grossAmount)} | ODIYA Profit: ${naira.format(txn.commissionProfitAmount)} | Acct: ${txn.paymentAccount.take(34)}", 42f, y, subPaint)
                     y += 17f
                 }
             }

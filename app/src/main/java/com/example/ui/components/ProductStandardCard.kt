@@ -267,7 +267,7 @@ fun ProductStandardCard(
                             )
                             Spacer(modifier = Modifier.width(3.dp))
                             Text(
-                                text = "24/7 SHOPPING",
+                                text = "ODIYA",
                                 color = Color.White,
                                 fontWeight = FontWeight.Black,
                                 fontSize = 11.5.sp,
@@ -569,7 +569,7 @@ fun ProductStandardCard(
                                             )
                                             Spacer(modifier = Modifier.width(2.dp))
                                             Text(
-                                                text = "24/7 SHOPPING",
+                                                text = "ODIYA",
                                                 color = Color.White,
                                                 fontWeight = FontWeight.Black,
                                                 fontSize = 8.5.sp

@@ -55,7 +55,7 @@ class ReceiptShareAndSyncHelperTest {
     @Test
     fun extractStoreSyncCredentials_parsesWhatsAppInviteAndDeepLink() {
         val whatsappInvite = """
-            🛍️ Welcome to 24/7 SHOPPING!
+            🛍️ Welcome to ODIYA!
             📲 Direct App Connect Link:
             depros://connect?sb_url=https%3A%2F%2Fxyzstore.supabase.co&sb_key=sb_publishable_TestKey1234567890
             💡 Copy this message & paste it in the app!

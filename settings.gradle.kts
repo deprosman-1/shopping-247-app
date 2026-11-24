@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "24-7 SMART SHOP"
+rootProject.name = "Odiya"
 
 include(":app")

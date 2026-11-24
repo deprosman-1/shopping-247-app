@@ -149,6 +149,8 @@ import androidx.compose.ui.graphics.FilterQuality
 import com.example.ui.theme.MoniepointBlue
 import com.example.ui.theme.OPayGreen
 import com.example.ui.theme.PalmPayPurple
+import com.example.ui.theme.PaystackNavy
+import com.example.ui.theme.PaystackTeal
 import com.example.ui.theme.PosPurple
 import com.example.ui.theme.SuccessGreen
 import java.text.NumberFormat
@@ -468,6 +470,7 @@ fun CheckoutScreen(
                                 val posId = storeProfile.posTerminalId.ifBlank { storeProfile.storeName }
                                 val folderTag = if (activePartnerFolder != null) " [Folder: ${activePartnerFolder.businessName}]" else ""
                                 val accountOrTerminal = when (selectedPaymentMethod) {
+                                    PaymentMethod.PAYSTACK -> "Paystack Merchant (${storeProfile.storeName})$folderTag"
                                     PaymentMethod.OPAY -> "OPay: $opayNum ($opayName)$folderTag"
                                     PaymentMethod.MONIEPOINT -> "Moniepoint: $monieNum ($monieName)$folderTag"
                                     PaymentMethod.PALMPAY -> "PalmPay: $palmpayNum ($palmpayName)$folderTag"
@@ -708,11 +711,11 @@ fun CheckoutScreen(
                         currentStepName = CheckoutStep.PAYMENT_CONFIRMED_STATUS.name
                         val statusMsg = when (order.creditVerificationStatus) {
                             CreditVerificationStatus.CONFIRMED_CREDITED ->
-                                "✅ ORDER & PAYMENT CONFIRMATION RECEIPT generated! Exact amount debited & 24/7 SHOPPING credited."
+                                "✅ ORDER & PAYMENT CONFIRMATION RECEIPT generated! Exact amount debited & ODIYA credited."
                             CreditVerificationStatus.NETWORK_DELAYED_PENDING ->
                                 "⏳ Network delay queued — transfer will push & confirm automatically when network restores."
                             else ->
-                                "⚠️ ORDER & PAYMENT FAILED: 24/7 SHOPPING has not received credit alert yet."
+                                "⚠️ ORDER & PAYMENT FAILED: ODIYA has not received credit alert yet."
                         }
                         Toast.makeText(context, statusMsg, Toast.LENGTH_LONG).show()
                     },
@@ -1050,6 +1053,24 @@ private fun PaymentReceiptUploadStep(
     Text("Payment Account Transfer Information", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
     Spacer(modifier = Modifier.height(8.dp))
 
+    // Payment Option 0: PAYSTACK
+    PaymentOptionCard(
+        title = "Paystack Checkout (Cards • Transfer • USSD)",
+        subtitle = "Official Nigeria gateway — Debit Cards, Bank Transfer, USSD & OPay",
+        brandColor = PaystackTeal,
+        icon = Icons.Default.CreditCard,
+        isSelected = selectedPaymentMethod == PaymentMethod.PAYSTACK,
+        onSelect = { onSelectPaymentMethod(PaymentMethod.PAYSTACK) }
+    ) {
+        Text(
+            text = "Accepts Mastercard, Verve, Visa, instant Bank Transfer, USSD & OPay via Paystack HTTPS Checkout (1.5% + ₦100 capped at ₦2,000; ₦100 waived under ₦2,500).",
+            fontSize = 11.5.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+
+    Spacer(modifier = Modifier.height(10.dp))
+
     // Payment Option 1: OPAY
     PaymentOptionCard(
         title = "OPay Transfer",
@@ -1303,7 +1324,7 @@ private fun PaymentConfirmedStatusStep(
             modifier = Modifier.padding(18.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Clickable 24/7 SHOPPING Official Target Recipient Logo
+            // Clickable ODIYA Official Target Recipient Logo
             Surface(
                 onClick = {
                     targetRecipientSelected = true
@@ -1325,7 +1346,7 @@ private fun PaymentConfirmedStatusStep(
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                         Image(
                             painter = painterResource(id = R.drawable.shopping_logo_icon_1794752250458),
-                            contentDescription = "24/7 SHOPPING Official Recipient Logo",
+                            contentDescription = "ODIYA Official Recipient Logo",
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
                                 .size(38.dp)
@@ -1403,13 +1424,13 @@ private fun PaymentConfirmedStatusStep(
             Text(
                 text = when {
                     isConfirmed ->
-                        "24/7 SHOPPING account has received the credit alert! Admin Payment Confirmation is automatically ON and your receipt is confirmed."
+                        "ODIYA account has received the credit alert! Admin Payment Confirmation is automatically ON and your receipt is confirmed."
                     isFailedUncredited ->
-                        "24/7 SHOPPING account has NOT received a credit alert from your account yet. This turns into ORDER & PAYMENT CONFIRMED once 24/7 account is credited."
+                        "ODIYA account has NOT received a credit alert from your account yet. This turns into ORDER & PAYMENT CONFIRMED once ODIYA account is credited."
                     isNetworkDelayed ->
-                        "Transfer delayed by network. As soon as network restores, the transaction processes automatically, credits 24/7 SHOPPING, and sends ORDER & PAYMENT CONFIRMED."
+                        "Transfer delayed by network. As soon as network restores, the transaction processes automatically, credits ODIYA, and sends ORDER & PAYMENT CONFIRMED."
                     else ->
-                        "Your payment receipt has been delivered. Once 24/7 SHOPPING account is credited, Admin Payment Confirmation unlocks automatically."
+                        "Your payment receipt has been delivered. Once ODIYA account is credited, Admin Payment Confirmation unlocks automatically."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1429,7 +1450,7 @@ private fun PaymentConfirmedStatusStep(
                         isConfirmed -> "● ORDER & PAYMENT CONFIRMED ✓"
                         isFailedUncredited -> "● ORDER & PAYMENT FAILED (NO CREDIT ALERT)"
                         isNetworkDelayed -> "● QUEUED FOR AUTO-CREDIT ON RECONNECT"
-                        else -> "● AWAITING 24/7 ACCOUNT CREDIT ALERT"
+                        else -> "● AWAITING ODIYA ACCOUNT CREDIT ALERT"
                     },
                     color = themeColor,
                     fontSize = 11.sp,
@@ -1459,7 +1480,7 @@ private fun PaymentConfirmedStatusStep(
                     Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (isNetworkDelayed) "Push Transfer & Confirm Credit Now" else "Verify Credit Alert to 24/7 SHOPPING",
+                        text = if (isNetworkDelayed) "Push Transfer & Confirm Credit Now" else "Verify Credit Alert to ODIYA",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Black
                     )
@@ -1749,7 +1770,7 @@ private fun PaymentConfirmedStatusStep(
                                     color = AccentGold
                                 )
                                 Text(
-                                    text = "24/7 SHOPPING & ${order?.partnerName} received automated alert logs for this order.",
+                                    text = "ODIYA & ${order?.partnerName} received automated alert logs for this order.",
                                     fontSize = 10.5.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -1911,7 +1932,7 @@ private fun PaymentConfirmedStatusStep(
                     val saved = WordInvoiceExporter.writeToUri(context, targetUri, targetOrder, storeProfile)
                     Toast.makeText(
                         context,
-                        if (saved) "Word Receipt (.doc) saved with 24/7 SHOPPING recipient!" else "Could not save Word receipt",
+                        if (saved) "Word Receipt (.doc) saved with ODIYA recipient!" else "Could not save Word receipt",
                         Toast.LENGTH_SHORT
                     ).show()
                 }
@@ -1933,7 +1954,7 @@ private fun PaymentConfirmedStatusStep(
 
             if (order != null) {
                 Text(
-                    text = "Export Generated Receipt (24/7 SHOPPING Recipient)",
+                    text = "Export Generated Receipt (ODIYA Recipient)",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Black,
                     color = MaterialTheme.colorScheme.primary,
@@ -2073,10 +2094,11 @@ private fun PaymentOptionCard(
     icon: ImageVector,
     isSelected: Boolean,
     onSelect: () -> Unit,
+    modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onSelect)
@@ -2793,12 +2815,145 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
         val effectivePalmpayNum = storeProfile.palmpayAccountNumber.ifBlank { storeProfile.opayAccountNumber.ifBlank { "Contact Store for Account Number" } }
         val effectivePalmpayName = storeProfile.palmpayAccountName.ifBlank { storeProfile.storeName }
 
+        val paystackUiState by viewModel.paystackCheckoutState.collectAsState()
+        val paystackContext = LocalContext.current
+
+        PaymentOptionCard(
+            title = "Paystack Checkout (Cards • Bank • USSD • OPay)",
+            subtitle = "Nigeria #1 Automated Gateway • Pay even WITHOUT a debit card via Bank Transfer or USSD",
+            brandColor = PaystackTeal,
+            icon = Icons.Default.CreditCard,
+            isSelected = selectedPaymentMethod == PaymentMethod.PAYSTACK,
+            onSelect = { onSelectPaymentMethod(PaymentMethod.PAYSTACK) },
+            modifier = Modifier.testTag("checkout_paystack_card")
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Pay with Bank Transfer, USSD, OPay, Mastercard, Verve or Visa. Verified automatically via Paystack & Supabase.",
+                    fontSize = 11.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Button(
+                    enabled = !paystackUiState.isLoading && !isPlacingOrder,
+                    onClick = {
+                        if (fullName.isBlank() || phone.isBlank() || address.isBlank()) {
+                            Toast.makeText(paystackContext, "Please enter Customer Delivery Information below first!", Toast.LENGTH_LONG).show()
+                            return@Button
+                        }
+                        if (cartItems.isEmpty()) {
+                            Toast.makeText(paystackContext, "Your cart is empty", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        val zoneDesc = selectedDeliveryZone?.let { "${it.zoneName} • ${it.etaLabel}" } ?: "Standard Zone"
+                        viewModel.initiatePaystackCheckout(
+                            customerName = fullName,
+                            customerPhone = phone,
+                            deliveryAddress = address,
+                            senderName = senderName.ifBlank { fullName },
+                            deliveryConditionTitle = "${selectedDeliveryOption?.title ?: "Standard Delivery"} ($zoneDesc)",
+                            deliveryFeeAmount = deliveryFee,
+                            customBargainTotal = appliedBargainPrice,
+                            appliedCouponCode = appliedCouponCode,
+                            couponDiscountAmount = couponDiscountAmount,
+                            loyaltyPointsRedeemed = loyaltyPointsRedeemed,
+                            loyaltyDiscountAmount = loyaltyDiscountAmount,
+                            onReadyToOpenUrl = { authUrl, _, ref ->
+                                Toast.makeText(paystackContext, "Opening Paystack Checkout ($ref)...", Toast.LENGTH_LONG).show()
+                                com.example.util.WebPortalExporter.openExternalUrl(paystackContext, authUrl)
+                            },
+                            onFailure = { errMsg ->
+                                Toast.makeText(paystackContext, errMsg, Toast.LENGTH_LONG).show()
+                            }
+                        )
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = PaystackTeal, contentColor = PaystackNavy),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("paystack_checkout_launch_button")
+                ) {
+                    if (paystackUiState.isLoading) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = PaystackNavy, strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("CONNECTING PAYSTACK...", fontSize = 12.sp, fontWeight = FontWeight.Black)
+                    } else {
+                        Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Pay via Paystack Gateway (${nairaFormat.format(appliedBargainPrice ?: effectivePayableTotal)})",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
+
+                if (paystackUiState.reference.isNotBlank()) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = PaystackTeal.copy(alpha = 0.12f),
+                        border = BorderStroke(1.dp, PaystackTeal.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "Paystack Ref: ${paystackUiState.reference}",
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Black,
+                                color = PaystackTeal
+                            )
+                            if (paystackUiState.statusMessage.isNotBlank()) {
+                                Text(
+                                    text = paystackUiState.statusMessage,
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                OutlinedButton(
+                                    enabled = !paystackUiState.isLoading,
+                                    onClick = {
+                                        viewModel.verifyPaystackPayment(
+                                            reference = paystackUiState.reference,
+                                            orderId = paystackUiState.orderId.ifBlank { null }
+                                        ) { _, msg ->
+                                            Toast.makeText(paystackContext, msg, Toast.LENGTH_LONG).show()
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp)
+                                        .testTag("verify_paystack_payment_button")
+                                ) {
+                                    Text("Verify Payment", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                }
+                                if (paystackUiState.authorizationUrl.isNotBlank()) {
+                                    Button(
+                                        onClick = {
+                                            com.example.util.WebPortalExporter.openExternalUrl(paystackContext, paystackUiState.authorizationUrl)
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = PaystackNavy, contentColor = Color.White),
+                                        modifier = Modifier.weight(1f).height(48.dp)
+                                    ) {
+                                        Text("Re-Open Portal", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
         PaymentOptionCard(
             title = "OPay Transfer",
             subtitle = if (partnerFolder?.opayAccountNumber?.isNotBlank() == true)
                 "Partner Folder OPay Account (${partnerFolder.businessName})"
             else
-                "Tap to open Direct OPay Portal with embedded 24/7 account & total",
+                "Tap to open Direct OPay Portal with embedded ODIYA account & total",
             brandColor = OPayGreen,
             icon = Icons.Default.PhoneAndroid,
             isSelected = selectedPaymentMethod == PaymentMethod.OPAY,
@@ -2837,7 +2992,7 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
             subtitle = if (partnerFolder?.moniepointAccountNumber?.isNotBlank() == true)
                 "Partner Folder Moniepoint Account (${partnerFolder.businessName})"
             else
-                "Tap to open Direct Moniepoint Portal with embedded 24/7 account & total",
+                "Tap to open Direct Moniepoint Portal with embedded ODIYA account & total",
             brandColor = MoniepointBlue,
             icon = Icons.Default.AccountBalance,
             isSelected = selectedPaymentMethod == PaymentMethod.MONIEPOINT,
@@ -2873,7 +3028,7 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
 
         PaymentOptionCard(
             title = "PalmPay Digital Wallet",
-            subtitle = "Tap to open Direct PalmPay Portal with embedded 24/7 account & total",
+            subtitle = "Tap to open Direct PalmPay Portal with embedded ODIYA account & total",
             brandColor = PalmPayPurple,
             icon = Icons.Default.AccountBalanceWallet,
             isSelected = selectedPaymentMethod == PaymentMethod.PALMPAY,
@@ -3021,7 +3176,7 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                     Spacer(modifier = Modifier.height(10.dp))
                     Text("No receipt selected yet", fontWeight = FontWeight.Bold)
                     Text(
-                        text = "Tip: Tap Share / Send directly on your OPay or Moniepoint invoice → select 24/7 SHOPPING (no need to save to folder!), or pick a photo below.",
+                        text = "Tip: Tap Share / Send directly on your OPay or Moniepoint invoice → select ODIYA (no need to save to folder!), or pick a photo below.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
@@ -3294,6 +3449,7 @@ private fun DirectPortalCheckoutDialog(
     onPayNow: (simulateCredited: Boolean, simulateNetworkDelay: Boolean) -> Unit
 ) {
     val portalColor = when (paymentMethod) {
+        PaymentMethod.PAYSTACK -> PaystackTeal
         PaymentMethod.OPAY -> OPayGreen
         PaymentMethod.MONIEPOINT -> MoniepointBlue
         PaymentMethod.PALMPAY -> PalmPayPurple
@@ -3342,7 +3498,7 @@ private fun DirectPortalCheckoutDialog(
                     }
                 }
 
-                // Clickable 24/7 SHOPPING Official Recipient Target Logo
+                // Clickable ODIYA Official Recipient Target Logo
                 Surface(
                     onClick = { targetLogoSelected = !targetLogoSelected },
                     shape = RoundedCornerShape(14.dp),
@@ -3360,7 +3516,7 @@ private fun DirectPortalCheckoutDialog(
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                             Image(
                                 painter = painterResource(id = R.drawable.shopping_logo_icon_1794752250458),
-                                contentDescription = "24/7 SHOPPING Target Recipient Logo",
+                                contentDescription = "ODIYA Target Recipient Logo",
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
                                     .size(44.dp)
@@ -3387,7 +3543,7 @@ private fun DirectPortalCheckoutDialog(
                     }
                 }
 
-                // Pre-Embedded 24/7 SHOPPING Account Number & Exact Payable Amount
+                // Pre-Embedded ODIYA Account Number & Exact Payable Amount
                 Surface(
                     shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
@@ -3430,7 +3586,7 @@ private fun DirectPortalCheckoutDialog(
                     Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("Settlement Verification Mode", fontSize = 10.5.sp, fontWeight = FontWeight.Black)
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text("Instant Credit Alert to 24/7 Account", fontSize = 11.sp, modifier = Modifier.weight(1f))
+                            Text("Instant Credit Alert to ODIYA Account", fontSize = 11.sp, modifier = Modifier.weight(1f))
                             Switch(
                                 checked = simulateCreditAlert && !simulateNetworkDelay,
                                 onCheckedChange = {

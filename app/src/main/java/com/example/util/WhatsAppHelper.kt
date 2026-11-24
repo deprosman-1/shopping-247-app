@@ -100,7 +100,7 @@ object WhatsAppHelper {
             *Current Status:* ${order.status.label}
             *Amount:* ${naira.format(order.totalAmount)}
             ${if (order.verificationNote.isNotBlank()) "*Note:* ${order.verificationNote}\n" else ""}
-            Thank you for shopping with us 24/7!
+            Thank you for shopping with ODIYA!
         """.trimIndent()
         openWhatsAppChat(context, order.customerPhone, msg)
     }
@@ -134,7 +134,7 @@ object WhatsAppHelper {
             *Customer:* $customerName ($customerPhone)
             *Items:* $productDetails
             *Gross Sale Amount:* ${naira.format(grossAmount)}
-            *24/7 SHOPPING Commission (${String.format(Locale.US, "%.1f", commissionPercent)}%):* ${naira.format(commissionProfit)}
+            *ODIYA Commission (${String.format(Locale.US, "%.1f", commissionPercent)}%):* ${naira.format(commissionProfit)}
             *Partner Net Payout:* ${naira.format(partnerNetPayout)}
             
             *Payment Channel:* $paymentMethodLabel

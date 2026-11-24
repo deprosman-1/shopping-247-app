@@ -101,7 +101,7 @@ fun generateQrBitmap(content: String, size: Int = 720): Bitmap? {
  */
 fun generateShareableQrPosterBitmap(
     content: String,
-    title: String = "24/7 SHOPPING",
+    title: String = "ODIYA",
     subtitle: String = "Scan with Phone Camera or QR Scanner"
 ): Bitmap? {
     val qr = generateQrBitmap(content, 720) ?: return null

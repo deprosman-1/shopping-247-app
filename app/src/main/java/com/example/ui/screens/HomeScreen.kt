@@ -261,7 +261,7 @@ fun HomeScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        // Prominent 24/7 SHOPPING Logo Badge (Long-press opens restricted Admin area)
+                        // Prominent ODIYA Logo Badge (Long-press opens restricted Admin area)
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.weight(1f)
@@ -285,16 +285,16 @@ fun HomeScreen(
                                 ) {
                                     AsyncImage(
                                         model = R.drawable.shopping_logo_icon_1794752250458,
-                                        contentDescription = "24/7 SHOPPING Logo",
+                                        contentDescription = "ODIYA Logo",
                                         modifier = Modifier
                                             .size(28.dp)
                                             .clip(RoundedCornerShape(6.dp))
                                     )
                                     Spacer(modifier = Modifier.width(5.dp))
                                     Text(
-                                        text = "24/7\nSHOPPING",
-                                        fontSize = 8.5.sp,
-                                        lineHeight = 9.5.sp,
+                                        text = "ODIYA",
+                                        fontSize = 10.sp,
+                                        lineHeight = 11.sp,
                                         fontWeight = FontWeight.Black,
                                         color = AccentGold,
                                         softWrap = false
@@ -1196,7 +1196,7 @@ fun HomeScreen(
                         verticalArrangement = Arrangement.spacedBy(14.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        // 24/7 SHOPPING Official Installed Crest
+                        // ODIYA Official Installed Crest
                         if (searchQuery.isEmpty() && selectedCategory == null) {
                             item(span = { GridItemSpan(gridColumns) }) {
                                 ShopEmblemWatermark(
@@ -1261,7 +1261,7 @@ fun HomeScreen(
                                                     )
                                                     Spacer(modifier = Modifier.width(2.dp))
                                                     Text(
-                                                        text = "24/7 SHOPPING",
+                                                        text = "ODIYA",
                                                         color = Color(0xFFDC2626),
                                                         fontWeight = FontWeight.Black,
                                                         fontSize = 11.sp

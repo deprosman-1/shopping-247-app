@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Handshake
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Inbox
+import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
@@ -94,7 +95,6 @@ import com.example.MainViewModel
 import com.example.data.model.OrderStatus
 import com.example.data.model.SavedAddress
 import com.example.ui.components.DualAxisScrollContainer
-import com.example.ui.components.GoogleSignInButton
 import com.example.ui.components.ShareAppDialog
 import com.example.ui.theme.AccentGold
 import com.example.ui.theme.CyberCyan
@@ -148,9 +148,10 @@ fun AuthScreen(
         CustomerAccountDestination.MENU -> "Customer Account"
         CustomerAccountDestination.WELCOME_PROFILE -> "WELCOME"
         CustomerAccountDestination.INBOX -> "INBOX"
+        CustomerAccountDestination.ORDER_TRACKING -> "ORDER TRACKING"
         CustomerAccountDestination.RATINGS_AND_REVIEWS -> "RATINGS AND REVIEWS"
         CustomerAccountDestination.VOUCHERS -> "VOUCHERS"
-        CustomerAccountDestination.FOLLOW_STORE -> "FOLLOW 24/7 SHOPPING"
+        CustomerAccountDestination.FOLLOW_STORE -> "FOLLOW ODIYA"
     }
 
     BackHandler {
@@ -259,7 +260,7 @@ fun AuthScreen(
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     Text(
-                                        text = currentCustomer?.fullName ?: "24/7 SHOPPING Customer",
+                                        text = currentCustomer?.fullName ?: "ODIYA Customer",
                                         fontWeight = FontWeight.Black,
                                         fontSize = 15.sp,
                                         color = Color.White
@@ -300,11 +301,27 @@ fun AuthScreen(
 
                         CustomerAccountMenuItem(
                             title = "ORDERS",
-                            subtitle = "${allOrders.size} order(s) • Track receipts & Pre-Orders",
+                            subtitle = "${allOrders.size} order(s) • Receipts & Pre-Orders",
                             icon = Icons.Default.ReceiptLong,
                             accentColor = SuccessGreen,
                             onClick = { viewModel.navigateTo(AppScreen.ORDERS) },
                             testTag = "account_menu_orders"
+                        )
+
+                        val activeOrdersCount = allOrders.count {
+                            it.status != OrderStatus.DELIVERED && it.status != OrderStatus.CANCELLED
+                        }
+                        CustomerAccountMenuItem(
+                            title = "ORDER TRACKING",
+                            subtitle = if (activeOrdersCount > 0) {
+                                "$activeOrdersCount active order(s) • Live status from Supabase"
+                            } else {
+                                "Track live delivery status from Supabase 'orders'"
+                            },
+                            icon = Icons.Default.LocalShipping,
+                            accentColor = CyberCyan,
+                            onClick = { viewModel.openOrderTracking() },
+                            testTag = "account_menu_order_tracking"
                         )
 
                         CustomerAccountMenuItem(
@@ -340,8 +357,8 @@ fun AuthScreen(
                         )
 
                         CustomerAccountMenuItem(
-                            title = "FOLLOW 24/7 SHOPPING",
-                            subtitle = if (isFollowingStore) "Following 24/7 SHOPPING ✓" else "Follow official channels & updates",
+                            title = "FOLLOW ODIYA",
+                            subtitle = if (isFollowingStore) "Following ODIYA ✓" else "Follow official channels & updates",
                             icon = if (isFollowingStore) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                             accentColor = SuccessGreen,
                             onClick = { viewModel.selectCustomerAccountDestination(CustomerAccountDestination.FOLLOW_STORE) },
@@ -642,14 +659,22 @@ fun AuthScreen(
                                     )
                                 }
 
-                                GoogleSignInButton(
-                                    onAuthSuccess = {
-                                        viewModel.onGoogleSignInSuccess {
-                                            Toast.makeText(context, "Signed in with Google!", Toast.LENGTH_SHORT).show()
-                                        }
-                                    },
-                                    onAuthError = { err -> Toast.makeText(context, err, Toast.LENGTH_LONG).show() }
-                                )
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = SuccessGreen.copy(alpha = 0.09f),
+                                    border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.35f)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("auth_security_shield_note")
+                                ) {
+                                    Text(
+                                        text = "Protected by Salted SHA-256 Auth & Hardware Keystore Vault • Supabase Encrypted Sync",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = SuccessGreen,
+                                        modifier = Modifier.padding(10.dp)
+                                    )
+                                }
                             } else {
                                 Text("Create Customer Account", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                                 Text(
@@ -721,6 +746,7 @@ fun AuthScreen(
                     }
 
                     CustomerAccountDestination.INBOX -> CustomerInboxPage(viewModel = viewModel)
+                    CustomerAccountDestination.ORDER_TRACKING -> CustomerOrderTrackingPage(viewModel = viewModel)
                     CustomerAccountDestination.RATINGS_AND_REVIEWS -> DeliveredRatingsAndReviewsPage(viewModel = viewModel)
                     CustomerAccountDestination.VOUCHERS -> CustomerVouchersPage(viewModel = viewModel)
                     CustomerAccountDestination.FOLLOW_STORE -> FollowStorePage(viewModel = viewModel, onShowQr = { showQrDialog = true })

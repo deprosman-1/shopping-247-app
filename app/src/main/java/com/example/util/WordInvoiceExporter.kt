@@ -18,7 +18,7 @@ import java.util.Locale
 
 /**
  * Generates an official Microsoft Word (.doc) invoice & payment receipt embedded
- * with the clickable 24/7 SHOPPING official recipient badge & verification stamp.
+ * with the clickable ODIYA official recipient badge & verification stamp.
  */
 object WordInvoiceExporter {
 
@@ -42,14 +42,14 @@ object WordInvoiceExporter {
             .replace("\n", "<br/>")
         val verificationLabel = when {
             order.isCreditAlertConfirmed || order.creditVerificationStatus == CreditVerificationStatus.CONFIRMED_CREDITED ->
-                "ORDER &amp; PAYMENT CONFIRMED (24/7 SHOPPING ACCOUNT CREDITED)"
+                "ORDER &amp; PAYMENT CONFIRMED (ODIYA ACCOUNT CREDITED)"
             order.creditVerificationStatus == CreditVerificationStatus.NETWORK_DELAYED_PENDING ->
                 "ORDER &amp; PAYMENT PENDING NETWORK RESTORE"
             order.creditVerificationStatus == CreditVerificationStatus.PAYMENT_FAILED_UNCREDITED ->
                 "ORDER &amp; PAYMENT FAILED — AWAITING CREDIT ALERT"
             else -> escapeHtml(order.status.label)
         }
-        val storeTitle = escapeHtml(storeProfile.storeName.ifBlank { "24/7 SHOPPING" }.uppercase())
+        val storeTitle = escapeHtml(storeProfile.storeName.ifBlank { "ODIYA" }.uppercase())
 
         return """
             <html xmlns:o="urn:schemas-microsoft-com:office:office"

@@ -97,7 +97,7 @@ fun HelpSupportScreen(
         listOf(
             FaqEntry(
                 "How do I pay and confirm my order?",
-                "At Checkout, pick your delivery zone, select OPay, Moniepoint MFB, POS Transfer, or Payment on Delivery, transfer to the official 24/7 SHOPPING account, and attach your transfer receipt photo. Admin verifies payments promptly and sends an instant notification."
+                "At Checkout, pick your delivery zone, select Paystack, OPay, Moniepoint MFB, PalmPay, POS Transfer, or Payment on Delivery, transfer to the official ODIYA account, and attach your transfer receipt photo. Admin verifies payments promptly and sends an instant notification."
             ),
             FaqEntry(
                 "How do I track or cancel my order?",
@@ -109,7 +109,7 @@ fun HelpSupportScreen(
             ),
             FaqEntry(
                 "How do Loyalty Points & Referral Credits work?",
-                "You earn 1 Loyalty Point for every ₦1,000 spent (1 point = ₦50 discount credit at Checkout). Share your personal 247-XXXX referral code on your Account page — friends applying a referral code receive +100 bonus points (₦5,000 value)."
+                "You earn 1 Loyalty Point for every ₦1,000 spent (1 point = ₦50 discount credit at Checkout). Share your personal ODY-XXXX referral code on your Account page — friends applying a referral code receive +100 bonus points (₦5,000 value)."
             ),
             FaqEntry(
                 "Can I shop when my internet is offline?",
@@ -484,15 +484,33 @@ fun HelpSupportScreen(
                                 Text("Privacy Policy & Data Protection", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
                             }
                             Text(
-                                text = "${storeProfile.storeName} collects only the minimum information required to process and deliver your orders (name, phone number, delivery address, and payment receipt proofs you explicitly choose to upload). Password credentials are protected using salted SHA-256 cryptographic hashes. Photos are selected solely via the privacy-preserving Android Photo Picker without accessing broad device storage.",
+                                text = "${storeProfile.storeName} collects only the minimum information required to process and deliver your orders (name, phone number, delivery address, and payment receipt proofs you explicitly choose to upload). Password credentials use salted SHA-256 cryptographic hashes and local secrets are protected inside Android Keystore AES-256-GCM storage.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = "You may request data deletion or account updates at any time through Support Tickets above or by contacting store management.",
+                                text = "Payments via Paystack are processed over strict HTTPS/TLS directly through Paystack's PCI-DSS checkout; card numbers and PINs are never stored by this app. Photos are selected solely via the Android Photo Picker without broad storage access.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            Text(
+                                text = "Account & Data Deletion: You may delete your account anytime from Account -> WELCOME -> Delete My Account & Data, or submit a request via Support Tickets.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.openCustomerAccountShortcut(
+                                        com.example.CustomerAccountDestination.WELCOME_PROFILE
+                                    )
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .testTag("help_manage_delete_account_button")
+                            ) {
+                                Text("Manage / Delete My Account & Data", fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
@@ -511,7 +529,7 @@ fun HelpSupportScreen(
                                 text = "1. Order Confirmation: Bank/POS transfers are verified before dispatch; Payment on Delivery orders are confirmed via phone/WhatsApp.\n" +
                                     "2. Cancellations: Orders may be cancelled prior to dispatch from Receipts & Tracking.\n" +
                                     "3. Returns & Refunds: Eligible items may be submitted for return/refund within 7 days of delivery with clear photo documentation.\n" +
-                                    "4. Partner Sellers: Verified partner business items hosted on 24/7 SHOPPING follow identical warranty, delivery ETA, and customer protection standards.",
+                                    "4. Partner Sellers: Verified partner business items hosted on ODIYA follow identical warranty, delivery ETA, and customer protection standards.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

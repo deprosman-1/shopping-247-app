@@ -265,6 +265,7 @@ class SupabaseSyncService(
             if (pCode in 200..299) {
                 val (cCode, cBody) = probeTable("customers", "id")
                 val (oCode, oBody) = probeTable("orders", "order_id")
+                val (poCode, _) = probeTable("pre_orders", "id")
                 val issues = mutableListOf<String>()
                 if (cCode !in 200..299) {
                     issues.add("customers (HTTP $cCode: ${cBody.ifBlank { "missing/RLS blocked" }.take(80)})")
@@ -273,7 +274,12 @@ class SupabaseSyncService(
                     issues.add("orders (HTTP $oCode: ${oBody.ifBlank { "missing/RLS blocked" }.take(80)})")
                 }
                 return@withContext if (issues.isEmpty()) {
-                    Result.success("✅ Connected to '$host' ($keyType)! 'products', 'customers' & 'orders' tables + RLS ready (HTTP $pCode).")
+                    val preOrderNote = if (poCode in 200..299) {
+                        " & 'pre_orders' ready"
+                    } else {
+                        " (run updated SQL in SQL Editor to add 'pre_orders' table — using storage fallback meanwhile)"
+                    }
+                    Result.success("✅ Connected to '$host' ($keyType)! 'products', 'customers', 'orders'$preOrderNote (HTTP $pCode).")
                 } else {
                     Result.failure(
                         Exception("Host '$host' & API Key are valid, and 'products' is ready, BUT these tables need setup/RLS in project '$projectRef': ${issues.joinToString("; ")}. Tap 'Copy SQL' and run it in Supabase SQL Editor.")
@@ -996,7 +1002,7 @@ class SupabaseSyncService(
 
     fun generateSupabaseSqlSchema(): String {
         return """
-            -- 24/7 SHOPPING Complete Supabase Schema, RLS & Storage Bucket Policy Script
+            -- ODIYA Complete Supabase Schema, RLS & Storage Bucket Policy Script
             -- Execute this entire script in your Supabase SQL Editor:
 
             -- 1. TABLES CREATION & SAFE COLUMN UPGRADES
@@ -1020,9 +1026,8 @@ class SupabaseSyncService(
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
 
-            -- Safely upgrade an existing partial products table without dropping data
             ALTER TABLE public.products ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'General';
-            ALTER TABLE public.products ADD COLUMN IF NOT EXISTS brand TEXT DEFAULT '24/7 SHOPPING';
+            ALTER TABLE public.products ADD COLUMN IF NOT EXISTS brand TEXT DEFAULT 'ODIYA';
             ALTER TABLE public.products ADD COLUMN IF NOT EXISTS available_brands TEXT;
             ALTER TABLE public.products ADD COLUMN IF NOT EXISTS available_sizes TEXT;
             ALTER TABLE public.products ADD COLUMN IF NOT EXISTS available_colors TEXT;
@@ -1100,11 +1105,78 @@ class SupabaseSyncService(
             ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS partner_net_payout NUMERIC DEFAULT 0;
             ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS created_at BIGINT;
 
-            -- 2. GRANTS & ROW LEVEL SECURITY (RLS) POLICIES FOR TABLES
+            -- 1B. CUSTOMER PRE-ORDERS & SPECIAL BRAND REQUESTS TABLE
+            CREATE TABLE IF NOT EXISTS public.pre_orders (
+                id TEXT PRIMARY KEY,
+                customer_id TEXT DEFAULT 'guest',
+                customer_name TEXT NOT NULL,
+                customer_phone TEXT DEFAULT '',
+                product_name TEXT NOT NULL,
+                brand_name TEXT DEFAULT '',
+                category TEXT DEFAULT 'Clothes',
+                preferred_size TEXT DEFAULT 'Standard',
+                preferred_color TEXT DEFAULT 'Any',
+                target_budget NUMERIC DEFAULT 0,
+                description TEXT DEFAULT '',
+                photo_url TEXT DEFAULT '',
+                status TEXT DEFAULT 'PENDING',
+                created_at BIGINT,
+                admin_response TEXT DEFAULT '',
+                admin_quoted_price NUMERIC DEFAULT 0,
+                customer_reply TEXT DEFAULT ''
+            );
+
+            ALTER TABLE public.pre_orders ADD COLUMN IF NOT EXISTS customer_id TEXT DEFAULT 'guest';
+            ALTER TABLE public.pre_orders ADD COLUMN IF NOT EXISTS customer_phone TEXT DEFAULT '';
+            ALTER TABLE public.pre_orders ADD COLUMN IF NOT EXISTS brand_name TEXT DEFAULT '';
+            ALTER TABLE public.pre_orders ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'Clothes';
+            ALTER TABLE public.pre_orders ADD COLUMN IF NOT EXISTS preferred_size TEXT DEFAULT 'Standard';
+            ALTER TABLE public.pre_orders ADD COLUMN IF NOT EXISTS preferred_color TEXT DEFAULT 'Any';
+            ALTER TABLE public.pre_orders ADD COLUMN IF NOT EXISTS target_budget NUMERIC DEFAULT 0;
+            ALTER TABLE public.pre_orders ADD COLUMN IF NOT EXISTS description TEXT DEFAULT '';
+            ALTER TABLE public.pre_orders ADD COLUMN IF NOT EXISTS photo_url TEXT DEFAULT '';
+            ALTER TABLE public.pre_orders ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'PENDING';
+            ALTER TABLE public.pre_orders ADD COLUMN IF NOT EXISTS created_at BIGINT;
+            ALTER TABLE public.pre_orders ADD COLUMN IF NOT EXISTS admin_response TEXT DEFAULT '';
+            ALTER TABLE public.pre_orders ADD COLUMN IF NOT EXISTS admin_quoted_price NUMERIC DEFAULT 0;
+            ALTER TABLE public.pre_orders ADD COLUMN IF NOT EXISTS customer_reply TEXT DEFAULT '';
+
+            -- 1C. PAYSTACK TRANSACTIONS & APP DEFENSE TELEMETRY TABLES
+            CREATE TABLE IF NOT EXISTS public.paystack_transactions (
+                reference TEXT PRIMARY KEY,
+                order_id TEXT NOT NULL,
+                customer_phone TEXT DEFAULT '',
+                customer_name TEXT DEFAULT '',
+                amount_kobo BIGINT DEFAULT 0,
+                amount_naira NUMERIC DEFAULT 0,
+                currency TEXT DEFAULT 'NGN',
+                channel TEXT DEFAULT 'card',
+                status TEXT DEFAULT 'initialized',
+                authorization_url TEXT DEFAULT '',
+                paid_at TIMESTAMPTZ,
+                verified_by TEXT DEFAULT 'edge_function',
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS public.app_security_telemetry (
+                id TEXT PRIMARY KEY,
+                device_model TEXT DEFAULT '',
+                app_version TEXT DEFAULT '',
+                event_type TEXT NOT NULL,
+                severity TEXT DEFAULT 'INFO',
+                details TEXT DEFAULT '',
+                signing_sha256 TEXT DEFAULT '',
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+
+            -- 2. GRANTS & LEAST-PRIVILEGE ROW LEVEL SECURITY (RLS) POLICIES
             GRANT USAGE ON SCHEMA public TO anon, authenticated;
-            GRANT ALL ON TABLE public.products TO anon, authenticated;
-            GRANT ALL ON TABLE public.customers TO anon, authenticated;
-            GRANT ALL ON TABLE public.orders TO anon, authenticated;
+            GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.products TO anon, authenticated;
+            GRANT SELECT, INSERT, UPDATE ON TABLE public.customers TO anon, authenticated;
+            GRANT SELECT, INSERT, UPDATE ON TABLE public.orders TO anon, authenticated;
+            GRANT SELECT, INSERT, UPDATE ON TABLE public.pre_orders TO anon, authenticated;
+            GRANT SELECT ON TABLE public.paystack_transactions TO anon, authenticated;
+            GRANT INSERT, SELECT ON TABLE public.app_security_telemetry TO anon, authenticated;
 
             ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
             DROP POLICY IF EXISTS "Public Read & Sync Access on products" ON public.products;
@@ -1112,11 +1184,41 @@ class SupabaseSyncService(
 
             ALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;
             DROP POLICY IF EXISTS "Public Read & Sync Access on customers" ON public.customers;
-            CREATE POLICY "Public Read & Sync Access on customers" ON public.customers FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+            DROP POLICY IF EXISTS "Customers Read Access" ON public.customers;
+            DROP POLICY IF EXISTS "Customers Insert Access" ON public.customers;
+            DROP POLICY IF EXISTS "Customers Update Access" ON public.customers;
+            CREATE POLICY "Customers Read Access" ON public.customers FOR SELECT TO anon, authenticated USING (true);
+            CREATE POLICY "Customers Insert Access" ON public.customers FOR INSERT TO anon, authenticated WITH CHECK (true);
+            CREATE POLICY "Customers Update Access" ON public.customers FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
 
             ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
             DROP POLICY IF EXISTS "Public Read & Sync Access on orders" ON public.orders;
-            CREATE POLICY "Public Read & Sync Access on orders" ON public.orders FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+            DROP POLICY IF EXISTS "Orders Read Access" ON public.orders;
+            DROP POLICY IF EXISTS "Orders Insert Access" ON public.orders;
+            DROP POLICY IF EXISTS "Orders Update Access" ON public.orders;
+            CREATE POLICY "Orders Read Access" ON public.orders FOR SELECT TO anon, authenticated USING (true);
+            CREATE POLICY "Orders Insert Access" ON public.orders FOR INSERT TO anon, authenticated WITH CHECK (true);
+            CREATE POLICY "Orders Update Access" ON public.orders FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+
+            ALTER TABLE public.pre_orders ENABLE ROW LEVEL SECURITY;
+            DROP POLICY IF EXISTS "PreOrders Read Access" ON public.pre_orders;
+            DROP POLICY IF EXISTS "PreOrders Insert Access" ON public.pre_orders;
+            DROP POLICY IF EXISTS "PreOrders Update Access" ON public.pre_orders;
+            CREATE POLICY "PreOrders Read Access" ON public.pre_orders FOR SELECT TO anon, authenticated USING (true);
+            CREATE POLICY "PreOrders Insert Access" ON public.pre_orders FOR INSERT TO anon, authenticated WITH CHECK (true);
+            CREATE POLICY "PreOrders Update Access" ON public.pre_orders FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+
+            ALTER TABLE public.paystack_transactions ENABLE ROW LEVEL SECURITY;
+            DROP POLICY IF EXISTS "Public Read & Sync Access on paystack_transactions" ON public.paystack_transactions;
+            DROP POLICY IF EXISTS "Paystack Ledger Read Only for Clients" ON public.paystack_transactions;
+            CREATE POLICY "Paystack Ledger Read Only for Clients" ON public.paystack_transactions FOR SELECT TO anon, authenticated USING (true);
+
+            ALTER TABLE public.app_security_telemetry ENABLE ROW LEVEL SECURITY;
+            DROP POLICY IF EXISTS "Public Insert & Read on app_security_telemetry" ON public.app_security_telemetry;
+            DROP POLICY IF EXISTS "Telemetry Read & Insert" ON public.app_security_telemetry;
+            DROP POLICY IF EXISTS "Telemetry Insert Only" ON public.app_security_telemetry;
+            CREATE POLICY "Telemetry Read & Insert" ON public.app_security_telemetry FOR SELECT TO anon, authenticated USING (true);
+            CREATE POLICY "Telemetry Insert Only" ON public.app_security_telemetry FOR INSERT TO anon, authenticated WITH CHECK (true);
 
             -- 3. SUPABASE STORAGE BUCKETS INITIALIZATION
             INSERT INTO storage.buckets (id, name, public) 
@@ -1132,45 +1234,76 @@ class SupabaseSyncService(
             ON CONFLICT (id) DO UPDATE SET public = true;
 
             -- 4. SUPABASE STORAGE BUCKET POLICIES (storage.objects)
-            -- Receipts Bucket Policies
             DROP POLICY IF EXISTS "Public Read on shop-receipts" ON storage.objects;
             CREATE POLICY "Public Read on shop-receipts" ON storage.objects FOR SELECT USING (bucket_id = 'shop-receipts');
-
             DROP POLICY IF EXISTS "Public Insert on shop-receipts" ON storage.objects;
             CREATE POLICY "Public Insert on shop-receipts" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'shop-receipts');
-
             DROP POLICY IF EXISTS "Public Update on shop-receipts" ON storage.objects;
             CREATE POLICY "Public Update on shop-receipts" ON storage.objects FOR UPDATE USING (bucket_id = 'shop-receipts');
-
             DROP POLICY IF EXISTS "Public Delete on shop-receipts" ON storage.objects;
             CREATE POLICY "Public Delete on shop-receipts" ON storage.objects FOR DELETE USING (bucket_id = 'shop-receipts');
 
-            -- Product Media Bucket Policies
             DROP POLICY IF EXISTS "Public Read on product-media" ON storage.objects;
             CREATE POLICY "Public Read on product-media" ON storage.objects FOR SELECT USING (bucket_id = 'product-media');
-
             DROP POLICY IF EXISTS "Public Insert on product-media" ON storage.objects;
             CREATE POLICY "Public Insert on product-media" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'product-media');
-
             DROP POLICY IF EXISTS "Public Update on product-media" ON storage.objects;
             CREATE POLICY "Public Update on product-media" ON storage.objects FOR UPDATE USING (bucket_id = 'product-media');
-
             DROP POLICY IF EXISTS "Public Delete on product-media" ON storage.objects;
             CREATE POLICY "Public Delete on product-media" ON storage.objects FOR DELETE USING (bucket_id = 'product-media');
 
-            -- Customer Avatars Bucket Policies
             DROP POLICY IF EXISTS "Public Read on customer-avatars" ON storage.objects;
             CREATE POLICY "Public Read on customer-avatars" ON storage.objects FOR SELECT USING (bucket_id = 'customer-avatars');
-
             DROP POLICY IF EXISTS "Public Insert on customer-avatars" ON storage.objects;
             CREATE POLICY "Public Insert on customer-avatars" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'customer-avatars');
-
             DROP POLICY IF EXISTS "Public Update on customer-avatars" ON storage.objects;
             CREATE POLICY "Public Update on customer-avatars" ON storage.objects FOR UPDATE USING (bucket_id = 'customer-avatars');
 
             -- 5. FORCE POSTGREST SCHEMA CACHE RELOAD
             NOTIFY pgrst, 'reload schema';
         """.trimIndent()
+    }
+
+    suspend fun reportSecurityTelemetryToCloud(
+        eventType: String,
+        severity: String,
+        details: String,
+        appVersion: String,
+        signingSha256: String
+    ): Result<Boolean> = withContext(Dispatchers.IO) {
+        val validationErr = validateCredentialsBeforeRequest()
+        if (validationErr != null) {
+            return@withContext Result.failure(Exception(validationErr))
+        }
+        try {
+            val baseUrl = cleanUrl(config.url)
+            val payload = JSONObject().apply {
+                put("id", "SEC-${System.currentTimeMillis()}-${java.util.UUID.randomUUID().toString().take(6)}")
+                put("device_model", "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}".take(80))
+                put("app_version", appVersion.take(32))
+                put("event_type", eventType.take(64))
+                put("severity", severity.take(24))
+                put("details", details.take(400))
+                put("signing_sha256", signingSha256.take(64))
+            }
+            val request = Request.Builder()
+                .url("$baseUrl/rest/v1/app_security_telemetry")
+                .addSupabaseAuthHeaders()
+                .header("Prefer", "return=minimal")
+                .post(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    val bodyStr = response.body?.string().orEmpty()
+                    return@withContext Result.failure(
+                        Exception(formatSyncHttpError(response.code, bodyStr, response.message))
+                    )
+                }
+            }
+            Result.success(true)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     suspend fun fetchProductsFromCloud(): Result<List<Product>> = withContext(Dispatchers.IO) {
@@ -1211,7 +1344,7 @@ class SupabaseSyncService(
                             if (id.isBlank() || title.isBlank()) continue
 
                             val category = obj.optCleanString("category", "Clothes").ifBlank { "Clothes" }
-                            val brand = obj.optCleanString("brand", "24/7 SHOPPING").ifBlank { "24/7 SHOPPING" }
+                            val brand = obj.optCleanString("brand", "ODIYA").ifBlank { "ODIYA" }
                             val availableBrandsStr = obj.optCleanString("available_brands")
                             val availableSizesStr = obj.optCleanString("available_sizes")
                             val availableColorsStr = obj.optCleanString("available_colors")
@@ -1371,6 +1504,233 @@ class SupabaseSyncService(
         }
     }
 
+    private fun parseOrderStatusFlexible(rawStatus: String): com.example.data.model.OrderStatus {
+        val normalized = rawStatus.trim()
+            .uppercase(java.util.Locale.US)
+            .replace('-', '_')
+            .replace(' ', '_')
+        return when (normalized) {
+            "PENDING_VERIFICATION", "PENDING", "AWAITING_CONFIRMATION" -> com.example.data.model.OrderStatus.PENDING_VERIFICATION
+            "CONFIRMED", "PROCESSING", "PAID" -> com.example.data.model.OrderStatus.CONFIRMED
+            "VERIFIED" -> com.example.data.model.OrderStatus.VERIFIED
+            "OUT_FOR_DELIVERY", "DISPATCHED", "IN_TRANSIT", "SHIPPED" -> com.example.data.model.OrderStatus.OUT_FOR_DELIVERY
+            "DELIVERED", "COMPLETED" -> com.example.data.model.OrderStatus.DELIVERED
+            "CANCELLED", "CANCELED", "REVERSED" -> com.example.data.model.OrderStatus.CANCELLED
+            else -> try {
+                com.example.data.model.OrderStatus.valueOf(normalized)
+            } catch (_: Exception) {
+                com.example.data.model.OrderStatus.PENDING_VERIFICATION
+            }
+        }
+    }
+
+    internal fun parseOrderJson(obj: JSONObject): Order? {
+        val orderId = obj.optCleanString("order_id")
+        if (orderId.isBlank()) return null
+
+        val customerId = obj.optCleanString("customer_id")
+        val customerName = obj.optCleanString("customer_name")
+        val customerEmail = obj.optCleanString("customer_email")
+        val customerPhone = obj.optCleanString("customer_phone")
+        val deliveryAddress = obj.optCleanString("delivery_address")
+        val itemsSummary = obj.optCleanString("items_summary")
+        val totalAmount = obj.optDouble("total_amount", 0.0).let { if (it.isNaN()) 0.0 else it }
+        val profit = obj.optDouble("profit", totalAmount * 0.15).let { if (it.isNaN()) totalAmount * 0.15 else it }
+        val paymentMethodStr = obj.optCleanString("payment_method", "OPAY")
+        val paymentAccount = obj.optCleanString("payment_account")
+        val paymentReference = obj.optCleanString("payment_reference")
+        val senderName = obj.optCleanString("sender_name")
+        val statusStr = obj.optCleanString("status", "PENDING_VERIFICATION")
+        val createdAt = parseCreatedAtMillis(obj)
+        val rawNote = obj.optCleanString("verification_note")
+        val directReceiptUrl = obj.optCleanString("receipt_image_url")
+        val extractedNoteUrl = Regex("\\[Receipt:\\s*(https?://[^\\]\\s]+)\\]").find(rawNote)?.groupValues?.getOrNull(1) ?: ""
+        val receiptUrl = directReceiptUrl.ifBlank { extractedNoteUrl }
+        val dispatchWhatsapp = obj.optCleanString("dispatch_rider_whatsapp")
+        val statusUpdatesRaw = obj.optCleanString("status_updates_json")
+        val updates = statusUpdatesRaw.split(";").mapNotNull { entry ->
+            val parts = entry.split("|")
+            if (parts.size >= 3) {
+                com.example.data.model.StatusUpdate(
+                    status = parseOrderStatusFlexible(parts[0]),
+                    timestamp = parts[1].toLongOrNull() ?: createdAt,
+                    note = parts.drop(2).joinToString("|")
+                )
+            } else null
+        }
+
+        val pMethod = try {
+            com.example.data.model.PaymentMethod.valueOf(paymentMethodStr.trim().uppercase(java.util.Locale.US))
+        } catch (_: Exception) {
+            com.example.data.model.PaymentMethod.OPAY
+        }
+        val oStatus = parseOrderStatusFlexible(statusStr)
+        val partnerId = obj.optCleanString("partner_id")
+        val partnerName = obj.optCleanString("partner_name")
+        val partnerCommAmt = if (obj.isNull("partner_commission_amount")) 0.0 else obj.optDouble("partner_commission_amount", 0.0)
+        val partnerNetPayout = if (obj.isNull("partner_net_payout")) 0.0 else obj.optDouble("partner_net_payout", 0.0)
+
+        return Order(
+            orderId = orderId,
+            customerId = customerId,
+            customerName = customerName,
+            customerEmail = customerEmail,
+            customerPhone = customerPhone,
+            deliveryAddress = deliveryAddress,
+            itemsSummary = itemsSummary,
+            totalAmount = totalAmount,
+            profit = profit,
+            paymentMethod = pMethod,
+            paymentAccount = paymentAccount,
+            paymentReference = paymentReference,
+            senderName = senderName,
+            status = oStatus,
+            createdAt = createdAt,
+            verificationNote = rawNote,
+            receiptImageUrl = receiptUrl,
+            statusUpdates = updates,
+            dispatchRiderWhatsapp = dispatchWhatsapp,
+            partnerId = partnerId,
+            partnerName = partnerName,
+            partnerCommissionAmount = if (partnerCommAmt.isNaN()) 0.0 else partnerCommAmt,
+            partnerNetPayout = if (partnerNetPayout.isNaN()) 0.0 else partnerNetPayout
+        )
+    }
+
+    private fun sanitizePostgrestFilterToken(raw: String): String {
+        return raw.trim().replace(Regex("[(),*\"'\\\\]"), "")
+    }
+
+    private fun executeOrdersSelectQuery(filterQueryParams: String, limit: Int): Result<List<Order>> {
+        val baseUrl = cleanUrl(config.url)
+        var useOrder = true
+        while (true) {
+            val orderParam = if (useOrder) "&order=created_at.desc.nullslast" else ""
+            val separator = if (filterQueryParams.isNotBlank()) "&$filterQueryParams" else ""
+            val url = "$baseUrl/rest/v1/orders?select=*$separator$orderParam&limit=$limit"
+            val request = Request.Builder()
+                .url(url)
+                .addSupabaseAuthHeaders()
+                .get()
+                .build()
+            var retryWithoutOrder = false
+            client.newCall(request).execute().use { response ->
+                val bodyStr = response.body?.string() ?: ""
+                if (response.isSuccessful) {
+                    val jsonArray = JSONArray(bodyStr.ifBlank { "[]" })
+                    val parsed = mutableListOf<Order>()
+                    for (i in 0 until jsonArray.length()) {
+                        parseOrderJson(jsonArray.getJSONObject(i))?.let { parsed.add(it) }
+                    }
+                    return Result.success(parsed.sortedByDescending { it.createdAt })
+                } else if (useOrder && response.code == 400 && (bodyStr.contains("created_at") || bodyStr.contains("42703") || bodyStr.contains("PGRST"))) {
+                    useOrder = false
+                    retryWithoutOrder = true
+                } else {
+                    Log.e("SupabaseSyncService", "Orders tracking query failed HTTP ${response.code}: $bodyStr")
+                    return Result.failure(Exception("Supabase Orders Query HTTP ${response.code}: ${bodyStr.take(150)}"))
+                }
+            }
+            if (!retryWithoutOrder) break
+        }
+        return Result.success(emptyList())
+    }
+
+    suspend fun trackOrdersFromCloud(query: String, limit: Int = 25): Result<List<Order>> = withContext(Dispatchers.IO) {
+        val validationErr = validateCredentialsBeforeRequest()
+        if (validationErr != null) {
+            return@withContext Result.failure(Exception(validationErr))
+        }
+        try {
+            val cleanToken = sanitizePostgrestFilterToken(query)
+            if (cleanToken.isBlank()) {
+                return@withContext executeOrdersSelectQuery("", limit)
+            }
+            val encToken = java.net.URLEncoder.encode(cleanToken, "UTF-8")
+            val digitsOnly = cleanToken.filter { it.isDigit() }
+            val clauses = mutableListOf(
+                "order_id.ilike.*$encToken*",
+                "payment_reference.ilike.*$encToken*",
+                "customer_phone.ilike.*$encToken*",
+                "customer_email.ilike.*$encToken*",
+                "customer_name.ilike.*$encToken*"
+            )
+            if (digitsOnly.length >= 7) {
+                val tail = digitsOnly.takeLast(10)
+                if (tail != cleanToken) {
+                    clauses.add("customer_phone.ilike.*$tail*")
+                }
+            }
+            val filter = "or=(${clauses.joinToString(",")})"
+            executeOrdersSelectQuery(filter, limit)
+        } catch (e: Exception) {
+            Log.e("SupabaseSyncService", "Track orders exception", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchCustomerOrdersFromCloud(
+        customerId: String,
+        customerPhone: String,
+        customerEmail: String = "",
+        limit: Int = 100
+    ): Result<List<Order>> = withContext(Dispatchers.IO) {
+        val validationErr = validateCredentialsBeforeRequest()
+        if (validationErr != null) {
+            return@withContext Result.failure(Exception(validationErr))
+        }
+        try {
+            val clauses = mutableListOf<String>()
+            val cleanId = sanitizePostgrestFilterToken(customerId)
+            if (cleanId.isNotBlank()) {
+                clauses.add("customer_id.eq.${java.net.URLEncoder.encode(cleanId, "UTF-8")}")
+            }
+            val digits = customerPhone.filter { it.isDigit() }
+            if (digits.length >= 7) {
+                val tail = digits.takeLast(10)
+                clauses.add("customer_phone.ilike.*$tail*")
+            } else {
+                val cleanPhone = sanitizePostgrestFilterToken(customerPhone)
+                if (cleanPhone.isNotBlank()) {
+                    clauses.add("customer_phone.ilike.*${java.net.URLEncoder.encode(cleanPhone, "UTF-8")}*")
+                }
+            }
+            val cleanEmail = sanitizePostgrestFilterToken(customerEmail)
+            if (cleanEmail.isNotBlank() &&
+                !cleanEmail.endsWith("@247shopping.local", ignoreCase = true) &&
+                !cleanEmail.endsWith("@ozich.local", ignoreCase = true) &&
+                !cleanEmail.endsWith("@odiya.local", ignoreCase = true)
+            ) {
+                clauses.add("customer_email.ilike.${java.net.URLEncoder.encode(cleanEmail, "UTF-8")}")
+            }
+            if (clauses.isEmpty()) {
+                return@withContext Result.success(emptyList())
+            }
+            val filter = "or=(${clauses.joinToString(",")})"
+            executeOrdersSelectQuery(filter, limit)
+        } catch (e: Exception) {
+            Log.e("SupabaseSyncService", "Fetch customer orders exception", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchSingleOrderStatusFromCloud(orderId: String): Result<Order?> = withContext(Dispatchers.IO) {
+        val validationErr = validateCredentialsBeforeRequest()
+        if (validationErr != null) {
+            return@withContext Result.failure(Exception(validationErr))
+        }
+        try {
+            val cleanId = sanitizePostgrestFilterToken(orderId)
+            if (cleanId.isBlank()) return@withContext Result.success(null)
+            val encId = java.net.URLEncoder.encode(cleanId, "UTF-8")
+            val res = executeOrdersSelectQuery("order_id=eq.$encId", limit = 1)
+            res.map { it.firstOrNull() }
+        } catch (e: Exception) {
+            Log.e("SupabaseSyncService", "Fetch single order status exception", e)
+            Result.failure(e)
+        }
+    }
+
     suspend fun fetchOrdersFromCloud(): Result<List<Order>> = withContext(Dispatchers.IO) {
         if (isPlaceholderConfig()) {
             return@withContext Result.failure(Exception("Supabase not configured"))
@@ -1399,75 +1759,7 @@ class SupabaseSyncService(
                         val jsonArray = JSONArray(bodyStr.ifBlank { "[]" })
                         pageCount = jsonArray.length()
                         for (i in 0 until pageCount) {
-                            val obj = jsonArray.getJSONObject(i)
-                            val orderId = obj.optCleanString("order_id")
-                            val customerId = obj.optCleanString("customer_id")
-                            val customerName = obj.optCleanString("customer_name")
-                            val customerEmail = obj.optCleanString("customer_email")
-                            val customerPhone = obj.optCleanString("customer_phone")
-                            val deliveryAddress = obj.optCleanString("delivery_address")
-                            val itemsSummary = obj.optCleanString("items_summary")
-                            val totalAmount = obj.optDouble("total_amount", 0.0)
-                            val profit = obj.optDouble("profit", totalAmount * 0.15)
-                            val paymentMethodStr = obj.optCleanString("payment_method", "OPAY")
-                            val paymentAccount = obj.optCleanString("payment_account")
-                            val paymentReference = obj.optCleanString("payment_reference")
-                            val senderName = obj.optCleanString("sender_name")
-                            val statusStr = obj.optCleanString("status", "PENDING_VERIFICATION")
-                            val createdAt = parseCreatedAtMillis(obj)
-                            val rawNote = obj.optCleanString("verification_note")
-                            val directReceiptUrl = obj.optCleanString("receipt_image_url")
-                            val extractedNoteUrl = Regex("\\[Receipt:\\s*(https?://[^\\]\\s]+)\\]").find(rawNote)?.groupValues?.getOrNull(1) ?: ""
-                            val receiptUrl = directReceiptUrl.ifBlank { extractedNoteUrl }
-                            val dispatchWhatsapp = obj.optCleanString("dispatch_rider_whatsapp")
-                            val statusUpdatesRaw = obj.optCleanString("status_updates_json")
-                            val updates = statusUpdatesRaw.split(";").mapNotNull { entry ->
-                                val parts = entry.split("|")
-                                if (parts.size >= 3) {
-                                    com.example.data.model.StatusUpdate(
-                                        status = try { com.example.data.model.OrderStatus.valueOf(parts[0]) } catch (_: Exception) { com.example.data.model.OrderStatus.PENDING_VERIFICATION },
-                                        timestamp = parts[1].toLongOrNull() ?: createdAt,
-                                        note = parts[2]
-                                    )
-                                } else null
-                            }
-
-                            val pMethod = try { com.example.data.model.PaymentMethod.valueOf(paymentMethodStr) } catch (e: Exception) { com.example.data.model.PaymentMethod.OPAY }
-                            val oStatus = try { com.example.data.model.OrderStatus.valueOf(statusStr) } catch (e: Exception) { com.example.data.model.OrderStatus.PENDING_VERIFICATION }
-                            val partnerId = obj.optCleanString("partner_id")
-                            val partnerName = obj.optCleanString("partner_name")
-                            val partnerCommAmt = if (obj.isNull("partner_commission_amount")) 0.0 else obj.optDouble("partner_commission_amount", 0.0)
-                            val partnerNetPayout = if (obj.isNull("partner_net_payout")) 0.0 else obj.optDouble("partner_net_payout", 0.0)
-
-                            if (orderId.isNotBlank()) {
-                                ordersList.add(
-                                    Order(
-                                        orderId = orderId,
-                                        customerId = customerId,
-                                        customerName = customerName,
-                                        customerEmail = customerEmail,
-                                        customerPhone = customerPhone,
-                                        deliveryAddress = deliveryAddress,
-                                        itemsSummary = itemsSummary,
-                                        totalAmount = totalAmount,
-                                        profit = profit,
-                                        paymentMethod = pMethod,
-                                        paymentAccount = paymentAccount,
-                                        paymentReference = paymentReference,
-                                        senderName = senderName,
-                                        status = oStatus,
-                                        createdAt = createdAt,
-                                        verificationNote = rawNote,
-                                        receiptImageUrl = receiptUrl,
-                                        statusUpdates = updates,
-                                        dispatchRiderWhatsapp = dispatchWhatsapp,
-                                        partnerId = partnerId,
-                                        partnerName = partnerName,
-                                        partnerCommissionAmount = if (partnerCommAmt.isNaN()) 0.0 else partnerCommAmt,
-                                        partnerNetPayout = if (partnerNetPayout.isNaN()) 0.0 else partnerNetPayout
-                                    )
-                                )
-                            }
+                            parseOrderJson(jsonArray.getJSONObject(i))?.let { ordersList.add(it) }
                         }
                     } else if (useOrder && response.code == 400 && (bodyStr.contains("created_at") || bodyStr.contains("42703") || bodyStr.contains("PGRST"))) {
                         useOrder = false
@@ -1650,6 +1942,66 @@ class SupabaseSyncService(
         try {
             val baseUrl = cleanUrl(config.url)
             val ts = System.currentTimeMillis()
+            val remoteById = linkedMapOf<String, PreOrderRequest>()
+            var tableReadable = false
+            var sawStorageNotFoundOrEmpty = false
+            var lastNetworkError: Exception? = null
+            var lastWriteError: String? = null
+
+            fun parsePreOrderJson(obj: JSONObject, isSnakeCase: Boolean): PreOrderRequest? {
+                val id = obj.optString("id", "").trim()
+                if (id.isBlank()) return null
+                val statusStr = obj.optString("status", PreOrderStatus.PENDING.name)
+                val parsedStatus = PreOrderStatus.entries.firstOrNull { it.name == statusStr }
+                    ?: PreOrderStatus.PENDING
+                return PreOrderRequest(
+                    id = id,
+                    customerId = obj.optString(if (isSnakeCase) "customer_id" else "customerId", "guest"),
+                    customerName = obj.optString(if (isSnakeCase) "customer_name" else "customerName", "Valued Customer"),
+                    customerPhone = obj.optString(if (isSnakeCase) "customer_phone" else "customerPhone", ""),
+                    productName = obj.optString(if (isSnakeCase) "product_name" else "productName", ""),
+                    brandName = obj.optString(if (isSnakeCase) "brand_name" else "brandName", ""),
+                    category = obj.optString("category", "Clothes"),
+                    preferredSize = obj.optString(if (isSnakeCase) "preferred_size" else "preferredSize", "Standard"),
+                    preferredColor = obj.optString(if (isSnakeCase) "preferred_color" else "preferredColor", "Any"),
+                    targetBudget = obj.optDouble(if (isSnakeCase) "target_budget" else "targetBudget", 0.0),
+                    description = obj.optString("description", ""),
+                    photoUrl = obj.optString(if (isSnakeCase) "photo_url" else "photoUrl", ""),
+                    status = parsedStatus,
+                    createdAt = obj.optLong(if (isSnakeCase) "created_at" else "createdAt", System.currentTimeMillis()),
+                    adminResponse = obj.optString(if (isSnakeCase) "admin_response" else "adminResponse", ""),
+                    adminQuotedPrice = obj.optDouble(if (isSnakeCase) "admin_quoted_price" else "adminQuotedPrice", 0.0),
+                    customerReply = obj.optString(if (isSnakeCase) "customer_reply" else "customerReply", "")
+                )
+            }
+
+            // 1. PRIMARY: Fetch from Postgres public.pre_orders table
+            val tableList = mutableListOf<PreOrderRequest>()
+            try {
+                val tableReq = Request.Builder()
+                    .url("$baseUrl/rest/v1/pre_orders?select=*&order=created_at.desc&limit=500")
+                    .addSupabaseAuthHeaders()
+                    .get()
+                    .build()
+                client.newCall(tableReq).execute().use { resp ->
+                    val body = resp.body?.string()?.trim().orEmpty()
+                    if (resp.isSuccessful && body.startsWith("[")) {
+                        tableReadable = true
+                        val arr = JSONArray(body)
+                        for (i in 0 until arr.length()) {
+                            val item = parsePreOrderJson(arr.optJSONObject(i) ?: continue, isSnakeCase = true) ?: continue
+                            tableList.add(item)
+                            remoteById[item.id] = item
+                        }
+                    } else if (!resp.isSuccessful) {
+                        lastWriteError = formatSyncHttpError(resp.code, body, resp.message)
+                    }
+                }
+            } catch (e: Exception) {
+                lastNetworkError = e
+            }
+
+            // 2. SECONDARY MIRROR: Also read system/pre_orders.json from Supabase Storage buckets
             val objectPath = "system/pre_orders.json"
             val remoteCandidates = listOf(
                 "$baseUrl/storage/v1/object/public/product-media/$objectPath?t=$ts" to false,
@@ -1657,11 +2009,7 @@ class SupabaseSyncService(
                 "$baseUrl/storage/v1/object/product-media/$objectPath?t=$ts" to true,
                 "$baseUrl/storage/v1/object/shop-receipts/$objectPath?t=$ts" to true
             )
-
             var remoteJsonRaw: String? = null
-            var sawNotFoundOrEmpty = false
-            var lastNetworkError: Exception? = null
-
             for ((url, useAuth) in remoteCandidates) {
                 try {
                     val reqBuilder = Request.Builder().url(url).get()
@@ -1671,7 +2019,7 @@ class SupabaseSyncService(
                         if (resp.isSuccessful && body.startsWith("[")) {
                             remoteJsonRaw = body
                         } else if (resp.code == 400 || resp.code == 404) {
-                            sawNotFoundOrEmpty = true
+                            sawStorageNotFoundOrEmpty = true
                         }
                     }
                     if (remoteJsonRaw != null) break
@@ -1680,51 +2028,29 @@ class SupabaseSyncService(
                 }
             }
 
-            if (remoteJsonRaw == null && !sawNotFoundOrEmpty && lastNetworkError != null) {
-                return@withContext Result.failure(lastNetworkError!!)
-            }
-
-            val remoteList = mutableListOf<PreOrderRequest>()
+            val storageList = mutableListOf<PreOrderRequest>()
             if (!remoteJsonRaw.isNullOrBlank()) {
                 try {
                     val arr = JSONArray(remoteJsonRaw)
                     for (i in 0 until arr.length()) {
-                        val obj = arr.optJSONObject(i) ?: continue
-                        val id = obj.optString("id", "").trim()
-                        if (id.isBlank()) continue
-                        val statusStr = obj.optString("status", PreOrderStatus.PENDING.name)
-                        val parsedStatus = PreOrderStatus.entries.firstOrNull { it.name == statusStr }
-                            ?: PreOrderStatus.PENDING
-                        remoteList.add(
-                            PreOrderRequest(
-                                id = id,
-                                customerId = obj.optString("customerId", "guest"),
-                                customerName = obj.optString("customerName", "Valued Customer"),
-                                customerPhone = obj.optString("customerPhone", ""),
-                                productName = obj.optString("productName", ""),
-                                brandName = obj.optString("brandName", ""),
-                                category = obj.optString("category", "Clothes"),
-                                preferredSize = obj.optString("preferredSize", "Standard"),
-                                preferredColor = obj.optString("preferredColor", "Any"),
-                                targetBudget = obj.optDouble("targetBudget", 0.0),
-                                description = obj.optString("description", ""),
-                                photoUrl = obj.optString("photoUrl", ""),
-                                status = parsedStatus,
-                                createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
-                                adminResponse = obj.optString("adminResponse", ""),
-                                adminQuotedPrice = obj.optDouble("adminQuotedPrice", 0.0),
-                                customerReply = obj.optString("customerReply", "")
-                            )
-                        )
+                        val item = parsePreOrderJson(arr.optJSONObject(i) ?: continue, isSnakeCase = false) ?: continue
+                        storageList.add(item)
+                        if (!remoteById.containsKey(item.id)) {
+                            remoteById[item.id] = item
+                        }
                     }
                 } catch (e: Exception) {
                     Log.w("SupabaseSyncService", "Failed parsing remote pre_orders.json", e)
                 }
             }
 
-            // Merge local + remote by request id
+            if (!tableReadable && remoteJsonRaw == null && !sawStorageNotFoundOrEmpty && lastNetworkError != null) {
+                return@withContext Result.failure(lastNetworkError!!)
+            }
+
+            // 3. Merge remote + local deterministically by request id
             val mergedById = linkedMapOf<String, PreOrderRequest>()
-            remoteList.forEach { mergedById[it.id] = it }
+            remoteById.values.forEach { mergedById[it.id] = it }
 
             localList.forEach { local ->
                 val remote = mergedById[local.id]
@@ -1763,14 +2089,67 @@ class SupabaseSyncService(
             }
 
             val merged = mergedById.values.sortedByDescending { it.createdAt }
+            val needsTablePush = merged.isNotEmpty() && (
+                !tableReadable ||
+                    preferLocalIds.isNotEmpty() ||
+                    merged.any { m -> tableList.none { it == m } }
+                )
+            val needsStoragePush = merged.isNotEmpty() && (
+                remoteJsonRaw == null ||
+                    preferLocalIds.isNotEmpty() ||
+                    merged.size != storageList.size ||
+                    merged != storageList
+                )
 
-            // Push merged array back up if anything changed or remote didn't exist yet
-            val needsUpload = remoteJsonRaw == null ||
-                preferLocalIds.isNotEmpty() ||
-                merged.size != remoteList.size ||
-                merged != remoteList
+            var tableUploadOk = !needsTablePush
+            var storageUploadOk = !needsStoragePush
 
-            if (needsUpload) {
+            // 4. Push to Postgres public.pre_orders table
+            if (needsTablePush) {
+                try {
+                    val rowsArr = JSONArray()
+                    merged.forEach { r ->
+                        rowsArr.put(JSONObject().apply {
+                            put("id", r.id)
+                            put("customer_id", r.customerId)
+                            put("customer_name", r.customerName)
+                            put("customer_phone", r.customerPhone)
+                            put("product_name", r.productName)
+                            put("brand_name", r.brandName)
+                            put("category", r.category)
+                            put("preferred_size", r.preferredSize)
+                            put("preferred_color", r.preferredColor)
+                            put("target_budget", r.targetBudget)
+                            put("description", r.description)
+                            put("photo_url", r.photoUrl)
+                            put("status", r.status.name)
+                            put("created_at", r.createdAt)
+                            put("admin_response", r.adminResponse)
+                            put("admin_quoted_price", r.adminQuotedPrice)
+                            put("customer_reply", r.customerReply)
+                        })
+                    }
+                    val upsertReq = Request.Builder()
+                        .url("$baseUrl/rest/v1/pre_orders?on_conflict=id")
+                        .addSupabaseAuthHeaders()
+                        .header("Content-Type", "application/json")
+                        .header("Prefer", "resolution=merge-duplicates,return=minimal")
+                        .post(rowsArr.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
+                    client.newCall(upsertReq).execute().use { resp ->
+                        if (resp.isSuccessful || resp.code in 200..299) {
+                            tableUploadOk = true
+                        } else {
+                            lastWriteError = formatSyncHttpError(resp.code, resp.body?.string().orEmpty(), resp.message)
+                        }
+                    }
+                } catch (e: Exception) {
+                    lastWriteError = e.message ?: "Pre-order table upload error"
+                }
+            }
+
+            // 5. Mirror to Storage buckets (secondary redundancy)
+            if (needsStoragePush) {
                 val jsonArr = JSONArray()
                 merged.forEach { r ->
                     jsonArr.put(JSONObject().apply {
@@ -1797,22 +2176,35 @@ class SupabaseSyncService(
                 val mediaType = "application/json".toMediaType()
 
                 suspend fun uploadToBucket(bucketId: String): Boolean {
-                    val url = "$baseUrl/storage/v1/object/$bucketId/$objectPath"
-                    val request = Request.Builder()
-                        .url(url)
-                        .addSupabaseAuthHeaders()
-                        .header("Content-Type", "application/json")
-                        .header("x-upsert", "true")
-                        .post(bytes.toRequestBody(mediaType))
-                        .build()
-                    return client.newCall(request).execute().use { resp ->
-                        resp.isSuccessful || resp.code in 200..201
+                    return try {
+                        val url = "$baseUrl/storage/v1/object/$bucketId/$objectPath"
+                        val request = Request.Builder()
+                            .url(url)
+                            .addSupabaseAuthHeaders()
+                            .header("Content-Type", "application/json")
+                            .header("x-upsert", "true")
+                            .post(bytes.toRequestBody(mediaType))
+                            .build()
+                        client.newCall(request).execute().use { resp ->
+                            if (!resp.isSuccessful && lastWriteError.isNullOrBlank()) {
+                                lastWriteError = "Storage $bucketId HTTP ${resp.code}"
+                            }
+                            resp.isSuccessful || resp.code in 200..201
+                        }
+                    } catch (e: Exception) {
+                        if (lastWriteError.isNullOrBlank()) lastWriteError = e.message
+                        false
                     }
                 }
 
-                if (!uploadToBucket("product-media")) {
-                    uploadToBucket("shop-receipts")
-                }
+                storageUploadOk = uploadToBucket("product-media") || uploadToBucket("shop-receipts")
+            }
+
+            // Fail loudly if local items needed upload AND BOTH table and storage failed
+            if ((needsTablePush || needsStoragePush) && !tableUploadOk && !storageUploadOk) {
+                return@withContext Result.failure(
+                    Exception(lastWriteError ?: "Pre-orders could not upload to Supabase table or storage yet. Run schema SQL in Supabase SQL Editor.")
+                )
             }
 
             Result.success(merged)

@@ -6,10 +6,11 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.model.Order
 import com.example.data.model.OrderStatus
 import com.example.data.model.PaymentMethod
-import com.google.firebase.FirebaseApp
-import com.google.firebase.FirebaseOptions
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -32,18 +33,19 @@ class CustomerAccountAndDeliveryReviewTest {
         app = ApplicationProvider.getApplicationContext()
         app.getSharedPreferences("depros_admin_settings", android.content.Context.MODE_PRIVATE)
             .edit().clear().commit()
-        if (FirebaseApp.getApps(app).isEmpty()) {
-            FirebaseApp.initializeApp(
-                app,
-                FirebaseOptions.Builder()
-                    .setApplicationId("1:1234567890:android:abcdef123456")
-                    .setProjectId("test-project")
-                    .setApiKey("fake-api-key")
-                    .build()
-            )
-        }
         viewModel = MainViewModel(app)
         pumpLooper()
+    }
+
+    @After
+    fun tearDown() {
+        try {
+            viewModel.endLiveCall()
+        } catch (_: Exception) {}
+        try {
+            viewModel.viewModelScope.cancel()
+        } catch (_: Exception) {}
+        com.example.data.local.DeprosDatabase.resetInstanceForTests(app)
     }
 
     private fun pumpLooper() = runBlocking {
@@ -64,6 +66,9 @@ class CustomerAccountAndDeliveryReviewTest {
 
         viewModel.selectCustomerAccountDestination(CustomerAccountDestination.INBOX)
         assertEquals(CustomerAccountDestination.INBOX, viewModel.customerAccountDestination.value)
+
+        viewModel.selectCustomerAccountDestination(CustomerAccountDestination.ORDER_TRACKING)
+        assertEquals(CustomerAccountDestination.ORDER_TRACKING, viewModel.customerAccountDestination.value)
 
         viewModel.selectCustomerAccountDestination(CustomerAccountDestination.RATINGS_AND_REVIEWS)
         assertEquals(CustomerAccountDestination.RATINGS_AND_REVIEWS, viewModel.customerAccountDestination.value)
@@ -122,7 +127,7 @@ class CustomerAccountAndDeliveryReviewTest {
             itemsSummary = "1x ${product.title}",
             totalAmount = product.basePrice,
             paymentMethod = PaymentMethod.OPAY,
-            paymentAccount = "24/7 SHOPPING OPay",
+            paymentAccount = "ODIYA OPay",
             paymentReference = "REF-1",
             senderName = "Ada Okafor",
             status = OrderStatus.PENDING_VERIFICATION
@@ -175,6 +180,8 @@ class CustomerAccountAndDeliveryReviewTest {
         pumpLooper()
         val activity = controller.get()
         org.junit.Assert.assertNotNull(activity)
+        activity.finish()
         controller.pause().stop().destroy()
+        Shadows.shadowOf(Looper.getMainLooper()).idle()
     }
 }

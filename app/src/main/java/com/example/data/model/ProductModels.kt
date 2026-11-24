@@ -287,15 +287,16 @@ data class CartItem(
 }
 
 enum class PaymentMethod(val title: String, val subtitle: String) {
+    PAYSTACK("Paystack Checkout", "Instant Card, Bank Transfer, USSD & OPay via Paystack"),
     OPAY("OPay Transfer", "Direct transfer to official OPay Merchant Account"),
     MONIEPOINT("Moniepoint MFB", "Fast transfer to Moniepoint Commercial Account"),
-    PALMPAY("PalmPay Wallet", "Direct instant transfer to official 24/7 SHOPPING PalmPay Account"),
+    PALMPAY("PalmPay Wallet", "Direct instant transfer to official ODIYA PalmPay Account"),
     POS_TRANSFER("POS Terminal Transfer", "Offline POS card swipe or terminal slip transfer"),
     CASH_ON_DELIVERY("Payment on Delivery", "Pay cash or card when parcel arrives at your doorstep")
 }
 
 enum class CreditVerificationStatus(val label: String) {
-    PENDING_CREDIT("Awaiting 24/7 Account Credit Alert"),
+    PENDING_CREDIT("Awaiting ODIYA Account Credit Alert"),
     PAYMENT_FAILED_UNCREDITED("ORDER & PAYMENT FAILED — Not Yet Credited"),
     CONFIRMED_CREDITED("ORDER & PAYMENT CONFIRMED — Account Credited"),
     NETWORK_DELAYED_PENDING("Network Delayed — Queued for Auto-Confirmation")
@@ -353,7 +354,7 @@ data class SupabaseConfig(
 )
 
 data class StoreProfileConfig(
-    val storeName: String = "24/7 SHOPPING",
+    val storeName: String = "ODIYA",
     val tagline: String = "Shopping with ease and comfort",
     val phoneNumber: String = "",
     val secondaryPhoneNumber: String = "",
@@ -361,11 +362,11 @@ data class StoreProfileConfig(
     val supportEmail: String = "",
     val storeAddress: String = "",
     val opayAccountNumber: String = "",
-    val opayAccountName: String = "24/7 SHOPPING",
+    val opayAccountName: String = "ODIYA",
     val moniepointAccountNumber: String = "",
-    val moniepointAccountName: String = "24/7 SHOPPING",
+    val moniepointAccountName: String = "ODIYA",
     val palmpayAccountNumber: String = "",
-    val palmpayAccountName: String = "24/7 SHOPPING",
+    val palmpayAccountName: String = "ODIYA",
     val posTerminalId: String = "",
     val posTerminalName: String = "",
     val extraBankName: String = "",
@@ -377,7 +378,10 @@ data class StoreProfileConfig(
     val updateReleaseNotes: String = "",
     val isMaintenanceMode: Boolean = false,
     val maintenanceMessage: String = "",
-    val maintenanceStartedAt: Long = 0L
+    val maintenanceStartedAt: Long = 0L,
+    val paystackPublicKey: String = "",
+    val paystackCallbackUrl: String = "depros://paystack-callback",
+    val paystackEdgeFunctionBaseUrl: String = ""
 )
 
 data class AppUpdateManifest(
@@ -414,7 +418,7 @@ data class PreOrderRequest(
     val customerPhone: String,
     val productName: String,
     val brandName: String,
-    val category: String = "24/7 Shopping Item",
+    val category: String = "Odiya Item",
     val preferredSize: String = "Standard",
     val preferredColor: String = "Any",
     val targetBudget: Double = 0.0,

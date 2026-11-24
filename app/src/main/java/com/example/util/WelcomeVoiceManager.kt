@@ -34,12 +34,12 @@ class WelcomeVoiceManager(context: Context) : TextToSpeech.OnInitListener {
     }
 
     fun speakAppWelcome() {
-        val welcomeMessage = "Welcome to 24/7 SHOPPING! Shopping with ease and comfort. Explore our 3D spatial catalog and enjoy custom price bargaining."
+        val welcomeMessage = "Welcome to ODIYA! Shopping with ease and comfort. Explore our 3D spatial catalog and enjoy custom price bargaining."
         speakText(welcomeMessage)
     }
 
     fun speakCustomerSignIn(customerName: String) {
-        val message = "Welcome to 24/7 SHOPPING, $customerName! Enjoy shopping with ease and comfort."
+        val message = "Welcome to ODIYA, $customerName! Enjoy shopping with ease and comfort."
         speakText(message)
     }
 

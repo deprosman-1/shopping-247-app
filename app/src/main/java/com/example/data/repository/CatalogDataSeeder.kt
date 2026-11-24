@@ -500,7 +500,7 @@ object CatalogDataSeeder {
                         title = name,
                         category = spec.category.displayName,
                         brand = brand,
-                        availableBrands = listOf(brand, "24/7 Select", "Premium OEM"),
+                        availableBrands = listOf(brand, "Odiya Select", "Premium OEM"),
                         availableSizes = spec.sizes,
                         availableColors = listOf(
                             ProductColor("Signature Finish", "#064E3B"),
@@ -511,7 +511,7 @@ object CatalogDataSeeder {
                         stockQuantity = 24 + idx * 8,
                         imageUrl = img,
                         model3dType = spec.model3d,
-                        description = "Verified quality $name under ${spec.category.displayName}. Ready for instant dispatch from 24/7 SHOPPING.",
+                        description = "Verified quality $name under ${spec.category.displayName}. Ready for instant dispatch from ODIYA.",
                         expiryMonthsRemaining = if (spec.category == ProductCategory.PHARMACEUTICALS) 18 else 24,
                         rating = 4.7 + (idx % 3) * 0.1,
                         reviewCount = 38 + idx * 11

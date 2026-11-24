@@ -12,21 +12,30 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import android.view.WindowManager
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalView
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.example.util.AppDefenseManager
 import com.example.util.ShopNotificationHelper
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
@@ -81,6 +90,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -116,9 +126,11 @@ data class RawSharedReceiptPayload(
 class MainActivity : ComponentActivity() {
     private val pendingCloudCredentials = kotlinx.coroutines.flow.MutableStateFlow<Pair<String, String>?>(null)
     private val pendingSharedReceiptPayload = kotlinx.coroutines.flow.MutableStateFlow<RawSharedReceiptPayload?>(null)
+    private val pendingPaystackReference = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppDefenseManager.installCrashGuard(applicationContext)
         enableEdgeToEdge()
         val coilOkHttp = okhttp3.OkHttpClient.Builder()
             .dispatcher(
@@ -158,7 +170,8 @@ class MainActivity : ComponentActivity() {
             MyApplicationTheme {
                 DeprosApp(
                     pendingCloudCredentials = pendingCloudCredentials,
-                    pendingSharedReceiptPayload = pendingSharedReceiptPayload
+                    pendingSharedReceiptPayload = pendingSharedReceiptPayload,
+                    pendingPaystackReference = pendingPaystackReference
                 )
             }
         }
@@ -221,19 +234,29 @@ class MainActivity : ComponentActivity() {
 
         val data = intent.data
         if (data != null) {
+            val isPaystackCallback = data.host.equals("paystack-callback", ignoreCase = true) ||
+                data.path?.contains("paystack-callback", ignoreCase = true) == true
+            val paystackRef = data.getQueryParameter("reference")?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?: data.getQueryParameter("trxref")?.trim()
+            if (isPaystackCallback && !paystackRef.isNullOrBlank()) {
+                pendingPaystackReference.value = paystackRef
+                return
+            }
+
             val sbUrl = data.getQueryParameter("sb_url")?.trim()
             val sbKey = data.getQueryParameter("sb_key")?.trim()
             if (!sbUrl.isNullOrBlank() && !sbKey.isNullOrBlank()) {
                 pendingCloudCredentials.value = sbUrl to sbKey
                 android.widget.Toast.makeText(
                     this,
-                    "🔗 Linking 24/7 Shopping to Store Live Cloud...",
+                    "🔗 Linking Odiya to Store Live Cloud...",
                     android.widget.Toast.LENGTH_LONG
                 ).show()
             } else {
                 android.widget.Toast.makeText(
                     this,
-                    "Welcome to 24/7 Shopping! App Opened via direct link",
+                    "Welcome to Odiya! App Opened via direct link",
                     android.widget.Toast.LENGTH_LONG
                 ).show()
             }
@@ -245,7 +268,8 @@ class MainActivity : ComponentActivity() {
 fun DeprosApp(
     viewModel: MainViewModel = viewModel(),
     pendingCloudCredentials: kotlinx.coroutines.flow.MutableStateFlow<Pair<String, String>?>? = null,
-    pendingSharedReceiptPayload: kotlinx.coroutines.flow.MutableStateFlow<RawSharedReceiptPayload?>? = null
+    pendingSharedReceiptPayload: kotlinx.coroutines.flow.MutableStateFlow<RawSharedReceiptPayload?>? = null,
+    pendingPaystackReference: kotlinx.coroutines.flow.MutableStateFlow<String?>? = null
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val currentScreen by viewModel.currentScreen.collectAsState()
@@ -262,6 +286,8 @@ fun DeprosApp(
     val latestVersionName by viewModel.latestVersionName.collectAsState()
     val releaseNotes by viewModel.releaseNotes.collectAsState()
     val updateDownloadUrl by viewModel.updateDownloadUrl.collectAsState()
+    val isOnline by viewModel.isOnline.collectAsState()
+    val offlineQueue by viewModel.offlineQueue.collectAsState()
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -311,6 +337,18 @@ fun DeprosApp(
         }
     }
 
+    val incomingPaystackRef = pendingPaystackReference?.collectAsState()?.value
+    LaunchedEffect(incomingPaystackRef) {
+        if (!incomingPaystackRef.isNullOrBlank()) {
+            showFullScreenBrandSplash = false
+            val refToVerify = incomingPaystackRef
+            pendingPaystackReference?.value = null
+            viewModel.verifyPaystackPayment(reference = refToVerify) { _, msg ->
+                android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     LaunchedEffect(showFullScreenBrandSplash) {
         if (showFullScreenBrandSplash) {
             delay(2200L)
@@ -321,7 +359,7 @@ fun DeprosApp(
     val view = LocalView.current
     val effectiveImmersiveFullScreen = isFullScreen || showFullScreenBrandSplash
     LaunchedEffect(effectiveImmersiveFullScreen) {
-        val window = (view.context as ComponentActivity).window
+        val window = (view.context as? ComponentActivity)?.window ?: return@LaunchedEffect
         val insetsController = WindowCompat.getInsetsController(window, view)
         if (effectiveImmersiveFullScreen) {
             insetsController.hide(WindowInsetsCompat.Type.systemBars())
@@ -331,13 +369,34 @@ fun DeprosApp(
         }
     }
 
+    // Dynamic anti-spying & screen-capture shield on sensitive payment, auth & Admin screens
+    DisposableEffect(currentScreen) {
+        val activity = view.context as? ComponentActivity
+        val protectScreen = currentScreen == AppScreen.ADMIN_CONTROL_ROOM ||
+            currentScreen == AppScreen.CHECKOUT ||
+            currentScreen == AppScreen.AUTH ||
+            currentScreen == AppScreen.PARTNER_PORTAL
+        runCatching {
+            if (protectScreen) {
+                activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            } else {
+                activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            }
+        }
+        onDispose { }
+    }
+
     // Handle system back button smoothly
     BackHandler(enabled = currentScreen != AppScreen.HOME) {
         viewModel.navigateBack()
     }
 
     Scaffold(
-        contentWindowInsets = if (isFullScreen) WindowInsets(0, 0, 0, 0) else WindowInsets.statusBars,
+        contentWindowInsets = if (isFullScreen) {
+            WindowInsets(0, 0, 0, 0)
+        } else {
+            WindowInsets.statusBars.union(WindowInsets.displayCutout)
+        },
         bottomBar = {
             // Show bottom navigation bar on primary destinations
             if (currentScreen != AppScreen.PRODUCT_DETAIL &&
@@ -478,24 +537,66 @@ fun DeprosApp(
         },
         modifier = Modifier.fillMaxSize()
     ) { innerPadding ->
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            when (currentScreen) {
-                AppScreen.HOME -> HomeScreen(viewModel = viewModel)
-                AppScreen.PRODUCT_DETAIL -> ProductDetailScreen(viewModel = viewModel)
-                AppScreen.CART -> CartScreen(viewModel = viewModel)
-                AppScreen.CHECKOUT -> CheckoutScreen(viewModel = viewModel)
-                AppScreen.ORDERS -> OrdersReceiptsScreen(viewModel = viewModel)
-                AppScreen.AUTH -> AuthScreen(viewModel = viewModel)
-                AppScreen.WISHLIST -> WishlistScreen(viewModel = viewModel)
-                AppScreen.ADMIN_CONTROL_ROOM -> AdminControlRoomScreen(viewModel = viewModel)
-                AppScreen.PARTNER_PORTAL -> PartnerPortalScreen(viewModel = viewModel)
-                AppScreen.HELP_SUPPORT -> HelpSupportScreen(viewModel = viewModel)
-                AppScreen.LIVE_CALL -> LiveCallScreen(viewModel = viewModel)
+            if (!isOnline && currentScreen != AppScreen.HOME) {
+                Surface(
+                    color = Color(0xFF78350F),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, AccentGold.copy(alpha = 0.7f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("global_offline_banner")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CloudOff,
+                            contentDescription = "No Internet Connection",
+                            tint = AccentGold,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (offlineQueue.isNotEmpty()) {
+                                "No Internet Connection • ${offlineQueue.size} action(s) queued to auto-sync"
+                            } else {
+                                "No Internet Connection • Browsing cached store data"
+                            },
+                            color = Color.White,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
             }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                when (currentScreen) {
+                    AppScreen.HOME -> HomeScreen(viewModel = viewModel)
+                    AppScreen.PRODUCT_DETAIL -> ProductDetailScreen(viewModel = viewModel)
+                    AppScreen.CART -> CartScreen(viewModel = viewModel)
+                    AppScreen.CHECKOUT -> CheckoutScreen(viewModel = viewModel)
+                    AppScreen.ORDERS -> OrdersReceiptsScreen(viewModel = viewModel)
+                    AppScreen.AUTH -> AuthScreen(viewModel = viewModel)
+                    AppScreen.WISHLIST -> WishlistScreen(viewModel = viewModel)
+                    AppScreen.ADMIN_CONTROL_ROOM -> AdminControlRoomScreen(viewModel = viewModel)
+                    AppScreen.PARTNER_PORTAL -> PartnerPortalScreen(viewModel = viewModel)
+                    AppScreen.HELP_SUPPORT -> HelpSupportScreen(viewModel = viewModel)
+                    AppScreen.LIVE_CALL -> LiveCallScreen(viewModel = viewModel)
+                }
 
             // Floating Incoming Customer Live Call Alert for Admin across all screens
             val pendingRing = liveCallState.incomingRequests.firstOrNull()
@@ -577,9 +678,10 @@ fun DeprosApp(
                     onDismiss = { viewModel.dismissUpdateDialog() }
                 )
             }
+            }
         }
 
-        // Full-Screen "24/7 SHOPPING" Brand Launch Overlay (Edge-to-Edge Immersive View)
+        // Full-Screen "ODIYA" Brand Launch Overlay (Edge-to-Edge Immersive View)
         AnimatedVisibility(
             visible = showFullScreenBrandSplash,
             exit = fadeOut(animationSpec = tween(durationMillis = 380))
@@ -643,7 +745,7 @@ fun DeprosApp(
                             Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                                 Image(
                                     painter = painterResource(id = R.drawable.shopping_logo_icon_1794752250458),
-                                    contentDescription = "24/7 SHOPPING Official Brand Crest",
+                                    contentDescription = "ODIYA Official Brand Crest",
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier
                                         .fillMaxSize()
@@ -654,11 +756,11 @@ fun DeprosApp(
                         }
 
                         Text(
-                            text = "24/7 SHOPPING",
+                            text = "ODIYA",
                             fontSize = 36.sp,
                             lineHeight = 40.sp,
                             fontWeight = FontWeight.Black,
-                            letterSpacing = 2.sp,
+                            letterSpacing = 3.sp,
                             color = AccentGold,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.testTag("fullscreen_brand_title")

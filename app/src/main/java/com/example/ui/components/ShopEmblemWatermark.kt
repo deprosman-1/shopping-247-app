@@ -56,7 +56,7 @@ import com.example.ui.theme.SuccessGreen
 fun ShopEmblemWatermark(
     onOpenQrShare: () -> Unit,
     modifier: Modifier = Modifier,
-    storeName: String = "24/7 SHOPPING",
+    storeName: String = "ODIYA",
     tagline: String = "Shopping with ease and comfort",
     storePhone: String = "",
     secondaryPhone: String = "",
@@ -119,7 +119,7 @@ fun ShopEmblemWatermark(
 
                 Spacer(modifier = Modifier.height(5.dp))
 
-                // Row with 24/7 SHOPPING Logo Box & Full Name
+                // Row with ODIYA Logo Box & Full Name
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center,
@@ -136,17 +136,17 @@ fun ShopEmblemWatermark(
                         ) {
                             AsyncImage(
                                 model = R.drawable.shopping_logo_icon_1794752250458,
-                                contentDescription = "24/7 SHOPPING Logo",
+                                contentDescription = "ODIYA Logo",
                                 modifier = Modifier
                                     .size(30.dp)
                                     .clip(RoundedCornerShape(6.dp))
                             )
                             Spacer(modifier = Modifier.width(5.dp))
                             Text(
-                                text = "24/7\nSHOPPING",
+                                text = "ODIYA",
                                 color = AccentGold,
-                                fontSize = 8.sp,
-                                lineHeight = 9.sp,
+                                fontSize = 10.sp,
+                                lineHeight = 11.sp,
                                 fontWeight = FontWeight.Black
                             )
                         }

@@ -3,7 +3,7 @@ package com.example.data.model
 import java.util.UUID
 
 enum class PartnerAgreementStatus(val label: String) {
-    PENDING_FINALIZATION("Awaiting 24/7 SHOPPING Signature"),
+    PENDING_FINALIZATION("Awaiting ODIYA Signature"),
     FINALIZED("Agreement Finalized & Active"),
     SUSPENDED("Paused / Expired"),
     TERMINATED("Contract Terminated • Products Deleted")

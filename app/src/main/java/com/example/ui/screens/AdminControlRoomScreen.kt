@@ -204,8 +204,11 @@ import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.MoniepointBlue
 import com.example.ui.theme.OPayGreen
 import com.example.ui.theme.PalmPayPurple
+import com.example.ui.theme.PaystackTeal
 import com.example.ui.theme.PosPurple
 import com.example.ui.theme.SuccessGreen
+import com.example.util.AppDefenseManager
+import com.example.util.DefenseCheckLevel
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -992,7 +995,7 @@ private fun CustomerFileModal(
                                             TextButton(
                                                 onClick = {
                                                     val credDump = """
-                                                        24/7 SHOPPING — CUSTOMER SIGN-UP CREDENTIALS
+                                                        ODIYA — CUSTOMER SIGN-UP CREDENTIALS
                                                         Folder ID: #CUST-${customer.id.take(8).uppercase()}
                                                         Full Name: ${customer.fullName}
                                                         Login Phone: ${customer.phoneNumber.ifBlank { "N/A" }}
@@ -4892,7 +4895,7 @@ private fun PaymentReceiptsTab(
                                 OutlinedButton(
                                     onClick = {
                                         viewModel.recordOrderCreditAlertReceived(inspectOrder.orderId)
-                                        Toast.makeText(context, "✅ 24/7 SHOPPING Credit Alert Recorded! Payment Confirmation is now ON.", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "✅ ODIYA Credit Alert Recorded! Payment Confirmation is now ON.", Toast.LENGTH_SHORT).show()
                                     },
                                     modifier = Modifier.weight(1f)
                                 ) {
@@ -4902,7 +4905,7 @@ private fun PaymentReceiptsTab(
                             Button(
                                 enabled = inspectOrder.isCreditAlertConfirmed,
                                 onClick = {
-                                    viewModel.updateOrderStatus(inspectOrder.orderId, OrderStatus.CONFIRMED, "Order confirmed & approved by Admin Cashier after 24/7 credit alert")
+                                    viewModel.updateOrderStatus(inspectOrder.orderId, OrderStatus.CONFIRMED, "Order confirmed & approved by Admin Cashier after ODIYA credit alert")
                                     Toast.makeText(context, "Order ${inspectOrder.orderId} Confirmed! Status changed to ORDER CONFIRMED.", Toast.LENGTH_SHORT).show()
                                     viewingReceiptImageOrder = null
                                 },
@@ -5052,6 +5055,7 @@ private fun PaymentReceiptsTab(
             } else {
                 items(filteredOrders, key = { it.orderId }) { order ->
                     val paymentColor = when (order.paymentMethod) {
+                        PaymentMethod.PAYSTACK -> PaystackTeal
                         PaymentMethod.OPAY -> OPayGreen
                         PaymentMethod.MONIEPOINT -> MoniepointBlue
                         PaymentMethod.PALMPAY -> PalmPayPurple
@@ -5270,7 +5274,7 @@ private fun PaymentReceiptsTab(
                                 border = BorderStroke(1.dp, creditColor.copy(alpha = 0.45f))
                             ) {
                                 Text(
-                                    text = if (order.isCreditAlertConfirmed) "24/7 Account Credited ✓ • Payment Confirmation ON" else order.creditVerificationStatus.label,
+                                    text = if (order.isCreditAlertConfirmed) "ODIYA Account Credited ✓ • Payment Confirmation ON" else order.creditVerificationStatus.label,
                                     color = creditColor,
                                     fontSize = 10.5.sp,
                                     fontWeight = FontWeight.Black,
@@ -5299,7 +5303,7 @@ private fun PaymentReceiptsTab(
                                         OutlinedButton(
                                             onClick = {
                                                 viewModel.recordOrderCreditAlertReceived(order.orderId)
-                                                Toast.makeText(context, "✅ 24/7 Credit Alert Received! Payment Confirmation ON & Receipt sent.", Toast.LENGTH_SHORT).show()
+                                                Toast.makeText(context, "✅ ODIYA Credit Alert Received! Payment Confirmation ON & Receipt sent.", Toast.LENGTH_SHORT).show()
                                             },
                                             modifier = Modifier
                                                 .weight(1f)
@@ -5920,7 +5924,7 @@ private fun SupabaseCloudTab(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = if (liveWebCustomerLink != null) "QR Target: Live Store Web Link" else "QR Target: 24/7 SHOPPING Direct App Link",
+                            text = if (liveWebCustomerLink != null) "QR Target: Live Store Web Link" else "QR Target: ODIYA Direct App Link",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = SuccessGreen
@@ -6172,7 +6176,7 @@ private fun SupabaseCloudTab(
                             value = customPortalUrl,
                             onValueChange = { customPortalUrl = it },
                             label = { Text("Your GitHub Pages Web URL (Optional)") },
-                            placeholder = { Text("https://yourusername.github.io/247-shopping/") },
+                            placeholder = { Text("https://yourusername.github.io/odiya-store/") },
                             singleLine = true,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -6542,6 +6546,46 @@ private fun SupabaseCloudTab(
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // PAYSTACK MERCHANT EDGE FUNCTIONS BLUEPRINT (Secret-Safe Supabase Architecture)
+        Card(
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = PaystackTeal.copy(alpha = 0.08f)),
+            border = BorderStroke(1.2.dp, PaystackTeal.copy(alpha = 0.55f)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("admin_paystack_edge_guide_card")
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Paystack Gateway • Supabase Edge Functions",
+                    fontWeight = FontWeight.Black,
+                    color = PaystackTeal,
+                    fontSize = 14.sp
+                )
+                Text(
+                    text = "Keep your Paystack Secret Key (sk_live_...) strictly inside Supabase Edge Function Secrets — NEVER put it in the APK. Deploy 'paystack-init', 'paystack-verify', and 'paystack-webhook' using the snippet below.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Button(
+                    onClick = {
+                        val guide = viewModel.paystackGateway.buildEdgeFunctionSetupGuide()
+                        copyToClipboard("Paystack Edge Functions", guide, "Copied Paystack Supabase Edge Function guide!")
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = PaystackTeal, contentColor = Color.Black),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("copy_paystack_edge_functions_button")
+                ) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Copy Paystack Edge Functions Setup", fontWeight = FontWeight.Black, fontSize = 12.sp)
                 }
             }
         }
@@ -7411,7 +7455,7 @@ private fun AdminSecurityLockScreen(viewModel: MainViewModel) {
 
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(
-                    text = "Tip: Long-press the 24/7 SHOPPING logo badge on the Home front view anytime to open this restricted portal.",
+                    text = "Tip: Long-press the ODIYA logo badge on the Home front view anytime to open this restricted portal.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
@@ -7597,7 +7641,7 @@ private fun PromoActivationTab(viewModel: MainViewModel) {
                     Spacer(modifier = Modifier.height(14.dp))
 
                     Text(
-                        text = "When activated, every item in the 24/7 SHOPPING store (or selected category) gets this discount percentage automatically calculated at checkout without hardcoded product edits.",
+                        text = "When activated, every item in the ODIYA store (or selected category) gets this discount percentage automatically calculated at checkout without hardcoded product edits.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -7658,7 +7702,7 @@ private fun PromoActivationTab(viewModel: MainViewModel) {
                         onValueChange = { titleInput = it },
                         enabled = isEditingUnlocked,
                         label = { Text("Promo Campaign Title") },
-                        placeholder = { Text("e.g. 24/7 SHOPPING Flash Sale / Holiday Discount") },
+                        placeholder = { Text("e.g. ODIYA Flash Sale / Holiday Discount") },
                         singleLine = true,
                         trailingIcon = {
                             Icon(
@@ -7815,7 +7859,7 @@ private fun PromoActivationTab(viewModel: MainViewModel) {
                             viewModel.updatePromo(
                                 isActive = isActive,
                                 discountPercent = pct,
-                                title = titleInput.ifBlank { "24/7 SHOPPING Promo Discount" },
+                                title = titleInput.ifBlank { "ODIYA Promo Discount" },
                                 targetCategory = targetCat,
                                 durationHours = durationHours
                             )
@@ -9106,7 +9150,7 @@ private fun AdminSecuritySettingsTab(
     var maintenanceMessageInput by remember(storeProfile.maintenanceMessage) {
         mutableStateOf(
             storeProfile.maintenanceMessage.ifBlank {
-                "Scheduled 24/7 SHOPPING system upgrade & performance maintenance in progress. Orders will auto-sync seamlessly."
+                "Scheduled ODIYA system upgrade & performance maintenance in progress. Orders will auto-sync seamlessly."
             }
         )
     }
@@ -9116,6 +9160,8 @@ private fun AdminSecuritySettingsTab(
     var extraBankNameInput by remember(storeProfile.extraBankName) { mutableStateOf(storeProfile.extraBankName) }
     var extraBankNumberInput by remember(storeProfile.extraBankAccountNumber) { mutableStateOf(storeProfile.extraBankAccountNumber) }
     var extraBankHolderInput by remember(storeProfile.extraBankAccountName) { mutableStateOf(storeProfile.extraBankAccountName) }
+    var paystackPublicKeyInput by remember(storeProfile.paystackPublicKey) { mutableStateOf(storeProfile.paystackPublicKey) }
+    var paystackEdgeUrlInput by remember(storeProfile.paystackEdgeFunctionBaseUrl) { mutableStateOf(storeProfile.paystackEdgeFunctionBaseUrl) }
 
     val installedApkInfo = remember(viewModel) { viewModel.getInstalledAppVersion() }
     var apkDownloadUrlInput by remember(storeProfile.apkDownloadUrl) {
@@ -9266,7 +9312,7 @@ private fun AdminSecuritySettingsTab(
                     ) {
                         Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
-                                text = "Write the official email address for the 24/7 SHOPPING app below (customers will never be asked for an email address).",
+                                text = "Write the official email address for the ODIYA app below (customers will never be asked for an email address).",
                                 style = MaterialTheme.typography.bodySmall,
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -9275,7 +9321,7 @@ private fun AdminSecuritySettingsTab(
                                 value = emailInput,
                                 onValueChange = { emailInput = it },
                                 label = { Text("App Email Address") },
-                                placeholder = { Text("e.g. store@247shopping.com") },
+                                placeholder = { Text("e.g. store@odiya.store") },
                                 leadingIcon = { Icon(Icons.Default.Email, contentDescription = null, modifier = Modifier.size(18.dp)) },
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
@@ -9414,11 +9460,39 @@ private fun AdminSecuritySettingsTab(
                         )
                     }
 
+                    HorizontalDivider()
+                    Text(
+                        text = "PAYSTACK MERCHANT GATEWAY (SUPABASE EDGE BACKED)",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Black,
+                        color = PaystackTeal
+                    )
+
+                    OutlinedTextField(
+                        value = paystackPublicKeyInput,
+                        onValueChange = { paystackPublicKeyInput = it },
+                        label = { Text("Paystack Public Key (pk_live_... or pk_test_...)") },
+                        placeholder = { Text("pk_live_... (Secret Key stays ONLY in Supabase)") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("admin_paystack_public_key_input")
+                    )
+
+                    OutlinedTextField(
+                        value = paystackEdgeUrlInput,
+                        onValueChange = { paystackEdgeUrlInput = it },
+                        label = { Text("Custom Edge Function URL (Optional)") },
+                        placeholder = { Text("Defaults to https://YOUR_REF.supabase.co/functions/v1") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("admin_paystack_edge_url_input")
+                    )
+
                     Button(
                         onClick = {
                             viewModel.updateStoreProfile(
                                 StoreProfileConfig(
-                                    storeName = storeNameInput.trim().ifBlank { "24/7 SHOPPING" },
+                                    storeName = storeNameInput.trim().ifBlank { "ODIYA" },
                                     tagline = taglineInput.trim().ifBlank { "Shopping with ease and comfort" },
                                     phoneNumber = phoneInput.trim(),
                                     secondaryPhoneNumber = secondaryPhoneInput.trim(),
@@ -9426,11 +9500,11 @@ private fun AdminSecuritySettingsTab(
                                     supportEmail = emailInput.trim(),
                                     storeAddress = addressInput.trim(),
                                     opayAccountNumber = opayNumberInput.trim(),
-                                    opayAccountName = opayNameInput.trim().ifBlank { "24/7 SHOPPING" },
+                                    opayAccountName = opayNameInput.trim().ifBlank { "ODIYA" },
                                     moniepointAccountNumber = monieNumberInput.trim(),
-                                    moniepointAccountName = monieNameInput.trim().ifBlank { "24/7 SHOPPING" },
+                                    moniepointAccountName = monieNameInput.trim().ifBlank { "ODIYA" },
                                     palmpayAccountNumber = palmpayNumberInput.trim(),
-                                    palmpayAccountName = palmpayNameInput.trim().ifBlank { "24/7 SHOPPING" },
+                                    palmpayAccountName = palmpayNameInput.trim().ifBlank { "ODIYA" },
                                     posTerminalId = posTerminalIdInput.trim(),
                                     posTerminalName = posTerminalNameInput.trim(),
                                     extraBankName = extraBankNameInput.trim(),
@@ -9442,12 +9516,15 @@ private fun AdminSecuritySettingsTab(
                                     updateReleaseNotes = updateNotesInput.trim(),
                                     isMaintenanceMode = storeProfile.isMaintenanceMode,
                                     maintenanceMessage = storeProfile.maintenanceMessage,
-                                    maintenanceStartedAt = storeProfile.maintenanceStartedAt
+                                    maintenanceStartedAt = storeProfile.maintenanceStartedAt,
+                                    paystackPublicKey = paystackPublicKeyInput.trim(),
+                                    paystackCallbackUrl = storeProfile.paystackCallbackUrl,
+                                    paystackEdgeFunctionBaseUrl = paystackEdgeUrlInput.trim()
                                 )
                             )
                             Toast.makeText(
                                 context,
-                                "✅ All phone numbers, address, app email & accounts updated everywhere!",
+                                "✅ All phone numbers, address, app email, Paystack & accounts updated!",
                                 Toast.LENGTH_LONG
                             ).show()
                         },
@@ -9765,7 +9842,7 @@ private fun AdminSecuritySettingsTab(
                                 val firstLine = signedUpPhones.firstOrNull().orEmpty()
                                 val itemTitle = latestProduct?.title ?: "New Arrival"
                                 val smsIntent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$firstLine")).apply {
-                                    putExtra("sms_body", "🛍️ ${storeProfile.storeName} New Arrival: $itemTitle is now live in the app! Open 24/7 SHOPPING to order now.")
+                                    putExtra("sms_body", "🛍️ ${storeProfile.storeName} New Arrival: $itemTitle is now live in the app! Open ODIYA to order now.")
                                 }
                                 runCatching { context.startActivity(smsIntent) }
                             },
@@ -9990,7 +10067,7 @@ private fun AdminSecuritySettingsTab(
                         color = AccentGold
                     )
                     Text(
-                        text = "Customer installs hide the Admin Control button automatically. Tap below to lock Admin and hide the Control button on this device too (you can always re-open Admin by long-pressing the 24/7 SHOPPING logo badge).",
+                        text = "Customer installs hide the Admin Control button automatically. Tap below to lock Admin and hide the Control button on this device too (you can always re-open Admin by long-pressing the ODIYA logo badge).",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -10143,6 +10220,113 @@ private fun AdminSecuritySettingsTab(
                         Icon(Icons.Default.Lock, contentDescription = null, tint = AccentGold, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Lock Control Room Now", fontWeight = FontWeight.Bold, color = AccentGold)
+                    }
+                }
+            }
+        }
+
+        // ACTIVE FORTRESS DEFENSE SHIELD & GOOGLE PLAY LAUNCH DIAGNOSTICS
+        item {
+            var auditReport by remember { mutableStateOf(viewModel.runSecurityDefenseAudit()) }
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF052E16)),
+                border = BorderStroke(1.5.dp, SuccessGreen.copy(alpha = 0.7f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("admin_defense_shield_card")
+            ) {
+                Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "APP DEFENSE SHIELD & PLAY READINESS",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Black,
+                                color = AccentGold
+                            )
+                            Text(
+                                text = "${auditReport.overallStatus} (${auditReport.overallScore}%)",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Black,
+                                color = Color.White
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = SuccessGreen.copy(alpha = 0.22f)
+                        ) {
+                            Text(
+                                text = auditReport.signingSha256Short,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = CyberCyan,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    auditReport.checks.forEach { chk ->
+                        val chkColor = when (chk.level) {
+                            DefenseCheckLevel.SECURE -> SuccessGreen
+                            DefenseCheckLevel.NOTICE -> AccentGold
+                            DefenseCheckLevel.ALERT -> Color(0xFFFCA5A5)
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFF064E3B),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(chk.title, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = chkColor)
+                                Text(chk.detail, fontSize = 10.5.sp, color = Color.White.copy(alpha = 0.88f))
+                            }
+                        }
+                    }
+
+                    if (auditReport.lastCrashSummary.isNotBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFF7F1D1D).copy(alpha = 0.45f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "Last Isolated Crash (${auditReport.recordedCrashCount}): ${auditReport.lastCrashSummary}",
+                                fontSize = 10.5.sp,
+                                color = Color(0xFFFECACA),
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = {
+                                auditReport = viewModel.runSecurityDefenseAudit()
+                                Toast.makeText(context, "Self-Audit Score: ${auditReport.overallScore}%", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = CyberCyan),
+                            border = BorderStroke(1.dp, CyberCyan),
+                            modifier = Modifier.weight(1f).height(48.dp).testTag("run_security_audit_button")
+                        ) {
+                            Text("Run Self-Audit", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Button(
+                            onClick = {
+                                viewModel.syncDefenseTelemetryToSupabase { _, msg ->
+                                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = Color(0xFF052E16)),
+                            modifier = Modifier.weight(1.2f).height(48.dp).testTag("sync_defense_telemetry_button")
+                        ) {
+                            Text("Sync Telemetry", fontSize = 11.5.sp, fontWeight = FontWeight.Black)
+                        }
                     }
                 }
             }
@@ -10587,7 +10771,7 @@ private fun ReturnsAndSupportAdminTab(viewModel: MainViewModel) {
                                     onClick = {
                                         viewModel.replySupportTicket(
                                             ticketId = ticket.id,
-                                            reply = replyInput.ifBlank { "Your issue has been resolved. Thank you for shopping with 24/7 Shopping!" },
+                                            reply = replyInput.ifBlank { "Your issue has been resolved. Thank you for shopping with Odiya!" },
                                             status = SupportTicketStatus.RESOLVED
                                         )
                                         Toast.makeText(context, "Reply sent & Ticket ${ticket.id} Resolved!", Toast.LENGTH_SHORT).show()

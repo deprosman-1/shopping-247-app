@@ -20,8 +20,8 @@ import com.example.util.PdfInvoiceExporter
 import com.example.util.ProductImageHelper
 import com.example.util.SharedReceiptHelper
 import com.example.util.WordInvoiceExporter
-import com.google.firebase.FirebaseApp
-import com.google.firebase.FirebaseOptions
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -56,16 +56,6 @@ class BatchFeaturesVerificationTest {
             Shadows.shadowOf(caps).addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
             Shadows.shadowOf(cm).setNetworkCapabilities(activeNet, caps)
         }
-        if (FirebaseApp.getApps(app).isEmpty()) {
-            FirebaseApp.initializeApp(
-                app,
-                FirebaseOptions.Builder()
-                    .setApplicationId("1:1234567890:android:abcdef123456")
-                    .setProjectId("test-project")
-                    .setApiKey("fake-api-key")
-                    .build()
-            )
-        }
         viewModel = MainViewModel(app)
         pumpLooper()
     }
@@ -74,6 +64,10 @@ class BatchFeaturesVerificationTest {
     fun tearDown() {
         try {
             viewModel.endLiveCall()
+        } catch (_: Exception) {
+        }
+        try {
+            viewModel.viewModelScope.cancel()
         } catch (_: Exception) {
         }
         com.example.data.local.DeprosDatabase.resetInstanceForTests(app)
@@ -146,7 +140,7 @@ class BatchFeaturesVerificationTest {
     }
 
     @Test
-    fun palmPayPortalDetectedAndWordPdfReceiptsInclude247ShoppingRecipient() {
+    fun palmPayPortalDetectedAndWordPdfReceiptsIncludeOdiyaRecipient() {
         val text = """
             PalmPay Official Receipt
             Amount: ₦35,500.00
@@ -159,7 +153,7 @@ class BatchFeaturesVerificationTest {
         assertEquals("Fatima Bello", parsed.extractedSender)
 
         val order = Order(
-            orderId = "ORD-247-PALM",
+            orderId = "ORD-ODY-PALM",
             customerId = "c-1",
             customerName = "Fatima Bello",
             customerEmail = "",
@@ -168,7 +162,7 @@ class BatchFeaturesVerificationTest {
             itemsSummary = "1x Luxury Gold Analog Watch",
             totalAmount = 35500.0,
             paymentMethod = PaymentMethod.PALMPAY,
-            paymentAccount = "PalmPay: 8012345678 (24/7 SHOPPING)",
+            paymentAccount = "PalmPay: 8012345678 (ODIYA)",
             paymentReference = "PALM-88221100",
             senderName = "Fatima Bello",
             status = OrderStatus.CONFIRMED,
@@ -180,8 +174,8 @@ class BatchFeaturesVerificationTest {
         val wordOk = WordInvoiceExporter.writeToUri(app, Uri.fromFile(wordFile), order, viewModel.storeProfile.value)
         assertTrue(wordOk)
         val wordHtml = wordFile.readText()
-        assertTrue(wordHtml.contains("24/7 SHOPPING OFFICIAL RECIPIENT"))
-        assertTrue(wordHtml.contains("ORD-247-PALM"))
+        assertTrue(wordHtml.contains("ODIYA OFFICIAL RECIPIENT"))
+        assertTrue(wordHtml.contains("ORD-ODY-PALM"))
 
         val pdfFile = File(app.cacheDir, "test_receipt.pdf")
         val pdfOk = PdfInvoiceExporter.writeToUri(app, Uri.fromFile(pdfFile), order, viewModel.storeProfile.value)
@@ -209,7 +203,7 @@ class BatchFeaturesVerificationTest {
             deliveryAddress = "Enugu",
             paymentMethod = PaymentMethod.PALMPAY,
             portalAccountNumber = "8012345678",
-            portalAccountName = "24/7 SHOPPING",
+            portalAccountName = "ODIYA",
             senderName = "Kelechi Eze",
             deliveryConditionTitle = "Standard",
             deliveryFeeAmount = 1000.0,
@@ -223,7 +217,7 @@ class BatchFeaturesVerificationTest {
         assertTrue(confirmedOrder!!.isCreditAlertConfirmed)
         assertEquals(CreditVerificationStatus.CONFIRMED_CREDITED, confirmedOrder!!.creditVerificationStatus)
 
-        // 2) Uncredited Payment -> ORDER & PAYMENT FAILED until 24/7 receives credit alert
+        // 2) Uncredited Payment -> ORDER & PAYMENT FAILED until ODIYA receives credit alert
         viewModel.addToCart(item)
         var failedOrder: Order? = null
         viewModel.processDirectPortalPayment(
@@ -233,7 +227,7 @@ class BatchFeaturesVerificationTest {
             deliveryAddress = "Enugu",
             paymentMethod = PaymentMethod.OPAY,
             portalAccountNumber = "9012345678",
-            portalAccountName = "24/7 SHOPPING",
+            portalAccountName = "ODIYA",
             senderName = "Kelechi Eze",
             deliveryConditionTitle = "Standard",
             deliveryFeeAmount = 1000.0,
@@ -247,7 +241,7 @@ class BatchFeaturesVerificationTest {
         assertFalse(failedOrder!!.isCreditAlertConfirmed)
         assertEquals(CreditVerificationStatus.PAYMENT_FAILED_UNCREDITED, failedOrder!!.creditVerificationStatus)
 
-        // When 24/7 SHOPPING receives credit alert -> Admin button turns ON & receipt confirmed
+        // When ODIYA receives credit alert -> Admin button turns ON & receipt confirmed
         viewModel.recordOrderCreditAlertReceived(failedOrder!!.orderId)
         pumpLooper()
         val recoveredOrder = viewModel.allOrders.value.first { it.orderId == failedOrder!!.orderId }
@@ -264,7 +258,7 @@ class BatchFeaturesVerificationTest {
             deliveryAddress = "Enugu",
             paymentMethod = PaymentMethod.MONIEPOINT,
             portalAccountNumber = "5012345678",
-            portalAccountName = "24/7 SHOPPING",
+            portalAccountName = "ODIYA",
             senderName = "Kelechi Eze",
             deliveryConditionTitle = "Standard",
             deliveryFeeAmount = 1000.0,
@@ -313,13 +307,13 @@ class BatchFeaturesVerificationTest {
         // Maintenance & Upgrade Notice propagates to StoreProfileConfig
         viewModel.publishAppMaintenanceNotice(
             enabled = true,
-            message = "Upgrading 24/7 SHOPPING checkout nodes",
+            message = "Upgrading ODIYA checkout nodes",
             isUpgradeNotice = true,
             versionName = "2.5"
         )
         pumpLooper()
         assertTrue(viewModel.storeProfile.value.isMaintenanceMode)
-        assertEquals("Upgrading 24/7 SHOPPING checkout nodes", viewModel.storeProfile.value.maintenanceMessage)
+        assertEquals("Upgrading ODIYA checkout nodes", viewModel.storeProfile.value.maintenanceMessage)
 
         // Signed-up phone line new product alert
         viewModel.persistDeliveryInfoLocally(phoneNumber = "+2348077665544")

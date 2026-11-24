@@ -80,6 +80,7 @@ import com.example.ui.theme.CodOrange
 import com.example.ui.theme.MoniepointBlue
 import com.example.ui.theme.OPayGreen
 import com.example.ui.theme.PalmPayPurple
+import com.example.ui.theme.PaystackTeal
 import com.example.ui.theme.PosPurple
 import com.example.ui.theme.SuccessGreen
 import com.example.util.PdfInvoiceExporter
@@ -98,7 +99,7 @@ fun ReceiptViewDialog(
 ) {
     val context = LocalContext.current
     var showZoomedReceipt by remember { mutableStateOf(false) }
-    val storeTitle = storeProfile.storeName.ifBlank { "24/7 SHOPPING" }.uppercase()
+    val storeTitle = storeProfile.storeName.ifBlank { "ODIYA" }.uppercase()
     val nairaFormat = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "NG")).apply {
             maximumFractionDigits = 0
@@ -107,6 +108,7 @@ fun ReceiptViewDialog(
     val dateFormat = remember { SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()) }
 
     val paymentColor = when (order.paymentMethod) {
+        PaymentMethod.PAYSTACK -> PaystackTeal
         PaymentMethod.OPAY -> OPayGreen
         PaymentMethod.MONIEPOINT -> MoniepointBlue
         PaymentMethod.PALMPAY -> PalmPayPurple
@@ -201,7 +203,7 @@ fun ReceiptViewDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Clickable 24/7 SHOPPING Official Target Recipient Logo Card
+                // Clickable ODIYA Official Target Recipient Logo Card
                 Surface(
                     onClick = {
                         isTargetRecipientSelected = true
@@ -220,7 +222,7 @@ fun ReceiptViewDialog(
                     ) {
                         Image(
                             painter = painterResource(id = R.drawable.shopping_logo_icon_1794752250458),
-                            contentDescription = "24/7 SHOPPING Target Recipient Logo",
+                            contentDescription = "ODIYA Target Recipient Logo",
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
                                 .size(44.dp)
@@ -445,7 +447,7 @@ fun ReceiptViewDialog(
                     }
                 }
 
-                // Word Format (.doc) Export Buttons targeting 24/7 SHOPPING
+                // Word Format (.doc) Export Buttons targeting ODIYA
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -469,7 +471,7 @@ fun ReceiptViewDialog(
                     Button(
                         onClick = {
                             isTargetRecipientSelected = true
-                            saveWordLauncher.launch("${order.orderId}_247SHOPPING.doc")
+                            saveWordLauncher.launch("${order.orderId}_ODIYA.doc")
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = MoniepointBlue, contentColor = Color.White),
                         modifier = Modifier
@@ -485,7 +487,7 @@ fun ReceiptViewDialog(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // PDF Format (.pdf) Export Buttons targeting 24/7 SHOPPING
+                // PDF Format (.pdf) Export Buttons targeting ODIYA
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -508,7 +510,7 @@ fun ReceiptViewDialog(
                     Button(
                         onClick = {
                             isTargetRecipientSelected = true
-                            savePdfLauncher.launch("${order.orderId}_247SHOPPING.pdf")
+                            savePdfLauncher.launch("${order.orderId}_ODIYA.pdf")
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = paymentColor),
                         modifier = Modifier

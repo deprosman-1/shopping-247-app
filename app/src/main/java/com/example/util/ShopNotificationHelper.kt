@@ -82,7 +82,7 @@ object ShopNotificationHelper {
             OrderStatus.CONFIRMED, OrderStatus.VERIFIED ->
                 "Payment Confirmed ($orderId)" to (note.ifBlank { "Your payment was confirmed and your order is now processing." })
             OrderStatus.OUT_FOR_DELIVERY ->
-                "Out for Delivery ($orderId)" to (note.ifBlank { "Your 24/7 SHOPPING order has been dispatched and is on the way!" })
+                "Out for Delivery ($orderId)" to (note.ifBlank { "Your ODIYA order has been dispatched and is on the way!" })
             OrderStatus.DELIVERED ->
                 "Delivered ($orderId)" to (note.ifBlank { "Your order has arrived. Enjoy your items and leave a review!" })
             OrderStatus.CANCELLED ->
@@ -107,7 +107,7 @@ object ShopNotificationHelper {
             channelId = CHANNEL_PROMOS,
             notificationId = ("promo_$title").hashCode(),
             title = "Flash Promo Live: $discountPercent% OFF $scopeLabel!",
-            body = title.ifBlank { "24/7 SHOPPING Promo Discount is active now." }
+            body = title.ifBlank { "ODIYA Promo Discount is active now." }
         )
     }
 
@@ -162,7 +162,7 @@ object ShopNotificationHelper {
             channelId = CHANNEL_ORDERS,
             notificationId = ("partner_${partnerName}_$orderId").hashCode(),
             title = "Partner Payment Alert • $partnerName ($orderId)",
-            body = "Paid $grossAmountText via $paymentAccount. 24/7 Profit: $commissionProfitText | Partner Payout: $partnerPayoutText."
+            body = "Paid $grossAmountText via $paymentAccount. ODIYA Profit: $commissionProfitText | Partner Payout: $partnerPayoutText."
         )
     }
 
@@ -178,7 +178,7 @@ object ShopNotificationHelper {
             channelId = CHANNEL_PROMOS,
             notificationId = ("restock_$productId").hashCode(),
             title = "Back in Stock: $productTitle",
-            body = "Good news! $productTitle is available again on 24/7 SHOPPING. Tap to grab yours before it sells out."
+            body = "Good news! $productTitle is available again on ODIYA. Tap to grab yours before it sells out."
         )
     }
 
@@ -228,7 +228,7 @@ object ShopNotificationHelper {
             channelId = CHANNEL_ORDERS,
             notificationId = 24799,
             title = "Connection Restored • Synced",
-            body = "$syncedCount queued offline update(s) synced safely to 24/7 SHOPPING Cloud."
+            body = "$syncedCount queued offline update(s) synced safely to ODIYA Cloud."
         )
     }
 
@@ -245,7 +245,7 @@ object ShopNotificationHelper {
             channelId = CHANNEL_ORDERS,
             notificationId = 24805,
             title = "Incoming $kind • $callerName",
-            body = "$callerName is calling Admin live on 24/7 SHOPPING. Tap to answer in Audio or Video mode."
+            body = "$callerName is calling Admin live on ODIYA. Tap to answer in Audio or Video mode."
         )
     }
 
@@ -261,7 +261,7 @@ object ShopNotificationHelper {
             context = context,
             channelId = CHANNEL_ORDERS,
             notificationId = 24810 + versionCode,
-            title = "New 24/7 SHOPPING Update Ready (v$versionName)",
+            title = "New ODIYA Update Ready (v$versionName)",
             body = notes.ifBlank { "Tap to install the latest features and live upgrades on your phone." }
         )
     }
@@ -280,7 +280,7 @@ object ShopNotificationHelper {
             context = context,
             channelId = CHANNEL_PROMOS,
             notificationId = ("new_prod_${productTitle}_$category").hashCode(),
-            title = "New Arrival on 24/7 SHOPPING: $productTitle",
+            title = "New Arrival on ODIYA: $productTitle",
             body = "Category: $category • Price: $priceText$phoneSuffix. Tap to view & shop now!"
         )
     }
@@ -296,7 +296,7 @@ object ShopNotificationHelper {
             context = context,
             channelId = CHANNEL_ORDERS,
             notificationId = 24899,
-            title = title.ifBlank { "24/7 SHOPPING App Maintenance & Upgrade" },
+            title = title.ifBlank { "ODIYA App Maintenance & Upgrade" },
             body = message.ifBlank { "Scheduled system upgrade in progress for faster shopping. Thank you for your patience." }
         )
     }
@@ -331,7 +331,7 @@ object ShopNotificationHelper {
             channelId = CHANNEL_ORDERS,
             notificationId = ("pay_ok_$orderId").hashCode(),
             title = "ORDER & PAYMENT CONFIRMED ($orderId)",
-            body = "24/7 SHOPPING account credited $amountText via $portalTitle. Your ORDER & PAYMENT CONFIRMATION RECEIPT is ready!"
+            body = "ODIYA account credited $amountText via $portalTitle. Your ORDER & PAYMENT CONFIRMATION RECEIPT is ready!"
         )
     }
 
@@ -350,9 +350,9 @@ object ShopNotificationHelper {
             "ORDER & PAYMENT FAILED ($orderId)"
         }
         val body = if (isNetworkDelay) {
-            "Network delay detected for $amountText via $portalTitle. Once network restores, transfer pushes automatically to credit 24/7 SHOPPING."
+            "Network delay detected for $amountText via $portalTitle. Once network restores, transfer pushes automatically to credit ODIYA."
         } else {
-            "24/7 SHOPPING account has NOT received credit alert for $amountText ($portalTitle) yet. Status turns to ORDER & PAYMENT CONFIRMED once credited."
+            "ODIYA account has NOT received credit alert for $amountText ($portalTitle) yet. Status turns to ORDER & PAYMENT CONFIRMED once credited."
         }
         postNotification(
             context = context,

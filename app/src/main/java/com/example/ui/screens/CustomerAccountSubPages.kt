@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ConfirmationNumber
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.HelpOutline
@@ -47,7 +48,9 @@ import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -228,6 +231,60 @@ fun WelcomeCustomerOnlyPage(
             Spacer(modifier = Modifier.width(6.dp))
             Text("Sign Out", fontWeight = FontWeight.Bold, color = Color(0xFFDC2626))
         }
+
+        var showDeleteAccountDialog by remember { mutableStateOf(false) }
+        var isDeletingAccount by remember { mutableStateOf(false) }
+
+        TextButton(
+            onClick = { showDeleteAccountDialog = true },
+            colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFEF4444)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .testTag("delete_customer_account_button")
+        ) {
+            Icon(Icons.Default.DeleteForever, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Delete My Account & Data", fontWeight = FontWeight.Bold)
+        }
+
+        if (showDeleteAccountDialog) {
+            AlertDialog(
+                onDismissRequest = { if (!isDeletingAccount) showDeleteAccountDialog = false },
+                title = { Text("Delete Account & Data?", fontWeight = FontWeight.Black) },
+                text = {
+                    Text(
+                        "This permanently removes your customer profile, saved delivery details, and wishlist from this device and synced Supabase Cloud storage. Active paid order tax/audit receipts remain archived if legally required.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        enabled = !isDeletingAccount,
+                        onClick = {
+                            isDeletingAccount = true
+                            viewModel.deleteCurrentCustomerAccount { _, msg ->
+                                isDeletingAccount = false
+                                showDeleteAccountDialog = false
+                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626), contentColor = Color.White),
+                        modifier = Modifier.testTag("confirm_delete_customer_account_button")
+                    ) {
+                        Text(if (isDeletingAccount) "Deleting..." else "Delete Permanently", fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        enabled = !isDeletingAccount,
+                        onClick = { showDeleteAccountDialog = false }
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
     }
 }
 
@@ -274,7 +331,7 @@ fun CustomerInboxPage(viewModel: MainViewModel) {
                             color = AccentGold
                         )
                         Text(
-                            text = adminPromo.title.ifBlank { "Limited-time discount active on 24/7 SHOPPING." },
+                            text = adminPromo.title.ifBlank { "Limited-time discount active on ODIYA." },
                             fontSize = 12.5.sp,
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -324,7 +381,7 @@ fun CustomerInboxPage(viewModel: MainViewModel) {
             )
             allOrders.take(10).forEach { ord ->
                 Card(
-                    onClick = { viewModel.navigateTo(AppScreen.ORDERS) },
+                    onClick = { viewModel.openOrderTracking(ord.orderId) },
                     shape = RoundedCornerShape(14.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
                     modifier = Modifier.fillMaxWidth()
@@ -785,7 +842,7 @@ fun CustomerVouchersPage(viewModel: MainViewModel) {
                             onClick = {
                                 val share = Intent(Intent.ACTION_SEND).apply {
                                     type = "text/plain"
-                                    putExtra(Intent.EXTRA_TEXT, "Shop on 24/7 Shopping with my referral code ${loyaltyAccount.referralCode} for 10 bonus points (₦500 value)!")
+                                    putExtra(Intent.EXTRA_TEXT, "Shop on ODIYA with my referral code ${loyaltyAccount.referralCode} for 10 bonus points (₦500 value)!")
                                 }
                                 context.startActivity(Intent.createChooser(share, "Share Referral Code"))
                             }
@@ -805,7 +862,7 @@ fun CustomerVouchersPage(viewModel: MainViewModel) {
                         OutlinedTextField(
                             value = referralInput,
                             onValueChange = { referralInput = it },
-                            placeholder = { Text("Enter friend's code (247-XXXX)", fontSize = 11.sp) },
+                            placeholder = { Text("Enter friend's code (ODY-XXXX)", fontSize = 11.sp) },
                             singleLine = true,
                             modifier = Modifier.weight(1f)
                         )
@@ -867,7 +924,7 @@ fun FollowStorePage(
             ) {
                 Icon(
                     imageVector = if (isFollowing) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                    contentDescription = "Follow 24/7 SHOPPING",
+                    contentDescription = "Follow ODIYA",
                     tint = AccentGold,
                     modifier = Modifier.size(40.dp)
                 )
@@ -879,9 +936,9 @@ fun FollowStorePage(
                 )
                 Text(
                     text = if (isFollowing) {
-                        "You are now following 24/7 SHOPPING for new arrivals, flash promos, and restock alerts."
+                        "You are now following ODIYA for new arrivals, flash promos, and restock alerts."
                     } else {
-                        "Follow 24/7 SHOPPING to receive fresh catalog drops, promo offers, and restock updates."
+                        "Follow ODIYA to receive fresh catalog drops, promo offers, and restock updates."
                     },
                     fontSize = 12.sp,
                     color = Color.White.copy(alpha = 0.9f)
@@ -891,7 +948,7 @@ fun FollowStorePage(
                         val nowFollowing = viewModel.toggleFollowStore()
                         Toast.makeText(
                             context,
-                            if (nowFollowing) "✓ Following 24/7 SHOPPING!" else "Unfollowed 24/7 SHOPPING",
+                            if (nowFollowing) "✓ Following ODIYA!" else "Unfollowed ODIYA",
                             Toast.LENGTH_SHORT
                         ).show()
                     },
@@ -906,7 +963,7 @@ fun FollowStorePage(
                         .testTag("toggle_follow_store_button")
                 ) {
                     Text(
-                        text = if (isFollowing) "FOLLOWING 24/7 SHOPPING ✓" else "FOLLOW 24/7 SHOPPING",
+                        text = if (isFollowing) "FOLLOWING ODIYA ✓" else "FOLLOW ODIYA",
                         fontWeight = FontWeight.Black,
                         fontSize = 13.sp
                     )
@@ -980,7 +1037,7 @@ fun FollowStorePage(
         ) {
             Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Share 24/7 SHOPPING QR & Invite", fontWeight = FontWeight.Bold)
+            Text("Share ODIYA QR & Invite", fontWeight = FontWeight.Bold)
         }
     }
 }

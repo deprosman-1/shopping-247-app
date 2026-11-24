@@ -6,7 +6,7 @@ object DeliveryZoneHelper {
     val zones: List<DeliveryZoneOption> = listOf(
         DeliveryZoneOption(
             id = "zone_pickup",
-            zoneName = "In-Store Pickup (24/7 Shopping Hub)",
+            zoneName = "In-Store Pickup (Odiya Hub)",
             statesSummary = "Walk-in / Rider self-pickup",
             fee = 0.0,
             etaLabel = "Ready in 1–2 Hours"

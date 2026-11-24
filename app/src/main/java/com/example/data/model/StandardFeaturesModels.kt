@@ -70,7 +70,7 @@ data class SupportTicket(
 data class LoyaltyAccount(
     val pointsBalance: Int = 0,
     val lifetimeEarnedPoints: Int = 0,
-    val referralCode: String = "247-${UUID.randomUUID().toString().take(4).uppercase()}",
+    val referralCode: String = "ODY-${UUID.randomUUID().toString().take(4).uppercase()}",
     val referredByCode: String = "",
     val referralBonusClaimed: Boolean = false,
     val totalOrdersRewarded: Int = 0

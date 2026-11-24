@@ -279,7 +279,7 @@ fun Product3DCard(
                             color = MaterialTheme.colorScheme.error
                         ) {
                             Text(
-                                text = "24/7 SHOPPING",
+                                text = "ODIYA",
                                 color = Color.White,
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.ExtraBold,

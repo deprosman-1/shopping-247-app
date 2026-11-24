@@ -416,7 +416,7 @@ private fun AdminPartnerAgreementsSection(
         var editOpayName by remember(partner.id, partner.opayAccountName) { mutableStateOf(partner.opayAccountName) }
         var editMonieNum by remember(partner.id, partner.moniepointAccountNumber) { mutableStateOf(partner.moniepointAccountNumber) }
         var editMonieName by remember(partner.id, partner.moniepointAccountName) { mutableStateOf(partner.moniepointAccountName) }
-        var adminSignatoryName by remember(partner.id) { mutableStateOf(partner.adminCounterSignatureName.ifBlank { "24/7 SHOPPING Management" }) }
+        var adminSignatoryName by remember(partner.id) { mutableStateOf(partner.adminCounterSignatureName.ifBlank { "ODIYA Management" }) }
         var adminSigStrokes by remember(partner.id) { mutableStateOf(partner.adminCounterSignatureStrokes) }
 
         Card(
@@ -493,7 +493,7 @@ private fun AdminPartnerAgreementsSection(
                         OutlinedTextField(
                             value = editCommission,
                             onValueChange = { editCommission = it.filter { c -> c.isDigit() || c == '.' } },
-                            label = { Text("24/7 % Per Product (Edit)") },
+                            label = { Text("ODIYA % Per Product (Edit)") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             singleLine = true,
                             modifier = Modifier.weight(1f)
@@ -581,20 +581,20 @@ private fun AdminPartnerAgreementsSection(
                         OutlinedTextField(
                             value = adminSignatoryName,
                             onValueChange = { adminSignatoryName = it },
-                            label = { Text("24/7 SHOPPING Admin Signatory Name") },
+                            label = { Text("ODIYA Admin Signatory Name") },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth()
                         )
                         SignaturePadBox(
                             strokesData = adminSigStrokes,
                             onStrokesChanged = { adminSigStrokes = it },
-                            title = "24/7 SHOPPING Counter-Signature *",
+                            title = "ODIYA Counter-Signature *",
                             testTagPrefix = "admin_mou_counter_sig_${partner.id}"
                         )
                         Button(
                             onClick = {
                                 if (adminSigStrokes.isBlank()) {
-                                    Toast.makeText(context, "Please draw 24/7 SHOPPING Admin counter-signature.", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Please draw ODIYA Admin counter-signature.", Toast.LENGTH_SHORT).show()
                                     return@Button
                                 }
                                 onCounterSignAndFinalize(
@@ -625,7 +625,7 @@ private fun AdminPartnerAgreementsSection(
                         SignaturePreviewBox(
                             strokesData = partner.adminCounterSignatureStrokes,
                             signerName = partner.adminCounterSignatureName,
-                            roleLabel = "24/7 SHOPPING ADMIN COUNTER-SIGNATURE (FINALIZED)"
+                            roleLabel = "ODIYA ADMIN COUNTER-SIGNATURE (FINALIZED)"
                         )
                         OutlinedButton(
                             onClick = { showCounterSignPad = !showCounterSignPad },
@@ -646,20 +646,20 @@ private fun AdminPartnerAgreementsSection(
                             OutlinedTextField(
                                 value = adminSignatoryName,
                                 onValueChange = { adminSignatoryName = it },
-                                label = { Text("24/7 SHOPPING Admin Signatory Name") },
+                                label = { Text("ODIYA Admin Signatory Name") },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
                             SignaturePadBox(
                                 strokesData = adminSigStrokes,
                                 onStrokesChanged = { adminSigStrokes = it },
-                                title = "24/7 SHOPPING Counter-Signature Pad *",
+                                title = "ODIYA Counter-Signature Pad *",
                                 testTagPrefix = "admin_mou_counter_sig_${partner.id}"
                             )
                             Button(
                                 onClick = {
                                     if (adminSigStrokes.isBlank()) {
-                                        Toast.makeText(context, "Please draw 24/7 SHOPPING Admin counter-signature.", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "Please draw ODIYA Admin counter-signature.", Toast.LENGTH_SHORT).show()
                                         return@Button
                                     }
                                     onCounterSignAndFinalize(
@@ -869,7 +869,7 @@ private fun AdminPartnerStagingBatchSection(
                                 fontWeight = FontWeight.SemiBold
                             )
                             Text(
-                                "24/7 Fee: ${sub.commissionPercent}% • Batch: ${sub.batchNumber}",
+                                "ODIYA Fee: ${sub.commissionPercent}% • Batch: ${sub.batchNumber}",
                                 fontSize = 11.sp,
                                 color = CyberCyan,
                                 fontWeight = FontWeight.Bold
@@ -979,7 +979,7 @@ private fun EditStagedProductDialog(
                     OutlinedTextField(value = price, onValueChange = { price = it.filter { ch -> ch.isDigit() || ch == '.' } }, label = { Text("Price ₦") }, modifier = Modifier.weight(1f), singleLine = true)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    OutlinedTextField(value = comm, onValueChange = { comm = it.filter { ch -> ch.isDigit() || ch == '.' } }, label = { Text("24/7 % Fee") }, modifier = Modifier.weight(1f), singleLine = true)
+                    OutlinedTextField(value = comm, onValueChange = { comm = it.filter { ch -> ch.isDigit() || ch == '.' } }, label = { Text("ODIYA % Fee") }, modifier = Modifier.weight(1f), singleLine = true)
                     OutlinedTextField(value = promo, onValueChange = { promo = it.filter { ch -> ch.isDigit() } }, label = { Text("Promo %") }, modifier = Modifier.weight(1f), singleLine = true)
                 }
                 OutlinedTextField(value = sizes, onValueChange = { sizes = it }, label = { Text("Sizes CSV") }, singleLine = true)
@@ -1086,7 +1086,7 @@ private fun AdminPartnerFolderListSection(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        "Gross: ${nairaFormat.format(gross)} • 24/7 Split: ${nairaFormat.format(profit)} • 30d Hosted: ${nairaFormat.format(folder.totalHostingFeesAutoDeducted)}",
+                        "Gross: ${nairaFormat.format(gross)} • ODIYA Split: ${nairaFormat.format(profit)} • 30d Hosted: ${nairaFormat.format(folder.totalHostingFeesAutoDeducted)}",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = SuccessGreen
@@ -1179,7 +1179,7 @@ private fun AdminSinglePartnerFolderAnalytics(
                     Text(nairaFormat.format(grossSales), fontWeight = FontWeight.Black, color = Color.White, fontSize = 15.sp)
                 }
                 Column {
-                    Text("24/7 Auto-Deduct %", fontSize = 10.5.sp, color = Color.White.copy(alpha = 0.7f))
+                    Text("ODIYA Auto-Deduct %", fontSize = 10.5.sp, color = Color.White.copy(alpha = 0.7f))
                     Text(
                         nairaFormat.format(maxOf(profitEarned, folder.totalAutoDeducted247Share)),
                         fontWeight = FontWeight.Black,
@@ -1440,7 +1440,7 @@ private fun AdminSinglePartnerFolderAnalytics(
                 color = Color(0xFFEF4444)
             )
             Text(
-                text = "If a Partner fails to log into the app and Add-to-Cart an offline-sold product, 24/7 SHOPPING reserves the MOU right to collect the accrued hosting unit cost % from that product.",
+                text = "If a Partner fails to log into the app and Add-to-Cart an offline-sold product, ODIYA reserves the MOU right to collect the accrued hosting unit cost % from that product.",
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1541,7 +1541,7 @@ private fun AdminSinglePartnerFolderAnalytics(
                 Text("Folder Payment Accounts (OPay & Moniepoint)", fontWeight = FontWeight.Black, fontSize = 13.sp)
             }
             Text(
-                text = "Customer checkout for ${folder.businessName}'s items routes to these accounts & triggers automated payment alerts to both 24/7 SHOPPING and ${folder.businessName}.",
+                text = "Customer checkout for ${folder.businessName}'s items routes to these accounts & triggers automated payment alerts to both ODIYA and ${folder.businessName}.",
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1659,7 +1659,7 @@ private fun AdminSinglePartnerFolderAnalytics(
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Amount: ${nairaFormat.format(txn.grossAmount)}", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
                         Text(
-                            "24/7 Profit (${txn.commissionPercent}%): ${nairaFormat.format(txn.commissionProfitAmount)}",
+                            "ODIYA Profit (${txn.commissionPercent}%): ${nairaFormat.format(txn.commissionProfitAmount)}",
                             fontSize = 11.5.sp,
                             fontWeight = FontWeight.Black,
                             color = AccentGold

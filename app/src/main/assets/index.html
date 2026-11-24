@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#064E3B">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-title" content="24/7 SHOPPING">
-    <title>24/7 SHOPPING - Install on Android & Computers</title>
+    <meta name="apple-mobile-web-app-title" content="ODIYA">
+    <title>ODIYA - Install on Android & Computers</title>
     <link rel="manifest" id="pwaManifestLink" href="">
     <style>
         :root {
@@ -326,7 +326,7 @@
 <body>
     <div class="container">
         <div class="header-title-container">
-            <h1>24/7 SHOPPING</h1>
+            <h1>ODIYA</h1>
             <button class="search-icon-btn" onclick="promptProductSearch()" title="Search Catalog">🔍</button>
         </div>
         <div class="subtitle">Shopping with ease and comfort • Cloud Synced & Offline Ready</div>
@@ -341,7 +341,7 @@
 
         <div>
             <div class="qr-box">
-                <img id="qrCodeImg" src="" alt="24/7 SHOPPING Scannable QR Code" onerror="fallbackQrImage()">
+                <img id="qrCodeImg" src="" alt="ODIYA Scannable QR Code" onerror="fallbackQrImage()">
             </div>
             <div class="qr-caption">📷 Scan with any Android Camera, QR Code Scanner, or Google Lens</div>
         </div>
@@ -381,18 +381,18 @@
             <div class="instructions">
                 <h3>💻 Install on Computers (Win / Mac / Linux / Chromebook):</h3>
                 <p>1. Open this link in <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong> on your PC/Mac/Chromebook.</p>
-                <p>2. Click <strong>"Install on Computer / Chrome"</strong> above, or click the <strong>Install (⊕)</strong> icon in your browser's address bar (or <strong>⋮ Menu → Install 24/7 SHOPPING</strong>).</p>
+                <p>2. Click <strong>"Install on Computer / Chrome"</strong> above, or click the <strong>Install (⊕)</strong> icon in your browser's address bar (or <strong>⋮ Menu → Install ODIYA</strong>).</p>
                 <p>3. To run the native Android APK on PC/Chromebook, open the shared APK inside Chromebook, Windows Subsystem for Android, or any Android Emulator.</p>
             </div>
         </div>
 
         <div class="warning-box">
             <h4>💡 Notice regarding Tecno / Infinix / Itel Phone Master Security Scan:</h4>
-            <p>Transsion Phone Master and HiOS/XOS security scanners check offline lists for apps not downloaded from the Google Play Store. <strong>24/7 SHOPPING</strong> is 100% safe, clean, and verified. You can safely tap <strong>"Continue Anyway"</strong> or <strong>"Trust"</strong> to complete installation, or install the Web App (PWA) directly from Chrome/Edge with zero security alerts.</p>
+            <p>Transsion Phone Master and HiOS/XOS security scanners check offline lists for apps not downloaded from the Google Play Store. <strong>ODIYA</strong> is 100% safe, clean, and verified. You can safely tap <strong>"Continue Anyway"</strong> or <strong>"Trust"</strong> to complete installation, or install the Web App (PWA) directly from Chrome/Edge with zero security alerts.</p>
         </div>
 
         <div class="footer">
-            © 24/7 SHOPPING • support@247shopping.com
+            © ODIYA • support@odiya.store
         </div>
     </div>
 
@@ -419,8 +419,8 @@
 
         // Dynamically attach an installable Web App Manifest so desktop/mobile browsers enable 1-click app install
         const manifestObj = {
-            name: "24/7 SHOPPING",
-            short_name: "24/7 Shop",
+            name: "ODIYA",
+            short_name: "Odiya",
             description: "Shopping with ease and comfort on Android and Desktop.",
             start_url: appUrl,
             display: "standalone",
@@ -442,7 +442,7 @@
             }
         }
 
-        const shareText = "🛍️ 24/7 SHOPPING\nShopping with ease and comfort\n\nOpen or Install on Android & Computers:\n" + appUrl + "\n\n✅ Scan QR or tap link to install!";
+        const shareText = "🛍️ ODIYA\nShopping with ease and comfort\n\nOpen or Install on Android & Computers:\n" + appUrl + "\n\n✅ Scan QR or tap link to install!";
         document.getElementById('whatsappShareBtn').href = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
 
         function copyShareLink() {
@@ -468,14 +468,14 @@
                 deferredPrompt.prompt();
                 deferredPrompt.userChoice.then(() => { deferredPrompt = null; });
             } else {
-                alert("💻 To install on your Computer or Phone:\n\n• Chrome / Edge Desktop: Click the Install icon (⊕) at the right end of the address bar, or open Menu (⋮) → 'Save and share / Apps' → 'Install 24/7 SHOPPING'.\n• Android: Tap 'Add to Home screen' in Chrome or install the APK.");
+                alert("💻 To install on your Computer or Phone:\n\n• Chrome / Edge Desktop: Click the Install icon (⊕) at the right end of the address bar, or open Menu (⋮) → 'Save and share / Apps' → 'Install ODIYA'.\n• Android: Tap 'Add to Home screen' in Chrome or install the APK.");
             }
         }
 
         function promptProductSearch() {
-            const query = prompt("🔍 Search 24/7 SHOPPING Catalog:\nEnter product title, category, or brand (e.g. Shoes, Watch, Shirt):");
+            const query = prompt("🔍 Search ODIYA Catalog:\nEnter product title, category, or brand (e.g. Shoes, Watch, Shirt):");
             if (query && query.trim().length > 0) {
-                alert(`🔎 Searching catalog for "${query.trim()}"...\n\n📲 Open or install 24/7 SHOPPING below for live inventory, bargaining, and instant orders!`);
+                alert(`🔎 Searching catalog for "${query.trim()}"...\n\n📲 Open or install ODIYA below for live inventory, bargaining, and instant orders!`);
             }
         }
     </script>
