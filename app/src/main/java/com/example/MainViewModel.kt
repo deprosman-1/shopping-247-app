@@ -667,11 +667,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun syncPreOrdersNow(onComplete: ((Boolean, String) -> Unit)? = null) {
         viewModelScope.launch {
+            if (repository.supabaseSync.isPlaceholderConfig()) {
+                onComplete?.invoke(
+                    false,
+                    "⚠️ Supabase not connected yet. Open Cloud Sync tab, connect Project URL & Key, then tap Refresh."
+                )
+                return@launch
+            }
             _isRefreshing.value = true
-            val res = syncPreOrdersWithCloudInternal(notifyOnNewRemote = false)
+            val pendingPreOrderIds = _offlineQueue.value
+                .filter { it.type == OfflineActionType.PREORDER_SYNC }
+                .map { it.referenceId }
+                .toSet()
+            val res = syncPreOrdersWithCloudInternal(
+                preferLocalIds = pendingPreOrderIds,
+                notifyOnNewRemote = false
+            )
             _isRefreshing.value = false
             res.onSuccess { list ->
-                onComplete?.invoke(true, "✅ Synced ${list.size} Pre-Order request(s) with Cloud.")
+                if (pendingPreOrderIds.isNotEmpty()) {
+                    val remaining = _offlineQueue.value.filterNot { it.type == OfflineActionType.PREORDER_SYNC }
+                    _offlineQueue.value = remaining
+                    persistOfflineQueue(remaining)
+                }
+                onComplete?.invoke(true, "✅ Refreshed ${list.size} Pre-Order request(s) from Cloud.")
             }.onFailure { err ->
                 onComplete?.invoke(false, "Saved locally. Cloud sync note: ${err.message ?: "Connect Supabase first"}")
             }

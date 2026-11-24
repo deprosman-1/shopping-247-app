@@ -1730,11 +1730,30 @@ private fun CustomerFileModal(
                     // ==========================================
                     if (folderSectionTab == 0 || folderSectionTab == 3) {
                         item {
-                            Text(
-                                text = "Pre-Orders & Brand Requests (${customerPreOrders.size})",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Black
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Pre-Orders & Brand Requests (${customerPreOrders.size})",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Black,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(
+                                    onClick = {
+                                        viewModel.syncPreOrdersNow { _, msg ->
+                                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    modifier = Modifier.testTag("admin_folder_preorders_refresh_button")
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = "Refresh Pre-Orders", modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Refresh", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
                         }
 
                         if (customerPreOrders.isEmpty()) {
@@ -8756,8 +8775,14 @@ private fun AdminPreOrdersTab(viewModel: MainViewModel) {
     }
     val dateFormat = remember { SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()) }
 
+    var lastSyncMessage by remember { mutableStateOf<String?>(null) }
+    var lastSyncSuccess by remember { mutableStateOf(true) }
+
     LaunchedEffect(Unit) {
-        viewModel.syncPreOrdersNow()
+        viewModel.syncPreOrdersNow { ok, msg ->
+            lastSyncSuccess = ok
+            if (!ok) lastSyncMessage = msg
+        }
     }
 
     var filterStatus by remember { mutableStateOf<PreOrderStatus?>(null) }
@@ -8767,6 +8792,14 @@ private fun AdminPreOrdersTab(viewModel: MainViewModel) {
 
     val pendingCount = preOrders.count { it.status == PreOrderStatus.PENDING }
     val processingCount = preOrders.count { it.status == PreOrderStatus.PROCESSING || it.status == PreOrderStatus.CONFIRMED_AVAILABLE }
+
+    val triggerPreOrderRefresh: () -> Unit = {
+        viewModel.syncPreOrdersNow { ok, msg ->
+            lastSyncSuccess = ok
+            lastSyncMessage = msg
+            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+        }
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -8787,7 +8820,10 @@ private fun AdminPreOrdersTab(viewModel: MainViewModel) {
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
                             Surface(
                                 shape = CircleShape,
                                 color = CyberCyan.copy(alpha = 0.2f),
@@ -8810,6 +8846,24 @@ private fun AdminPreOrdersTab(viewModel: MainViewModel) {
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        OutlinedButton(
+                            enabled = !isRefreshing,
+                            onClick = triggerPreOrderRefresh,
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier
+                                .height(48.dp)
+                                .testTag("admin_preorders_refresh_button")
+                        ) {
+                            if (isRefreshing) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.Refresh, contentDescription = "Refresh Pre-Orders", modifier = Modifier.size(18.dp))
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Refresh", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
@@ -8854,25 +8908,40 @@ private fun AdminPreOrdersTab(viewModel: MainViewModel) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Button(
                         enabled = !isRefreshing,
-                        onClick = {
-                            viewModel.syncPreOrdersNow { _, msg ->
-                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                            }
-                        },
+                        onClick = triggerPreOrderRefresh,
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(46.dp)
+                            .height(48.dp)
                             .testTag("admin_sync_preorders_button")
                     ) {
                         if (isRefreshing) {
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Syncing Pre-Orders from Cloud...", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("Refreshing Pre-Orders from Cloud...", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         } else {
-                            Icon(Icons.Default.CloudSync, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Sync Customer Pre-Orders from Cloud Now", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("Refresh & Sync Pre-Orders from Cloud", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    lastSyncMessage?.let { msg ->
+                        Spacer(modifier = Modifier.height(8.dp))
+                        val tint = if (lastSyncSuccess) SuccessGreen else AccentGold
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = tint.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, tint.copy(alpha = 0.4f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = msg,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = tint,
+                                modifier = Modifier.padding(10.dp)
+                            )
                         }
                     }
                 }
