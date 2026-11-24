@@ -1023,6 +1023,12 @@ class SupabaseSyncService(
                 model_3d_type TEXT DEFAULT 'CUBE',
                 description TEXT,
                 sku TEXT,
+                partner_id TEXT DEFAULT '',
+                partner_name TEXT DEFAULT '',
+                partner_commission_percent NUMERIC DEFAULT 0,
+                partner_batch_id TEXT DEFAULT '',
+                is_catalog_locked BOOLEAN DEFAULT FALSE,
+                variant_prices_json TEXT DEFAULT '',
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
 
@@ -1088,6 +1094,10 @@ class SupabaseSyncService(
                 receipt_image_url TEXT DEFAULT '',
                 status_updates_json TEXT DEFAULT '',
                 dispatch_rider_whatsapp TEXT DEFAULT '',
+                partner_id TEXT DEFAULT '',
+                partner_name TEXT DEFAULT '',
+                partner_commission_amount NUMERIC DEFAULT 0,
+                partner_net_payout NUMERIC DEFAULT 0,
                 created_at BIGINT
             );
 

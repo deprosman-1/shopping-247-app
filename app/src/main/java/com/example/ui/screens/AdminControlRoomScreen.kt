@@ -6308,17 +6308,24 @@ private fun SupabaseCloudTab(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                var showSqlViewer by remember { mutableStateOf(false) }
+                var sqlCopiedBanner by remember { mutableStateOf(false) }
+
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = {
                             val schema = viewModel.repository.supabaseSync.generateSupabaseSqlSchema()
                             copyToClipboard("Supabase Schema", schema, "Copied Complete Supabase RLS & Upgrade SQL Script!")
+                            sqlCopiedBanner = true
                         },
-                        modifier = Modifier.weight(1f).testTag("supabase_copy_sql_button")
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("supabase_copy_sql_button")
                     ) {
                         Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Copy SQL", fontSize = 11.sp)
+                        Text(if (sqlCopiedBanner) "Copied SQL!" else "Copy SQL", fontSize = 11.sp)
                     }
 
                     Button(
@@ -6331,11 +6338,181 @@ private fun SupabaseCloudTab(
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
                     ) {
                         Icon(Icons.Default.Cloud, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Open Web", fontSize = 11.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { showSqlViewer = true },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("supabase_view_sql_button")
+                    ) {
+                        Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("View & Select SQL", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            val schema = viewModel.repository.supabaseSync.generateSupabaseSqlSchema()
+                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_SUBJECT, "Odiya Supabase Database & RLS SQL Script")
+                                putExtra(Intent.EXTRA_TEXT, schema)
+                            }
+                            try {
+                                context.startActivity(Intent.createChooser(shareIntent, "Share Supabase SQL Script"))
+                            } catch (e: Exception) {
+                                copyToClipboard("Supabase Schema", schema, "Copied Complete Supabase RLS & Upgrade SQL Script!")
+                                sqlCopiedBanner = true
+                            }
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("supabase_share_sql_button")
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Share / Export SQL", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                if (sqlCopiedBanner) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = SuccessGreen.copy(alpha = 0.12f),
+                        border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.45f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "✅ Complete Database & RLS SQL copied! Open Supabase Dashboard -> SQL Editor -> New Query -> Paste & Run.",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = SuccessGreen,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                }
+
+                if (showSqlViewer) {
+                    val schemaScript = remember { viewModel.repository.supabaseSync.generateSupabaseSqlSchema() }
+                    Dialog(
+                        onDismissRequest = { showSqlViewer = false },
+                        properties = DialogProperties(usePlatformDefaultWidth = false)
+                    ) {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(14.dp),
+                            shape = RoundedCornerShape(20.dp),
+                            color = MaterialTheme.colorScheme.surface
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Database & RLS SQL Script",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                    IconButton(onClick = { showSqlViewer = false }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Close SQL Viewer")
+                                    }
+                                }
+                                Text(
+                                    text = "Long-press text below to select manually, or tap Copy All / Share.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Surface(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                                    border = BorderStroke(1.dp, CyberCyan.copy(alpha = 0.35f))
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .verticalScroll(rememberScrollState())
+                                            .horizontalScroll(rememberScrollState())
+                                            .padding(12.dp)
+                                    ) {
+                                        SelectionContainer {
+                                            Text(
+                                                text = schemaScript,
+                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = 11.sp,
+                                                lineHeight = 16.sp,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+                                    }
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            copyToClipboard("Supabase Schema", schemaScript, "Copied Complete Supabase RLS & Upgrade SQL Script!")
+                                            sqlCopiedBanner = true
+                                        },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(48.dp)
+                                    ) {
+                                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Copy All SQL", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                                type = "text/plain"
+                                                putExtra(Intent.EXTRA_SUBJECT, "Odiya Supabase Database & RLS SQL Script")
+                                                putExtra(Intent.EXTRA_TEXT, schemaScript)
+                                            }
+                                            try {
+                                                context.startActivity(Intent.createChooser(shareIntent, "Share Supabase SQL Script"))
+                                            } catch (_: Exception) {
+                                                copyToClipboard("Supabase Schema", schemaScript, "Copied Complete Supabase RLS & Upgrade SQL Script!")
+                                                sqlCopiedBanner = true
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(48.dp)
+                                    ) {
+                                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Share SQL", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
