@@ -732,7 +732,7 @@ class EcommerceRepository(
             baseUpdates + StatusUpdate(
                 status = cloudOrder.status,
                 timestamp = System.currentTimeMillis(),
-                note = cloudOrder.verificationNote.ifBlank { "Status updated in Supabase 'orders'" }
+                note = cloudOrder.verificationNote.ifBlank { "Status updated on secured store server" }
             )
         } else {
             baseUpdates
@@ -791,7 +791,7 @@ class EcommerceRepository(
             return@withContext OrderTrackingSyncResult(
                 orders = localMatched,
                 syncedFromSupabase = false,
-                message = "Showing ${localMatched.size} cached order(s). Link Supabase Store Cloud for live 'orders' status."
+                message = "Showing ${localMatched.size} cached order(s). Store data is encrypted & well secured."
             )
         }
 
@@ -810,7 +810,7 @@ class EcommerceRepository(
                 OrderTrackingSyncResult(
                     orders = combinedById,
                     syncedFromSupabase = true,
-                    message = "Synced ${remoteOrders.size} order(s) live from Supabase 'orders' table."
+                    message = "Synced ${remoteOrders.size} order(s) live (customer data is encrypted & well secured)."
                 )
             },
             onFailure = { err ->
@@ -843,7 +843,7 @@ class EcommerceRepository(
             return@withContext OrderTrackingSyncResult(
                 orders = matched,
                 syncedFromSupabase = false,
-                message = "Supabase not linked. Found ${matched.size} matching order(s) in local storage."
+                message = "Found ${matched.size} matching order(s) stored securely on this device."
             )
         }
 
@@ -859,9 +859,9 @@ class EcommerceRepository(
                     orders = mergedMap,
                     syncedFromSupabase = true,
                     message = if (mergedMap.isEmpty()) {
-                        "No matching orders found in Supabase 'orders' table for \"$cleanQuery\"."
+                        "No matching orders found for \"$cleanQuery\"."
                     } else {
-                        "Pulled ${mergedRemote.size} live match(es) from Supabase 'orders' table."
+                        "Pulled ${mergedRemote.size} live match(es) securely."
                     }
                 )
             },
@@ -886,7 +886,7 @@ class EcommerceRepository(
             return@withContext OrderTrackingSyncResult(
                 orders = listOfNotNull(localOrder),
                 syncedFromSupabase = false,
-                message = "Supabase not linked. Showing local status for $cleanId."
+                message = "Showing secured local status for $cleanId."
             )
         }
         val res = supabaseSync.fetchSingleOrderStatusFromCloud(cleanId)
@@ -897,13 +897,13 @@ class EcommerceRepository(
                     OrderTrackingSyncResult(
                         orders = listOf(merged),
                         syncedFromSupabase = true,
-                        message = "Updated $cleanId live from Supabase 'orders': ${merged.status.label}."
+                        message = "Updated $cleanId live: ${merged.status.label}."
                     )
                 } else {
                     OrderTrackingSyncResult(
                         orders = listOfNotNull(localOrder),
                         syncedFromSupabase = true,
-                        message = "$cleanId not yet in Supabase 'orders'; showing local record."
+                        message = "Showing secured local record for $cleanId."
                     )
                 }
             },
@@ -1609,9 +1609,18 @@ class EcommerceRepository(
                     }
                 }
             } else {
-                // Ensure newly expanded categories are also seeded into pre-existing databases
+                // Remove obsolete seeded default items from replaced categories (Kids & Pharmaceuticals)
+                val obsoleteDefaultIds = setOf(
+                    "prod-kids-1", "prod-kids-2", "prod-kids-3",
+                    "prod-pharma-1", "prod-pharma-2", "prod-pharma-3"
+                )
                 val existingProducts = dao.getAllProductsList()
-                val existingCategories = existingProducts.map { it.category.lowercase() }.toSet()
+                existingProducts.filter { it.id in obsoleteDefaultIds }.forEach { oldItem ->
+                    dao.deleteProduct(oldItem.id)
+                }
+                // Ensure newly expanded/updated categories are also seeded into pre-existing databases
+                val remainingProducts = dao.getAllProductsList()
+                val existingCategories = remainingProducts.map { it.category.lowercase() }.toSet()
                 val missingCategoryItems = catalogItems.filter { it.category.lowercase() !in existingCategories }
                 if (missingCategoryItems.isNotEmpty()) {
                     dao.insertProducts(missingCategoryItems.map { it.toEntity() })

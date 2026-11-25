@@ -86,11 +86,20 @@ object ProductImageHelper {
             cat.contains("jewelry") || t.contains("ring") || t.contains("necklace") || t.contains("bracelet") || t.contains("earring") || t.contains("chronograph") || t.contains("gold watch") -> {
                 R.drawable.img_jewelry_gold_watch
             }
-            cat.contains("babies") || cat.contains("kids") || t.contains("baby") || t.contains("romper") || t.contains("diaper") || t.contains("toddler") || t.contains("teddy") || t.contains("kids") -> {
+            cat.contains("babies") || t.contains("baby") || t.contains("romper") || t.contains("diaper") || t.contains("toddler") || t.contains("teddy") -> {
                 R.drawable.img_babies_kids_set
             }
-            cat.contains("pharmaceutical") || cat.contains("health") || cat.contains("medical") || t.contains("blood pressure") || t.contains("stethoscope") || t.contains("vitamin") || t.contains("syrup") || t.contains("tablet") || t.contains("thermometer") || t.contains("first aid") -> {
+            cat.contains("health") || cat.contains("medical") || t.contains("blood pressure") || t.contains("stethoscope") || t.contains("thermometer") || t.contains("first aid") -> {
                 R.drawable.img_medical_pharma_kit
+            }
+            cat.contains("processed") || cat.contains("pastr") || t.contains("croissant") || t.contains("meat pie") || t.contains("sausage roll") || t.contains("cinnamon") || t.contains("muffin") || t.contains("pastry") -> {
+                R.drawable.img_processed_foods_pastries
+            }
+            cat.contains("fruit") || cat.contains("vegetable") || t.contains("apple") || t.contains("tomato") || t.contains("mango") || t.contains("pepper") || t.contains("plantain") || t.contains("banana") -> {
+                R.drawable.img_fruits_vegetables
+            }
+            cat.contains("frozen") || cat.contains("meat") || t.contains("beef") || t.contains("chicken") || t.contains("croaker") || t.contains("fish") || t.contains("frozen") -> {
+                R.drawable.img_frozen_foods_meat
             }
             cat.contains("household") || cat.contains("upholstery") || cat.contains("rubber") || cat.contains("plastic") || cat.contains("musical") || t.contains("sofa") || t.contains("armchair") || t.contains("cushion") || t.contains("guitar") || t.contains("piano") || t.contains("drum") || t.contains("bucket") || t.contains("container") -> {
                 R.drawable.img_household_upholstery

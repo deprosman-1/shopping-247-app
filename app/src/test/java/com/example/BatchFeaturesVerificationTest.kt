@@ -83,13 +83,16 @@ class BatchFeaturesVerificationTest {
     @Test
     fun expanded23Categories_allHaveSeededCatalogAndBundledImages() {
         val expectedNewCategories = listOf(
-            "Men", "Women", "Babies", "Kids", "Household", "Musicals",
+            "Men", "Women", "Babies", "Fruits/Vegetables", "Household", "Musicals",
             "Educational", "Jewelry", "Stationaries", "Phone Accessories",
             "Upholstery", "Rubber/Plastic", "Automobile Spare-Parts",
-            "Clothing & Sewing Materials", "Health/Medical Equipment", "Pharmaceuticals"
+            "Clothing & Sewing Materials", "Health/Medical Equipment",
+            "Processed Foods/Pastries", "Frozen Foods/Meat"
         )
-        assertEquals(23, ProductCategory.entries.size)
+        assertEquals(24, ProductCategory.entries.size)
         val displayNames = ProductCategory.entries.map { it.displayName }
+        assertFalse(displayNames.contains("Kids"))
+        assertFalse(displayNames.contains("Pharmaceuticals"))
         expectedNewCategories.forEach { cat ->
             assertTrue("Missing category $cat", displayNames.contains(cat))
             assertNotEquals("Missing drawable for $cat", 0, ProductImageHelper.getFallbackDrawableRes(cat))

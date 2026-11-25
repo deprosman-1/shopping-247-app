@@ -17,17 +17,19 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AcUnit
+import androidx.compose.material.icons.filled.BakeryDining
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Checkroom
 import androidx.compose.material.icons.filled.ChildCare
-import androidx.compose.material.icons.filled.ChildFriendly
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Diamond
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.DryCleaning
+import androidx.compose.material.icons.filled.Eco
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FaceRetouchingNatural
 import androidx.compose.material.icons.filled.Fastfood
@@ -37,7 +39,6 @@ import androidx.compose.material.icons.filled.LocalBar
 import androidx.compose.material.icons.filled.LocalMall
 import androidx.compose.material.icons.filled.Man
 import androidx.compose.material.icons.filled.MedicalServices
-import androidx.compose.material.icons.filled.Medication
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.School
@@ -382,7 +383,7 @@ fun getCategoryIcon(category: ProductCategory): ImageVector {
         ProductCategory.MEN -> Icons.Default.Man
         ProductCategory.WOMEN -> Icons.Default.Woman
         ProductCategory.BABIES -> Icons.Default.ChildCare
-        ProductCategory.KIDS -> Icons.Default.ChildFriendly
+        ProductCategory.FRUITS_VEGETABLES -> Icons.Default.Eco
         ProductCategory.HOUSEHOLD -> Icons.Default.Home
         ProductCategory.MUSICALS -> Icons.Default.MusicNote
         ProductCategory.EDUCATIONAL -> Icons.Default.School
@@ -394,6 +395,7 @@ fun getCategoryIcon(category: ProductCategory): ImageVector {
         ProductCategory.AUTOMOBILE_SPARE_PARTS -> Icons.Default.DirectionsCar
         ProductCategory.CLOTHING_SEWING_MATERIALS -> Icons.Default.ContentCut
         ProductCategory.HEALTH_MEDICAL_EQUIPMENT -> Icons.Default.MedicalServices
-        ProductCategory.PHARMACEUTICALS -> Icons.Default.Medication
+        ProductCategory.PROCESSED_FOODS_PASTRIES -> Icons.Default.BakeryDining
+        ProductCategory.FROZEN_FOODS_MEAT -> Icons.Default.AcUnit
     }
 }

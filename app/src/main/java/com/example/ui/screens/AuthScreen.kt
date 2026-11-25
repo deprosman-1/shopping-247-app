@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Phone
@@ -149,6 +150,7 @@ fun AuthScreen(
         CustomerAccountDestination.MENU -> "Customer Account"
         CustomerAccountDestination.WELCOME_PROFILE -> "WELCOME"
         CustomerAccountDestination.INBOX -> "INBOX"
+        CustomerAccountDestination.PRE_ORDER -> "PRE-ORDER"
         CustomerAccountDestination.ORDER_TRACKING -> "ORDER TRACKING"
         CustomerAccountDestination.RATINGS_AND_REVIEWS -> "RATINGS AND REVIEWS"
         CustomerAccountDestination.VOUCHERS -> "VOUCHERS"
@@ -357,11 +359,24 @@ fun AuthScreen(
 
                         CustomerAccountMenuItem(
                             title = "ORDERS",
-                            subtitle = "${allOrders.size} order(s) • Receipts & Pre-Orders",
+                            subtitle = "${allOrders.size} order(s) • Receipts & Invoices",
                             icon = Icons.Default.ReceiptLong,
                             accentColor = SuccessGreen,
                             onClick = { viewModel.navigateTo(AppScreen.ORDERS) },
                             testTag = "account_menu_orders"
+                        )
+
+                        CustomerAccountMenuItem(
+                            title = "PRE-ORDER",
+                            subtitle = if (preOrders.isNotEmpty()) {
+                                "${preOrders.size} custom pre-order request(s) • Tap to submit or track"
+                            } else {
+                                "Request rare items, custom sizes & upcoming arrivals"
+                            },
+                            icon = Icons.Default.NewReleases,
+                            accentColor = CyberCyan,
+                            onClick = { viewModel.selectCustomerAccountDestination(CustomerAccountDestination.PRE_ORDER) },
+                            testTag = "account_menu_pre_order"
                         )
 
                         val activeOrdersCount = allOrders.count {
@@ -370,9 +385,9 @@ fun AuthScreen(
                         CustomerAccountMenuItem(
                             title = "ORDER TRACKING",
                             subtitle = if (activeOrdersCount > 0) {
-                                "$activeOrdersCount active order(s) • Live status from Supabase"
+                                "$activeOrdersCount active order(s) • Live encrypted delivery updates"
                             } else {
-                                "Track live delivery status from Supabase 'orders'"
+                                "Track live delivery status & real-time milestones"
                             },
                             icon = Icons.Default.LocalShipping,
                             accentColor = CyberCyan,
@@ -724,7 +739,7 @@ fun AuthScreen(
                                         .testTag("auth_security_shield_note")
                                 ) {
                                     Text(
-                                        text = "Protected by Salted SHA-256 Auth & Hardware Keystore Vault • Supabase Encrypted Sync",
+                                        text = "Protected by Encrypted Security & Hardware Keystore Vault — all customer data collected is well secured.",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = SuccessGreen,
@@ -827,6 +842,7 @@ fun AuthScreen(
                     }
 
                     CustomerAccountDestination.INBOX -> CustomerInboxPage(viewModel = viewModel)
+                    CustomerAccountDestination.PRE_ORDER -> CustomerPreOrderPage(viewModel = viewModel)
                     CustomerAccountDestination.ORDER_TRACKING -> CustomerOrderTrackingPage(viewModel = viewModel)
                     CustomerAccountDestination.RATINGS_AND_REVIEWS -> DeliveredRatingsAndReviewsPage(viewModel = viewModel)
                     CustomerAccountDestination.VOUCHERS -> CustomerVouchersPage(viewModel = viewModel)

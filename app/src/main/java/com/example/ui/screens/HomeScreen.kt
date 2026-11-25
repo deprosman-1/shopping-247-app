@@ -117,16 +117,27 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.example.AppScreen
 import com.example.MainViewModel
 import com.example.data.model.CatalogBrowseMode
@@ -137,11 +148,13 @@ import com.example.data.model.ProductCategory
 import com.example.ui.components.CategorySelectorButton
 import com.example.ui.components.DualAxisScrollContainer
 import com.example.ui.components.HorizontalCategoryStrip
+import com.example.ui.components.QrCodeView
 import com.example.ui.components.ShopEmblemWatermark
 import com.example.ui.components.ProductStandardCard
 import com.example.ui.components.QuickEditProductDialog
 import com.example.ui.components.ShareAppDialog
 import com.example.ui.components.AppUpdateDialog
+import com.example.ui.components.shareQrCodeImage
 import com.example.ui.theme.AccentGold
 import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.SuccessGreen
@@ -224,6 +237,7 @@ fun HomeScreen(
     }
 
     var showQrShareDialog by remember { mutableStateOf(false) }
+    var showCatalogQrDialog by remember { mutableStateOf(false) }
 
     Box(
         modifier = modifier
@@ -1079,6 +1093,18 @@ fun HomeScreen(
                         modifier = Modifier.height(34.dp).testTag("home_loyalty_chip")
                     )
 
+                    // Dynamic Catalog QR Generator Chip
+                    AssistChip(
+                        onClick = { showCatalogQrDialog = true },
+                        leadingIcon = {
+                            Icon(Icons.Default.QrCode2, contentDescription = "Catalog QR code generator", tint = CyberCyan, modifier = Modifier.size(15.dp))
+                        },
+                        label = {
+                            Text("Catalog QR", fontSize = 11.sp, fontWeight = FontWeight.Black, color = CyberCyan)
+                        },
+                        modifier = Modifier.height(34.dp).testTag("home_catalog_qr_chip")
+                    )
+
                     // Help Center, Support & Legal Chip
                     AssistChip(
                         onClick = { viewModel.navigateTo(AppScreen.HELP_SUPPORT) },
@@ -1651,6 +1677,133 @@ fun HomeScreen(
 
         if (showQrShareDialog) {
             ShareAppDialog(onDismiss = { showQrShareDialog = false }, viewModel = viewModel)
+        }
+
+        if (showCatalogQrDialog) {
+            val dynamicCatalogUrl = remember(selectedCategory, searchQuery, storeProfile.apkDownloadUrl) {
+                viewModel.buildCatalogShareLink(category = selectedCategory, query = searchQuery)
+            }
+            val scopeSummary = buildString {
+                append(selectedCategory?.takeIf { it.isNotBlank() } ?: "All Store Categories")
+                if (searchQuery.isNotBlank()) append(" • Search: \"${searchQuery.trim()}\"")
+            }
+            Dialog(onDismissRequest = { showCatalogQrDialog = false }) {
+                Card(
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.5.dp, CyberCyan.copy(alpha = 0.55f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("home_catalog_qr_dialog")
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(18.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.QrCode2, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(22.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("LIVE CATALOG QR CODE", fontWeight = FontWeight.Black, fontSize = 14.sp, color = CyberCyan)
+                            }
+                            IconButton(onClick = { showCatalogQrDialog = false }) {
+                                Icon(Icons.Default.Close, contentDescription = "Close Catalog QR")
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(999.dp),
+                            color = SuccessGreen.copy(alpha = 0.16f),
+                            border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.5f))
+                        ) {
+                            Text(
+                                text = scopeSummary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = SuccessGreen,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .size(224.dp)
+                                .clip(RoundedCornerShape(18.dp))
+                                .border(2.dp, CyberCyan.copy(alpha = 0.65f), RoundedCornerShape(18.dp))
+                                .padding(4.dp)
+                        ) {
+                            QrCodeView(
+                                content = dynamicCatalogUrl,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+
+                        Text(
+                            text = "Physical store visitors can scan this QR code to open this exact catalog view on their phone or install ${storeProfile.storeName.ifBlank { "ODIYA" }}.",
+                            fontSize = 11.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = dynamicCatalogUrl,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    clipboard.setPrimaryClip(ClipData.newPlainText("Catalog QR Link", dynamicCatalogUrl))
+                                    Toast.makeText(context, "✅ Catalog QR link copied!", Toast.LENGTH_SHORT).show()
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f).height(48.dp).testTag("copy_catalog_qr_link_button")
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Copy Link", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Button(
+                                onClick = {
+                                    shareQrCodeImage(
+                                        context = context,
+                                        qrTargetUrl = dynamicCatalogUrl,
+                                        storeTitle = "${storeProfile.storeName.ifBlank { "ODIYA" }} ($scopeSummary)"
+                                    )
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = Color.Black),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f).height(48.dp).testTag("save_catalog_qr_poster_button")
+                            ) {
+                                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("QR Poster", fontSize = 12.sp, fontWeight = FontWeight.Black)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

@@ -62,6 +62,7 @@ import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.LocalOffer
@@ -81,6 +82,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -270,6 +272,38 @@ fun CheckoutScreen(
     var placedOrderId by rememberSaveable { mutableStateOf<String?>(null) }
     var placedOrderSnapshot by remember { mutableStateOf<Order?>(null) }
     val allOrders by viewModel.allOrders.collectAsState()
+    val loyaltyOfferConfig by viewModel.adminLoyaltyOfferConfig.collectAsState()
+    var claimSpecialLoyaltyOffer by rememberSaveable { mutableStateOf(false) }
+    val preSpecialLoyaltySubtotal = (subtotal - couponDiscountAmount - loyaltyDiscountAmount).coerceAtLeast(0.0)
+    val specialLoyaltyStatus = remember(
+        loyaltyOfferConfig,
+        allOrders,
+        cartItems,
+        phone,
+        fullName,
+        currentCustomer,
+        preSpecialLoyaltySubtotal
+    ) {
+        viewModel.evaluateCustomerLoyaltyOffer(
+            customerPhone = phone,
+            customerName = fullName,
+            cartItems = cartItems,
+            currentCheckoutSubtotalBeforeLoyalty = preSpecialLoyaltySubtotal
+        )
+    }
+    LaunchedEffect(specialLoyaltyStatus.isClaimBoxActivated) {
+        if (!specialLoyaltyStatus.isClaimBoxActivated && claimSpecialLoyaltyOffer) {
+            claimSpecialLoyaltyOffer = false
+        }
+    }
+    val specialLoyaltyDiscountAmount = if (claimSpecialLoyaltyOffer && specialLoyaltyStatus.isClaimBoxActivated) {
+        specialLoyaltyStatus.claimableAmount.coerceAtMost(preSpecialLoyaltySubtotal)
+    } else 0.0
+    val combinedLoyaltyDiscountAmount = loyaltyDiscountAmount + specialLoyaltyDiscountAmount
+    val effectiveSpecialLoyaltyClaimed = specialLoyaltyDiscountAmount > 0.0
+    val specialLoyaltyPriorOrderIds = if (effectiveSpecialLoyaltyClaimed) {
+        specialLoyaltyStatus.qualifyingPriorOrderIds
+    } else emptyList()
     val liveOrder = remember(placedOrderId, placedOrderSnapshot, allOrders) {
         placedOrderId?.let { id -> allOrders.find { it.orderId == id } } ?: placedOrderSnapshot
     }
@@ -497,7 +531,9 @@ fun CheckoutScreen(
                                     appliedCouponCode = appliedCouponCode,
                                     couponDiscountAmount = couponDiscountAmount,
                                     loyaltyPointsRedeemed = appliedLoyaltyPoints,
-                                    loyaltyDiscountAmount = loyaltyDiscountAmount,
+                                    loyaltyDiscountAmount = combinedLoyaltyDiscountAmount,
+                                    specialLoyaltyOfferClaimed = effectiveSpecialLoyaltyClaimed,
+                                    specialLoyaltyPriorOrderIds = specialLoyaltyPriorOrderIds,
                                     onSuccess = { order ->
                                         isPlacingOrder = false
                                         placedOrderSnapshot = order
@@ -573,7 +609,12 @@ fun CheckoutScreen(
                             redeemLoyaltyPoints = redeemLoyaltyPoints,
                             onToggleRedeemLoyalty = { redeemLoyaltyPoints = it },
                             loyaltyPointsRedeemed = appliedLoyaltyPoints,
-                            loyaltyDiscountAmount = loyaltyDiscountAmount,
+                            loyaltyDiscountAmount = combinedLoyaltyDiscountAmount,
+                            specialLoyaltyStatus = specialLoyaltyStatus,
+                            claimSpecialLoyaltyOffer = claimSpecialLoyaltyOffer,
+                            onToggleClaimSpecialLoyalty = { shouldClaim -> claimSpecialLoyaltyOffer = shouldClaim },
+                            specialLoyaltyDiscountAmount = specialLoyaltyDiscountAmount,
+                            specialLoyaltyPriorOrderIds = specialLoyaltyPriorOrderIds,
                             selectedDeliveryZone = selectedDeliveryZone,
                             savedAddresses = savedAddresses,
                             onQuickPickAddress = { addr ->
@@ -650,7 +691,7 @@ fun CheckoutScreen(
     }
 
     activeDirectPortalMethod?.let { portalMethod ->
-        val payableNow = appliedCheckoutBargainPrice ?: (total - couponDiscountAmount - loyaltyDiscountAmount).coerceAtLeast(0.0)
+        val payableNow = appliedCheckoutBargainPrice ?: (total - couponDiscountAmount - combinedLoyaltyDiscountAmount).coerceAtLeast(0.0)
         val portalAcctNum = when (portalMethod) {
             PaymentMethod.OPAY -> activePartnerFolder?.opayAccountNumber?.takeIf { it.isNotBlank() } ?: storeProfile.opayAccountNumber.ifBlank { "9012345678" }
             PaymentMethod.MONIEPOINT -> activePartnerFolder?.moniepointAccountNumber?.takeIf { it.isNotBlank() } ?: storeProfile.moniepointAccountNumber.ifBlank { "5012345678" }
@@ -702,7 +743,9 @@ fun CheckoutScreen(
                     appliedCouponCode = appliedCouponCode,
                     couponDiscountAmount = couponDiscountAmount,
                     loyaltyPointsRedeemed = appliedLoyaltyPoints,
-                    loyaltyDiscountAmount = loyaltyDiscountAmount,
+                    loyaltyDiscountAmount = combinedLoyaltyDiscountAmount,
+                    specialLoyaltyOfferClaimed = effectiveSpecialLoyaltyClaimed,
+                    specialLoyaltyPriorOrderIds = specialLoyaltyPriorOrderIds,
                     onSuccess = { order ->
                         isPlacingOrder = false
                         activeDirectPortalMethod = null
@@ -2281,6 +2324,11 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
     onToggleRedeemLoyalty: (Boolean) -> Unit = {},
     loyaltyPointsRedeemed: Int = 0,
     loyaltyDiscountAmount: Double = 0.0,
+    specialLoyaltyStatus: com.example.CustomerLoyaltyOfferStatus? = null,
+    claimSpecialLoyaltyOffer: Boolean = false,
+    onToggleClaimSpecialLoyalty: (Boolean) -> Unit = {},
+    specialLoyaltyDiscountAmount: Double = 0.0,
+    specialLoyaltyPriorOrderIds: List<String> = emptyList(),
     selectedDeliveryZone: DeliveryZoneOption? = null,
     savedAddresses: List<SavedAddress> = emptyList(),
     onQuickPickAddress: (SavedAddress) -> Unit = {},
@@ -2290,6 +2338,7 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
     viewModel: MainViewModel
 ) {
     val effectivePayableTotal = (total - couponDiscountAmount - loyaltyDiscountAmount).coerceAtLeast(0.0)
+    val pointsOnlyDiscountAmount = (loyaltyDiscountAmount - specialLoyaltyDiscountAmount).coerceAtLeast(0.0)
     Column(
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -2325,14 +2374,24 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                         Text("-${nairaFormat.format(couponDiscountAmount)}", fontWeight = FontWeight.Black, color = SuccessGreen)
                     }
                 }
-                if (loyaltyDiscountAmount > 0.0 && loyaltyPointsRedeemed > 0) {
+                if (pointsOnlyDiscountAmount > 0.0 && loyaltyPointsRedeemed > 0) {
                     Spacer(modifier = Modifier.height(6.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text("Loyalty Points ($loyaltyPointsRedeemed pts):", style = MaterialTheme.typography.bodySmall, color = AccentGold, fontWeight = FontWeight.Bold)
-                        Text("-${nairaFormat.format(loyaltyDiscountAmount)}", fontWeight = FontWeight.Black, color = AccentGold)
+                        Text("-${nairaFormat.format(pointsOnlyDiscountAmount)}", fontWeight = FontWeight.Black, color = AccentGold)
+                    }
+                }
+                if (specialLoyaltyDiscountAmount > 0.0) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("🎁 Regular Customer Loyalty Reward:", style = MaterialTheme.typography.bodySmall, color = SuccessGreen, fontWeight = FontWeight.Bold)
+                        Text("-${nairaFormat.format(specialLoyaltyDiscountAmount)}", fontWeight = FontWeight.Black, color = SuccessGreen)
                     }
                 }
                 Spacer(modifier = Modifier.height(6.dp))
@@ -2397,6 +2456,179 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                         checked = redeemLoyaltyPoints,
                         onCheckedChange = onToggleRedeemLoyalty
                     )
+                }
+            }
+        }
+
+        if (specialLoyaltyStatus != null && specialLoyaltyStatus.config.isActive) {
+            Spacer(modifier = Modifier.height(12.dp))
+            val cfg = specialLoyaltyStatus.config
+            val progressFraction = if (cfg.claimableTotalReward > 0.0) {
+                (specialLoyaltyStatus.earnedProgressAmount / cfg.claimableTotalReward).toFloat().coerceIn(0f, 1f)
+            } else 0f
+            val loyaltyCtx = LocalContext.current
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = when {
+                        claimSpecialLoyaltyOffer && specialLoyaltyStatus.isClaimBoxActivated -> SuccessGreen.copy(alpha = 0.14f)
+                        specialLoyaltyStatus.isClaimBoxActivated -> AccentGold.copy(alpha = 0.14f)
+                        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                    }
+                ),
+                border = BorderStroke(
+                    width = 1.5.dp,
+                    color = when {
+                        claimSpecialLoyaltyOffer && specialLoyaltyStatus.isClaimBoxActivated -> SuccessGreen
+                        specialLoyaltyStatus.isClaimBoxActivated -> AccentGold
+                        else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+                    }
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("checkout_special_loyalty_offer_card")
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(
+                                imageVector = if (specialLoyaltyStatus.isClaimBoxActivated) Icons.Default.CardGiftcard else Icons.Default.Loyalty,
+                                contentDescription = null,
+                                tint = if (specialLoyaltyStatus.isClaimBoxActivated) AccentGold else CyberCyan,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = cfg.title.ifBlank { "Regular Customer Loyalty Offer" },
+                                fontWeight = FontWeight.Black,
+                                fontSize = 13.sp,
+                                color = if (specialLoyaltyStatus.isClaimBoxActivated) AccentGold else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(999.dp),
+                            color = CyberCyan.copy(alpha = 0.16f)
+                        ) {
+                            Text(
+                                text = if (cfg.designatedCategory.equals("All", ignoreCase = true)) "All Categories" else cfg.designatedCategory,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = CyberCyan,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = specialLoyaltyStatus.statusHeadline,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 12.sp,
+                        color = if (specialLoyaltyStatus.isClaimBoxActivated) SuccessGreen else MaterialTheme.colorScheme.onSurface
+                    )
+
+                    LinearProgressIndicator(
+                        progress = { progressFraction },
+                        color = if (specialLoyaltyStatus.isClaimBoxActivated) SuccessGreen else AccentGold,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Earned: ${nairaFormat.format(specialLoyaltyStatus.earnedProgressAmount)} / ${nairaFormat.format(cfg.claimableTotalReward)}",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = AccentGold
+                        )
+                        Text(
+                            text = "${cfg.windowDays}d • Min ${nairaFormat.format(cfg.minRecurrentCheckoutAmount)}/visit",
+                            fontSize = 10.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Text(
+                        text = specialLoyaltyStatus.statusDetail,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    if (specialLoyaltyStatus.isClaimBoxActivated) {
+                        Button(
+                            onClick = {
+                                val nextClaim = !claimSpecialLoyaltyOffer
+                                onToggleClaimSpecialLoyalty(nextClaim)
+                                Toast.makeText(
+                                    loyaltyCtx,
+                                    if (nextClaim) {
+                                        "🎁 Loyalty reward of ${nairaFormat.format(specialLoyaltyStatus.claimableAmount)} deducted from checkout payable total!"
+                                    } else {
+                                        "Removed loyalty reward deduction."
+                                    },
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (claimSpecialLoyaltyOffer) SuccessGreen else AccentGold,
+                                contentColor = if (claimSpecialLoyaltyOffer) Color.White else Color.Black
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("checkout_claim_special_loyalty_button")
+                        ) {
+                            Icon(
+                                imageVector = if (claimSpecialLoyaltyOffer) Icons.Default.CheckCircle else Icons.Default.CardGiftcard,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (claimSpecialLoyaltyOffer) {
+                                    "✅ CLAIMED -${nairaFormat.format(specialLoyaltyDiscountAmount)} (Tap to Cancel)"
+                                } else {
+                                    "🎁 CLICK & CLAIM -${nairaFormat.format(specialLoyaltyStatus.claimableAmount)} NOW"
+                                },
+                                fontWeight = FontWeight.Black,
+                                fontSize = 12.sp
+                            )
+                        }
+                    } else {
+                        val visitsCountingCurrent = specialLoyaltyStatus.qualifyingPriorVisitsInWindow +
+                            if (specialLoyaltyStatus.currentCartEligibleForVisit) 1 else 0
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Claim Box Unlocks on Visit ${cfg.minPatronages}: $visitsCountingCurrent/${cfg.minPatronages} qualifying checkouts completed",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -2849,7 +3081,7 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "Pay with Bank Transfer, USSD, OPay, Mastercard, Verve or Visa. Verified automatically via Paystack & Supabase.",
+                    text = "Pay with Bank Transfer, USSD, OPay, Mastercard, Verve or Visa. Verified automatically via Paystack with encrypted security.",
                     fontSize = 11.5.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -2921,6 +3153,8 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                             couponDiscountAmount = couponDiscountAmount,
                             loyaltyPointsRedeemed = loyaltyPointsRedeemed,
                             loyaltyDiscountAmount = loyaltyDiscountAmount,
+                            specialLoyaltyOfferClaimed = specialLoyaltyDiscountAmount > 0.0,
+                            specialLoyaltyPriorOrderIds = specialLoyaltyPriorOrderIds,
                             onReadyToOpenUrl = { authUrl, _, ref ->
                                 Toast.makeText(paystackContext, "Opening Paystack Checkout ($ref)...", Toast.LENGTH_LONG).show()
                                 com.example.util.WebPortalExporter.openExternalUrl(paystackContext, authUrl)

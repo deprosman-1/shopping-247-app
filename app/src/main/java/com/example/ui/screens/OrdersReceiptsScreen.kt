@@ -282,7 +282,7 @@ fun OrdersReceiptsScreen(
                     PreOrderRequestCard(viewModel = viewModel)
                 }
 
-                // Section 2: Live Supabase Order Tracking Shortcut & Order Receipts History
+                // Section 2: Live Encrypted Order Tracking Shortcut & Order Receipts History
                 item {
                     Card(
                         onClick = { viewModel.openOrderTracking() },
@@ -305,7 +305,7 @@ fun OrdersReceiptsScreen(
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column {
                                     Text(
-                                        text = "LIVE ORDER TRACKING (SUPABASE)",
+                                        text = "LIVE ORDER TRACKING",
                                         fontWeight = FontWeight.Black,
                                         fontSize = 12.sp,
                                         color = SuccessGreen

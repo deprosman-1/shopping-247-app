@@ -335,15 +335,15 @@ object CatalogDataSeeder {
                 )
             ),
             ExpandedSeedSpec(
-                category = ProductCategory.KIDS,
-                idPrefix = "kids",
-                model3d = "SNEAKER",
-                sizes = listOf("EU 24", "EU 26", "EU 28", "EU 30", "EU 32"),
-                baseStart = 12500,
+                category = ProductCategory.FRUITS_VEGETABLES,
+                idPrefix = "fruits-veg",
+                model3d = "BOX",
+                sizes = listOf("1kg Basket", "3kg Basket", "5kg Crate"),
+                baseStart = 4500,
                 items = listOf(
-                    Triple("Kids Pastel Breathable Canvas Sneakers", "TinyStep", "android.resource://com.example/drawable/img_babies_kids_set"),
-                    Triple("Kids Ergonomic School Backpack & Lunch Box", "Nike Kids", "android.resource://com.example/drawable/img_luxury_leather_bag"),
-                    Triple("Kids Cotton Playtime Tracksuit Set", "Adidas Kids", "android.resource://com.example/drawable/img_babies_kids_set")
+                    Triple("Fresh Crisp Red & Green Organic Apples Basket", "Odiya Harvest", "android.resource://com.example/drawable/img_fruits_vegetables"),
+                    Triple("Farm-Fresh Sweet Bell Peppers & Plum Tomatoes Pack", "GreenValley Farms", "android.resource://com.example/drawable/img_fruits_vegetables"),
+                    Triple("Ripe Sweet Golden Mangoes & Plantain Combo", "TropiFresh", "android.resource://com.example/drawable/img_fruits_vegetables")
                 )
             ),
             ExpandedSeedSpec(
@@ -479,15 +479,27 @@ object CatalogDataSeeder {
                 )
             ),
             ExpandedSeedSpec(
-                category = ProductCategory.PHARMACEUTICALS,
-                idPrefix = "pharma",
-                model3d = "BOTTLE",
-                sizes = listOf("60 Capsules", "100 Tablets", "200ml Syrup"),
-                baseStart = 6500,
+                category = ProductCategory.PROCESSED_FOODS_PASTRIES,
+                idPrefix = "pastries",
+                model3d = "BOX",
+                sizes = listOf("Box of 6", "Family Pack (12)", "Party Tray"),
+                baseStart = 5500,
                 items = listOf(
-                    Triple("Complete Multivitamin & Omega-3 Softgel Pharmacy Pack", "Emzor Pharma", "android.resource://com.example/drawable/img_medical_pharma_kit"),
-                    Triple("Sterile Antiseptic First-Aid Amber Bottle & Dressing Kit", "May & Baker", "android.resource://com.example/drawable/img_medical_pharma_kit"),
-                    Triple("Vitamin C 1000mg + Zinc Immune Effervescent Tablets", "Fidson Care", "android.resource://com.example/drawable/img_medical_pharma_kit")
+                    Triple("Artisanal Flaky Butter Croissants & Brioche Box", "Odiya Bakehouse", "android.resource://com.example/drawable/img_processed_foods_pastries"),
+                    Triple("Classic Oven-Baked Meat Pie & Sausage Roll Combo", "Golden Crust", "android.resource://com.example/drawable/img_processed_foods_pastries"),
+                    Triple("Glazed Cinnamon Rolls & Vanilla Bean Muffins Pack", "Royal Pastry", "android.resource://com.example/drawable/img_processed_foods_pastries")
+                )
+            ),
+            ExpandedSeedSpec(
+                category = ProductCategory.FROZEN_FOODS_MEAT,
+                idPrefix = "frozen-meat",
+                model3d = "CUBE",
+                sizes = listOf("1kg Pack", "2.5kg Pack", "5kg Carton"),
+                baseStart = 9500,
+                items = listOf(
+                    Triple("Prime Grass-Fed Marbled Beef Cuts (Frozen Pack)", "Odiya ColdChain", "android.resource://com.example/drawable/img_frozen_foods_meat"),
+                    Triple("Whole Cleaned Atlantic Croaker Fish Fillet Pack", "Ocean Harvest", "android.resource://com.example/drawable/img_frozen_foods_meat"),
+                    Triple("Tender Boneless Chicken Breast & Wings Family Pack", "Prime Poultry", "android.resource://com.example/drawable/img_frozen_foods_meat")
                 )
             )
         )
@@ -512,7 +524,7 @@ object CatalogDataSeeder {
                         imageUrl = img,
                         model3dType = spec.model3d,
                         description = "Verified quality $name under ${spec.category.displayName}. Ready for instant dispatch from ODIYA.",
-                        expiryMonthsRemaining = if (spec.category == ProductCategory.PHARMACEUTICALS) 18 else 24,
+                        expiryMonthsRemaining = 24,
                         rating = 4.7 + (idx % 3) * 0.1,
                         reviewCount = 38 + idx * 11
                     )

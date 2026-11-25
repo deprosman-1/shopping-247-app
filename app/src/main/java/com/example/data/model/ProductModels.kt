@@ -14,7 +14,7 @@ enum class ProductCategory(val displayName: String) {
     MEN("Men"),
     WOMEN("Women"),
     BABIES("Babies"),
-    KIDS("Kids"),
+    FRUITS_VEGETABLES("Fruits/Vegetables"),
     HOUSEHOLD("Household"),
     MUSICALS("Musicals"),
     EDUCATIONAL("Educational"),
@@ -26,7 +26,8 @@ enum class ProductCategory(val displayName: String) {
     AUTOMOBILE_SPARE_PARTS("Automobile Spare-Parts"),
     CLOTHING_SEWING_MATERIALS("Clothing & Sewing Materials"),
     HEALTH_MEDICAL_EQUIPMENT("Health/Medical Equipment"),
-    PHARMACEUTICALS("Pharmaceuticals")
+    PROCESSED_FOODS_PASTRIES("Processed Foods/Pastries"),
+    FROZEN_FOODS_MEAT("Frozen Foods/Meat")
 }
 
 @Immutable

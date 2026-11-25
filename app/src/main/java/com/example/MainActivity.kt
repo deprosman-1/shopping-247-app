@@ -128,6 +128,7 @@ class MainActivity : ComponentActivity() {
     private val pendingSharedReceiptPayload = kotlinx.coroutines.flow.MutableStateFlow<RawSharedReceiptPayload?>(null)
     private val pendingPaystackReference = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     private val pendingAppOpenSignal = kotlinx.coroutines.flow.MutableStateFlow(0L)
+    private val pendingCatalogFilter = kotlinx.coroutines.flow.MutableStateFlow<Pair<String?, String?>?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -173,7 +174,8 @@ class MainActivity : ComponentActivity() {
                     pendingCloudCredentials = pendingCloudCredentials,
                     pendingSharedReceiptPayload = pendingSharedReceiptPayload,
                     pendingPaystackReference = pendingPaystackReference,
-                    pendingAppOpenSignal = pendingAppOpenSignal
+                    pendingAppOpenSignal = pendingAppOpenSignal,
+                    pendingCatalogFilter = pendingCatalogFilter
                 )
             }
         }
@@ -248,6 +250,15 @@ class MainActivity : ComponentActivity() {
 
             val sbUrl = data.getQueryParameter("sb_url")?.trim()
             val sbKey = data.getQueryParameter("sb_key")?.trim()
+            val linkedCategory = (data.getQueryParameter("cat") ?: data.getQueryParameter("category"))
+                ?.trim()
+                ?.takeIf { it.isNotBlank() && !it.equals("all", ignoreCase = true) }
+            val linkedSearch = (data.getQueryParameter("q") ?: data.getQueryParameter("search"))
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+            if (linkedCategory != null || linkedSearch != null) {
+                pendingCatalogFilter.value = linkedCategory to linkedSearch
+            }
             pendingAppOpenSignal.value = System.currentTimeMillis()
             if (!sbUrl.isNullOrBlank() && !sbKey.isNullOrBlank()) {
                 pendingCloudCredentials.value = sbUrl to sbKey
@@ -259,7 +270,11 @@ class MainActivity : ComponentActivity() {
             } else {
                 android.widget.Toast.makeText(
                     this,
-                    "Welcome to Odiya! App Opened via direct link",
+                    if (linkedCategory != null || linkedSearch != null) {
+                        "Welcome to Odiya! Opening catalog..."
+                    } else {
+                        "Welcome to Odiya! App Opened via direct link"
+                    },
                     android.widget.Toast.LENGTH_LONG
                 ).show()
             }
@@ -273,7 +288,8 @@ fun DeprosApp(
     pendingCloudCredentials: kotlinx.coroutines.flow.MutableStateFlow<Pair<String, String>?>? = null,
     pendingSharedReceiptPayload: kotlinx.coroutines.flow.MutableStateFlow<RawSharedReceiptPayload?>? = null,
     pendingPaystackReference: kotlinx.coroutines.flow.MutableStateFlow<String?>? = null,
-    pendingAppOpenSignal: kotlinx.coroutines.flow.MutableStateFlow<Long>? = null
+    pendingAppOpenSignal: kotlinx.coroutines.flow.MutableStateFlow<Long>? = null,
+    pendingCatalogFilter: kotlinx.coroutines.flow.MutableStateFlow<Pair<String?, String?>?>? = null
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val currentScreen by viewModel.currentScreen.collectAsState()
@@ -361,6 +377,18 @@ fun DeprosApp(
             if (currentScreen == AppScreen.AUTH || currentScreen == AppScreen.HELP_SUPPORT) {
                 viewModel.navigateToHome()
             }
+        }
+    }
+
+    val incomingCatalogFilter = pendingCatalogFilter?.collectAsState()?.value
+    LaunchedEffect(incomingCatalogFilter) {
+        if (incomingCatalogFilter != null) {
+            showFullScreenBrandSplash = false
+            val (cat, q) = incomingCatalogFilter
+            pendingCatalogFilter?.value = null
+            viewModel.selectCategory(cat)
+            viewModel.setSearchQuery(q ?: "")
+            viewModel.navigateToHome()
         }
     }
 

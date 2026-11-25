@@ -23,7 +23,12 @@ class ExampleUnitTest {
     assertTrue(categories.contains("Electronics"))
     assertTrue(categories.contains("Food"))
     assertTrue(categories.contains("Beverages"))
-    assertEquals(23, categories.size)
+    assertTrue(categories.contains("Fruits/Vegetables"))
+    assertTrue(categories.contains("Processed Foods/Pastries"))
+    assertTrue(categories.contains("Frozen Foods/Meat"))
+    org.junit.Assert.assertFalse(categories.contains("Kids"))
+    org.junit.Assert.assertFalse(categories.contains("Pharmaceuticals"))
+    assertEquals(24, categories.size)
   }
 
   @Test

@@ -1,13 +1,9 @@
 package com.example.ui.components
 
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -16,6 +12,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Update
 import androidx.compose.material3.Button
@@ -23,11 +21,18 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -41,6 +46,12 @@ import androidx.compose.ui.window.Dialog
 import com.example.ui.theme.AccentGold
 import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.SuccessGreen
+import com.example.util.ApkDownloadResult
+import com.example.util.ApkInstallLaunchResult
+import com.example.util.ApkUpdateInstaller
+import com.example.util.WebPortalExporter
+import kotlinx.coroutines.launch
+import java.io.File
 
 @Composable
 fun AppUpdateDialog(
@@ -48,12 +59,29 @@ fun AppUpdateDialog(
     releaseNotes: String,
     updateUrl: String,
     installedVersionName: String = "1.0",
-    storefrontUrl: String = com.example.util.WebPortalExporter.DEFAULT_LIVE_PORTAL_URL,
+    storefrontUrl: String = WebPortalExporter.DEFAULT_LIVE_PORTAL_URL,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
-    Dialog(onDismissRequest = onDismiss) {
+    var isDownloading by remember { mutableStateOf(false) }
+    var downloadProgress by remember { mutableFloatStateOf(0f) }
+    var statusText by remember { mutableStateOf<String?>(null) }
+    var isErrorStatus by remember { mutableStateOf(false) }
+    var downloadedApkFile by remember { mutableStateOf<File?>(null) }
+    var needsInstallPermission by remember { mutableStateOf(false) }
+
+    val resolvedApkTarget = remember(updateUrl) {
+        val normalized = WebPortalExporter.normalizeApkOrPortalUrl(updateUrl)
+        if (WebPortalExporter.isDirectApkReleaseUrl(normalized)) {
+            normalized
+        } else {
+            WebPortalExporter.DEFAULT_GITHUB_APK_RELEASE_URL
+        }
+    }
+
+    Dialog(onDismissRequest = { if (!isDownloading) onDismiss() }) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -69,7 +97,6 @@ fun AppUpdateDialog(
                     .padding(22.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Icon Header Box
                 Surface(
                     shape = RoundedCornerShape(20.dp),
                     color = AccentGold.copy(alpha = 0.2f),
@@ -129,19 +156,125 @@ fun AppUpdateDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Primary Update Action -> opens strictly in external browser (APK download or web=1 storefront)
-                Button(
-                    onClick = {
-                        val target = com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(updateUrl)
-                            .ifBlank { com.example.util.WebPortalExporter.DEFAULT_GITHUB_APK_RELEASE_URL }
-                        com.example.util.WebPortalExporter.openInExternalBrowserOnly(
-                            context = context,
-                            url = target,
-                            forceStayOnWebIfPortal = true
+                if (isDownloading) {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    if (downloadProgress > 0f) {
+                        LinearProgressIndicator(
+                            progress = { downloadProgress.coerceIn(0f, 1f) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp),
+                            color = SuccessGreen
                         )
-                        onDismiss()
+                    } else {
+                        LinearProgressIndicator(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp),
+                            color = SuccessGreen
+                        )
+                    }
+                }
+
+                if (!statusText.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = statusText.orEmpty(),
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isErrorStatus) Color(0xFFEF4444) else SuccessGreen,
+                        textAlign = TextAlign.Center
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                // Primary Update Action -> downloads APK inside app and opens native Android installer directly
+                Button(
+                    enabled = !isDownloading,
+                    onClick = {
+                        val existingFile = downloadedApkFile
+                        if (existingFile != null && existingFile.exists()) {
+                            when (val launchRes = ApkUpdateInstaller.launchApkInstall(context, existingFile)) {
+                                ApkInstallLaunchResult.LaunchedInstaller -> {
+                                    needsInstallPermission = false
+                                    isErrorStatus = false
+                                    statusText = "✅ Installer opened — tap 'Update' on Android prompt to upgrade now."
+                                }
+                                ApkInstallLaunchResult.NeedsInstallPermission -> {
+                                    needsInstallPermission = true
+                                    isErrorStatus = false
+                                    statusText = "Allow 'Install unknown apps' for ODIYA in Settings, then return & tap 'INSTALL DOWNLOADED APK'."
+                                }
+                                is ApkInstallLaunchResult.Failed -> {
+                                    isErrorStatus = true
+                                    statusText = launchRes.message
+                                }
+                            }
+                            return@Button
+                        }
+
+                        isDownloading = true
+                        downloadProgress = 0f
+                        isErrorStatus = false
+                        statusText = "Downloading ODIYA v$latestVersionName APK..."
+
+                        scope.launch {
+                            when (val dl = ApkUpdateInstaller.downloadApk(
+                                context = context,
+                                rawUrl = resolvedApkTarget,
+                                onProgress = { bytes, total ->
+                                    if (total > 0L) {
+                                        val frac = bytes.toFloat() / total.toFloat()
+                                        downloadProgress = frac
+                                        statusText = "Downloading APK (${(frac * 100).toInt()}% • ${bytes / 1024} KB)..."
+                                    } else {
+                                        statusText = "Downloading APK (${bytes / 1024} KB)..."
+                                    }
+                                }
+                            )) {
+                                is ApkDownloadResult.ReadyToInstall -> {
+                                    isDownloading = false
+                                    downloadedApkFile = dl.apkFile
+                                    when (val installRes = ApkUpdateInstaller.launchApkInstall(context, dl.apkFile)) {
+                                        ApkInstallLaunchResult.LaunchedInstaller -> {
+                                            needsInstallPermission = false
+                                            isErrorStatus = false
+                                            statusText = "✅ Download complete! Tap 'Update' on Android installer prompt."
+                                        }
+                                        ApkInstallLaunchResult.NeedsInstallPermission -> {
+                                            needsInstallPermission = true
+                                            isErrorStatus = false
+                                            statusText = "Enable 'Allow from this source' in Android Settings, then come back and tap 'INSTALL DOWNLOADED APK'."
+                                            Toast.makeText(
+                                                context,
+                                                "Allow ODIYA to install app updates, then return to finish installing!",
+                                                Toast.LENGTH_LONG
+                                            ).show()
+                                        }
+                                        is ApkInstallLaunchResult.Failed -> {
+                                            isErrorStatus = true
+                                            statusText = installRes.message
+                                        }
+                                    }
+                                }
+                                is ApkDownloadResult.NotAnApk -> {
+                                    isDownloading = false
+                                    isErrorStatus = true
+                                    statusText = "${dl.reason} Opening download link in browser..."
+                                    WebPortalExporter.openInExternalBrowserOnly(
+                                        context = context,
+                                        url = dl.url,
+                                        forceStayOnWebIfPortal = true
+                                    )
+                                }
+                                is ApkDownloadResult.Failed -> {
+                                    isDownloading = false
+                                    isErrorStatus = true
+                                    statusText = dl.message
+                                }
+                            }
+                        }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = Color.White),
                     shape = RoundedCornerShape(14.dp),
@@ -150,21 +283,36 @@ fun AppUpdateDialog(
                         .height(52.dp)
                         .testTag("update_app_action_button")
                 ) {
-                    Icon(Icons.Default.Update, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Icon(
+                        imageVector = if (downloadedApkFile != null) Icons.Default.DownloadDone else Icons.Default.Update,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("UPDATE APP NOW", fontWeight = FontWeight.Black, fontSize = 14.sp)
+                    Text(
+                        text = when {
+                            isDownloading -> "DOWNLOADING APK..."
+                            needsInstallPermission || downloadedApkFile != null -> "INSTALL DOWNLOADED APK"
+                            else -> "UPDATE APP NOW"
+                        },
+                        fontWeight = FontWeight.Black,
+                        fontSize = 14.sp
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Secondary Live Storefront Web Fallback -> guarantees access to APK download & web storefront
+                // Fallback: Direct Browser APK Download / Storefront Web
                 OutlinedButton(
+                    enabled = !isDownloading,
                     onClick = {
-                        val resolvedPortal = com.example.util.WebPortalExporter.normalizePortalUrl(storefrontUrl)
-                            .ifBlank { com.example.util.WebPortalExporter.DEFAULT_LIVE_PORTAL_URL }
-                        com.example.util.WebPortalExporter.openInExternalBrowserOnly(
+                        val directBrowserTarget = resolvedApkTarget.ifBlank {
+                            WebPortalExporter.normalizePortalUrl(storefrontUrl)
+                                .ifBlank { WebPortalExporter.DEFAULT_LIVE_PORTAL_URL }
+                        }
+                        WebPortalExporter.openInExternalBrowserOnly(
                             context = context,
-                            url = resolvedPortal,
+                            url = directBrowserTarget,
                             forceStayOnWebIfPortal = true
                         )
                         onDismiss()
@@ -175,12 +323,14 @@ fun AppUpdateDialog(
                         .height(48.dp)
                         .testTag("open_live_storefront_update_button")
                 ) {
-                    Text("Open Live Storefront (APK / Web)", fontWeight = FontWeight.Bold, fontSize = 12.5.sp, color = CyberCyan)
+                    Icon(Icons.Default.OpenInBrowser, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Download APK in Phone Browser", fontWeight = FontWeight.Bold, fontSize = 12.5.sp, color = CyberCyan)
                 }
 
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Opens in your phone browser so you can download & install the new APK cleanly.",
+                    text = "Downloads the latest ODIYA APK directly on your device and launches the Android installer.",
                     fontSize = 10.5.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
@@ -189,6 +339,7 @@ fun AppUpdateDialog(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 OutlinedButton(
+                    enabled = !isDownloading,
                     onClick = onDismiss,
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier

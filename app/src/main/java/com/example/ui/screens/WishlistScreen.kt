@@ -120,7 +120,7 @@ fun WishlistScreen(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Stored in User Profile • Supabase Cloud",
+                                text = "Saved in Your Profile • Data Well Secured",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = CyberCyan
                             )
@@ -273,7 +273,7 @@ fun WishlistScreen(
                     Spacer(modifier = Modifier.height(6.dp))
 
                     Text(
-                        text = "Tap the heart icon on any 3D item to save it here. Your wishlist is automatically synced to your user profile in Supabase Cloud.",
+                        text = "Tap the heart icon on any 3D item to save it here. Your wishlist and collected details are encrypted and well secured.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 16.dp)

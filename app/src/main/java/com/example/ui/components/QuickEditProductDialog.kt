@@ -408,7 +408,7 @@ fun QuickEditProductDialog(
                                     color = Color(0xFFDC2626)
                                 )
                                 Text(
-                                    text = "This item currently falls back to a default category image because its old phone link was temporary. Tap 'Pick Real Product Photo' below and Save to upload the real image to Supabase Cloud.",
+                                    text = "This item currently falls back to a default category image because its old phone link was temporary. Tap 'Pick Real Product Photo' below and Save to upload the real image to Secured Cloud Storage.",
                                     fontSize = 11.sp,
                                     lineHeight = 14.sp,
                                     color = MaterialTheme.colorScheme.onSurface
@@ -488,7 +488,7 @@ fun QuickEditProductDialog(
                                 Text(
                                     text = when {
                                         isPhotoBrokenOrExpired -> "Pick a gallery photo above to replace this fallback image"
-                                        isNewLocalSelection -> "Will upload permanently to Supabase Storage when you Save"
+                                        isNewLocalSelection -> "Will upload permanently to Secured Cloud Storage when you Save"
                                         else -> "Active across catalog cards and 3D detail view"
                                     },
                                     style = MaterialTheme.typography.labelSmall,

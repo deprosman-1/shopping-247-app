@@ -448,7 +448,7 @@ fun PreOrderRequestCard(
                         val statusToast = if (isOnline && isSupabaseConnected) {
                             "✅ Pre-Order Request Sent & Synced to Admin Cloud!"
                         } else {
-                            "✅ Pre-Order Saved & Queued — will auto-sync to Admin as soon as Supabase / Internet is live."
+                            "✅ Pre-Order Saved & Queued — all details are well secured and will auto-sync as soon as Internet connection is live."
                         }
                         Toast.makeText(context, statusToast, Toast.LENGTH_LONG).show()
                         productName = ""

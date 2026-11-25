@@ -76,6 +76,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Loyalty
 import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
@@ -4786,8 +4787,401 @@ private fun CustomerIdentityTab(
 }
 
 // ==========================================
-// TAB 3: PAYMENT RECEIPTS CONTROL
+// TAB 3: PAYMENT RECEIPTS CONTROL (SEPARATE PER-CUSTOMER FOLDERS & FULL PAGES)
 // ==========================================
+private data class AdminCustomerOrderFolder(
+    val folderKey: String,
+    val customerName: String,
+    val customerPhone: String,
+    val deliveryAddress: String,
+    val orders: List<Order>,
+    val totalAmount: Double,
+    val totalProfit: Double,
+    val pendingCount: Int
+)
+
+private fun buildAdminCustomerFolders(orders: List<Order>): List<AdminCustomerOrderFolder> {
+    val grouped = orders.groupBy { order ->
+        val phoneDigits = order.customerPhone.filter { it.isDigit() }.takeLast(10)
+        when {
+            phoneDigits.length >= 7 -> "phone:$phoneDigits"
+            order.customerId.isNotBlank() && !order.customerId.startsWith("guest-", ignoreCase = true) ->
+                "id:${order.customerId}"
+            else -> "name:${order.customerName.trim().lowercase().ifBlank { order.orderId }}"
+        }
+    }
+    return grouped.map { (key, list) ->
+        val sorted = list.sortedByDescending { it.createdAt }
+        val latest = sorted.first()
+        val displayName = sorted.firstNotNullOfOrNull {
+            it.customerName.trim().takeIf { n -> n.isNotBlank() && !n.equals("Guest Customer", ignoreCase = true) }
+        } ?: latest.customerName.ifBlank { "Customer" }
+        AdminCustomerOrderFolder(
+            folderKey = key,
+            customerName = displayName,
+            customerPhone = sorted.firstNotNullOfOrNull { it.customerPhone.trim().takeIf { p -> p.isNotBlank() } }.orEmpty(),
+            deliveryAddress = sorted.firstNotNullOfOrNull { it.deliveryAddress.trim().takeIf { a -> a.isNotBlank() } }.orEmpty(),
+            orders = sorted,
+            totalAmount = sorted.sumOf { it.totalAmount },
+            totalProfit = sorted.sumOf { it.profit },
+            pendingCount = sorted.count { it.status == OrderStatus.PENDING_VERIFICATION }
+        )
+    }.sortedByDescending { it.orders.maxOfOrNull { o -> o.createdAt } ?: 0L }
+}
+
+@Composable
+private fun AdminOrderWorkflowActionsRow(
+    order: Order,
+    viewModel: MainViewModel,
+    context: Context,
+    onOpenFullOrderReceipt: (() -> Unit)? = null
+) {
+    val adminStoreProfile by viewModel.storeProfile.collectAsState()
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (onOpenFullOrderReceipt != null) {
+                OutlinedButton(
+                    onClick = onOpenFullOrderReceipt,
+                    modifier = Modifier.weight(0.95f)
+                ) {
+                    Icon(Icons.Default.ReceiptLong, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Full Order & Receipt", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            if (order.status == OrderStatus.PENDING_VERIFICATION) {
+                if (!order.isCreditAlertConfirmed) {
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.recordOrderCreditAlertReceived(order.orderId)
+                            Toast.makeText(context, "✅ ODIYA Credit Alert Received! Payment Confirmation ON & Receipt sent.", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("admin_confirm_credit_alert_${order.orderId}")
+                    ) {
+                        Text("Verify Credit", fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Button(
+                    enabled = order.isCreditAlertConfirmed,
+                    onClick = {
+                        viewModel.updateOrderStatus(order.orderId, OrderStatus.CONFIRMED, "Order confirmed & verified by Admin Cashier")
+                        Toast.makeText(context, "Order ${order.orderId} Confirmed! Customer status changed to ORDER CONFIRMED.", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
+                    modifier = Modifier
+                        .weight(1.2f)
+                        .testTag("admin_payment_confirmation_button_${order.orderId}")
+                ) {
+                    Icon(Icons.Default.Verified, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = if (order.isCreditAlertConfirmed) "Payment Confirmation ON" else "Locked (Uncredited)",
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            } else if (order.status == OrderStatus.CONFIRMED || order.status == OrderStatus.VERIFIED) {
+                Button(
+                    onClick = {
+                        viewModel.updateOrderStatus(order.orderId, OrderStatus.OUT_FOR_DELIVERY, "Dispatched via Express Courier")
+                        Toast.makeText(context, "Dispatched for Delivery!", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.weight(1.2f)
+                ) {
+                    Icon(Icons.Default.LocalShipping, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Dispatch", fontSize = 12.sp)
+                }
+            } else if (order.status == OrderStatus.OUT_FOR_DELIVERY) {
+                Button(
+                    onClick = {
+                        viewModel.updateOrderStatus(order.orderId, OrderStatus.DELIVERED, "Delivered and Signed")
+                        Toast.makeText(context, "Marked as Delivered!", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
+                    modifier = Modifier.weight(1.2f)
+                ) {
+                    Text("Delivered", fontSize = 12.sp)
+                }
+            }
+        }
+
+        OutlinedButton(
+            onClick = {
+                WhatsAppHelper.sendAdminOrderStatusToCustomer(
+                    context = context,
+                    order = order,
+                    storeProfile = adminStoreProfile
+                )
+            },
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("admin_whatsapp_customer_${order.orderId}")
+        ) {
+            Icon(Icons.Default.Chat, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("WhatsApp Customer (${order.status.label})", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = SuccessGreen)
+        }
+    }
+}
+
+@Composable
+private fun AdminFullOrderAndReceiptBlock(
+    order: Order,
+    customerFolderName: String,
+    nairaFormat: NumberFormat,
+    dateFormat: SimpleDateFormat,
+    context: Context,
+    viewModel: MainViewModel,
+    onZoomReceipt: (String) -> Unit,
+    onOpenOrderReceiptPage: (() -> Unit)? = null
+) {
+    val paymentColor = when (order.paymentMethod) {
+        PaymentMethod.PAYSTACK -> PaystackTeal
+        PaymentMethod.OPAY -> OPayGreen
+        PaymentMethod.MONIEPOINT -> MoniepointBlue
+        PaymentMethod.PALMPAY -> PalmPayPurple
+        PaymentMethod.POS_TRANSFER -> PosPurple
+        PaymentMethod.CASH_ON_DELIVERY -> CodOrange
+    }
+    val creditColor = when {
+        order.isCreditAlertConfirmed -> SuccessGreen
+        order.creditVerificationStatus == CreditVerificationStatus.PAYMENT_FAILED_UNCREDITED -> Color(0xFFDC2626)
+        order.creditVerificationStatus == CreditVerificationStatus.NETWORK_DELAYED_PENDING -> AccentGold
+        else -> Color(0xFFD97706)
+    }
+
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)),
+        border = BorderStroke(1.2.dp, paymentColor.copy(alpha = 0.45f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (onOpenOrderReceiptPage != null) {
+                    Modifier.clickable { onOpenOrderReceiptPage() }
+                } else Modifier
+            )
+            .testTag("admin_full_order_receipt_block_${order.orderId}")
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Customer Name explicitly on TOP of both Order & Receipt block
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "CUSTOMER: ${customerFolderName.uppercase()}",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "Phone: ${order.customerPhone.ifBlank { "N/A" }}",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = paymentColor.copy(alpha = 0.16f)
+                    ) {
+                        Text(
+                            text = order.paymentMethod.title,
+                            color = paymentColor,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 10.5.sp,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+
+            // Order Header Metadata
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text("ORDER FILE: ${order.orderId}", fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
+                    Text(
+                        text = dateFormat.format(Date(order.createdAt)),
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (order.status == OrderStatus.VERIFIED || order.status == OrderStatus.DELIVERED || order.status == OrderStatus.CONFIRMED) SuccessGreen.copy(alpha = 0.15f) else AccentGold.copy(alpha = 0.16f)
+                ) {
+                    Text(
+                        text = order.status.label,
+                        color = if (order.status == OrderStatus.VERIFIED || order.status == OrderStatus.DELIVERED || order.status == OrderStatus.CONFIRMED) SuccessGreen else AccentGold,
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Black,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+
+            Text("Delivery Address: ${order.deliveryAddress.ifBlank { "N/A" }}", style = MaterialTheme.typography.bodySmall)
+            if (order.paymentAccount.isNotBlank()) {
+                Text("Paid To Account: ${order.paymentAccount}", style = MaterialTheme.typography.bodySmall, color = CyberCyan, fontWeight = FontWeight.SemiBold)
+            }
+            Text("Payer / Sender Name: ${order.senderName.ifBlank { order.customerName }}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+            Text("Payment Ref / STAN: ${order.paymentReference.ifBlank { "N/A" }}", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = creditColor.copy(alpha = 0.14f),
+                border = BorderStroke(1.dp, creditColor.copy(alpha = 0.45f))
+            ) {
+                Text(
+                    text = if (order.isCreditAlertConfirmed) "ODIYA Account Credited ✓ • Payment Confirmation ON" else order.creditVerificationStatus.label,
+                    color = creditColor,
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Black,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
+
+            // Full Unclipped Items & Profit Breakdown
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("ORDERED ITEMS (FULL BREAKDOWN):", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = CyberCyan)
+                        Text("Profit: +${nairaFormat.format(order.profit)}", fontSize = 11.sp, fontWeight = FontWeight.Black, color = SuccessGreen)
+                    }
+                    order.itemsSummary.split(";", "\n").filter { it.isNotBlank() }.forEach { line ->
+                        Text(
+                            text = "• ${line.trim()}",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontSize = 11.5.sp,
+                            lineHeight = 16.sp
+                        )
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Total Payable Settled:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text(nairaFormat.format(order.totalAmount), fontWeight = FontWeight.Black, fontSize = 13.5.sp, color = MaterialTheme.colorScheme.primary)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("10% Made from Order Profit:", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = AccentGold)
+                        Text(nairaFormat.format(order.profit * 0.10), fontSize = 11.sp, fontWeight = FontWeight.Black, color = AccentGold)
+                    }
+                }
+            }
+
+            // Official Receipt Section INSIDE the same folder/page with Customer Name on top
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.2.dp, if (order.receiptImageUrl.isNotBlank()) SuccessGreen.copy(alpha = 0.55f) else CyberCyan.copy(alpha = 0.45f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "🧾 OFFICIAL RECEIPT — ${customerFolderName.uppercase()} (${order.orderId})",
+                        fontWeight = FontWeight.Black,
+                        fontSize = 11.5.sp,
+                        color = if (order.receiptImageUrl.isNotBlank()) SuccessGreen else CyberCyan
+                    )
+                    if (order.verificationNote.isNotBlank()) {
+                        Text(
+                            text = order.verificationNote,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    if (order.receiptImageUrl.isNotBlank()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(220.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.Black.copy(alpha = 0.06f))
+                                .clickable { onZoomReceipt(order.receiptImageUrl) }
+                        ) {
+                            AsyncImage(
+                                model = ProductImageHelper.buildImageRequest(
+                                    context = context,
+                                    imageUrl = order.receiptImageUrl,
+                                    title = "Receipt ${order.orderId}",
+                                    highRes = true
+                                ),
+                                contentDescription = "Uploaded Payment Receipt Photo",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Fit,
+                                filterQuality = FilterQuality.High
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color.Black.copy(alpha = 0.65f),
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(8.dp)
+                            ) {
+                                Text(
+                                    text = "Tap to Pinch-Zoom Full Receipt",
+                                    color = Color.White,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    } else {
+                        Text(
+                            text = "Transfer / Gateway Receipt Ref: ${order.paymentReference.ifBlank { "Recorded on ${order.paymentMethod.title}" }}",
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            AdminOrderWorkflowActionsRow(
+                order = order,
+                viewModel = viewModel,
+                context = context,
+                onOpenFullOrderReceipt = onOpenOrderReceiptPage
+            )
+        }
+    }
+}
+
 @Composable
 private fun PaymentReceiptsTab(
     viewModel: MainViewModel,
@@ -4795,11 +5189,34 @@ private fun PaymentReceiptsTab(
 ) {
     val context = LocalContext.current
     var filterStatus by remember { mutableStateOf<OrderStatus?>(null) }
+    var customerSearchQuery by remember { mutableStateOf("") }
 
-    var viewingReceiptImageOrder by remember { mutableStateOf<Order?>(null) }
+    var selectedCustomerFolderKey by remember { mutableStateOf<String?>(null) }
+    var viewingReceiptImageOrderId by remember { mutableStateOf<String?>(null) }
     var fullZoomReceiptUrl by remember { mutableStateOf<String?>(null) }
 
-    val filteredOrders = if (filterStatus == null) orders else orders.filter { it.status == filterStatus }
+    val filteredOrders = remember(orders, filterStatus) {
+        if (filterStatus == null) orders else orders.filter { it.status == filterStatus }
+    }
+    val customerFolders = remember(filteredOrders, customerSearchQuery) {
+        val folders = buildAdminCustomerFolders(filteredOrders)
+        val q = customerSearchQuery.trim()
+        if (q.isBlank()) folders else folders.filter { folder ->
+            folder.customerName.contains(q, ignoreCase = true) ||
+                folder.customerPhone.contains(q, ignoreCase = true) ||
+                folder.orders.any {
+                    it.orderId.contains(q, ignoreCase = true) ||
+                        it.paymentReference.contains(q, ignoreCase = true)
+                }
+        }
+    }
+    val allCustomerFolders = remember(orders) { buildAdminCustomerFolders(orders) }
+    val activeCustomerFolder = remember(selectedCustomerFolderKey, allCustomerFolders) {
+        selectedCustomerFolderKey?.let { key -> allCustomerFolders.find { it.folderKey == key } }
+    }
+    val viewingReceiptImageOrder = remember(viewingReceiptImageOrderId, orders) {
+        viewingReceiptImageOrderId?.let { id -> orders.find { it.orderId == id } }
+    }
 
     val nairaFormat = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "NG")).apply {
@@ -4808,147 +5225,195 @@ private fun PaymentReceiptsTab(
     }
     val dateFormat = remember { SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()) }
 
-    // Full High-Res Receipt Image Inspector Modal for Admin
-    viewingReceiptImageOrder?.let { inspectOrder ->
-        Dialog(onDismissRequest = { viewingReceiptImageOrder = null }) {
-            Card(
-                shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    // 1. FULL SEPARATED CUSTOMER FOLDER PAGE (ALL ORDERS & RECEIPTS FOR ONE CUSTOMER)
+    activeCustomerFolder?.let { folder ->
+        Dialog(
+            onDismissRequest = { selectedCustomerFolderKey = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(6.dp)
+                    .fillMaxSize()
+                    .testTag("admin_customer_folder_full_page_${folder.folderKey}"),
+                color = MaterialTheme.colorScheme.background
             ) {
-                Column(
-                    modifier = Modifier
-                        .padding(16.dp)
-                        .verticalScroll(rememberScrollState()),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 4.dp,
+                        shadowElevation = 4.dp
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Verified, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(20.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Uploaded Payment Receipt", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                        }
-                        IconButton(onClick = { viewingReceiptImageOrder = null }) {
-                            Icon(Icons.Default.Close, contentDescription = "Close")
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Text("Order ID: ${inspectOrder.orderId}", fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
-                    Text("Customer: ${inspectOrder.customerName} (${inspectOrder.customerPhone})", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                    Text("Delivery: ${inspectOrder.deliveryAddress}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Total Amount: ${nairaFormat.format(inspectOrder.totalAmount)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
-                    Text("Sender/Payer: ${inspectOrder.senderName.ifBlank { inspectOrder.customerName }}", style = MaterialTheme.typography.bodySmall, color = CyberCyan, fontWeight = FontWeight.SemiBold)
-                    Text("Transfer Ref: ${inspectOrder.paymentReference}", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall)
-                    Text("Items: ${inspectOrder.itemsSummary}", style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(320.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color.Black.copy(alpha = 0.08f))
-                            .border(1.5.dp, CyberCyan, RoundedCornerShape(14.dp))
-                            .clickable {
-                                if (inspectOrder.receiptImageUrl.isNotBlank()) {
-                                    fullZoomReceiptUrl = inspectOrder.receiptImageUrl
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 14.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = CyberCyan.copy(alpha = 0.18f),
+                                        modifier = Modifier.size(42.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(Icons.Default.FolderOpen, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(22.dp))
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = folder.customerName.uppercase(),
+                                            style = MaterialTheme.typography.titleLarge,
+                                            fontWeight = FontWeight.Black,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Text(
+                                            text = "Customer Orders & Receipts Folder • ${folder.customerPhone.ifBlank { "No phone" }}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                IconButton(
+                                    onClick = { selectedCustomerFolderKey = null },
+                                    modifier = Modifier.testTag("close_customer_folder_full_page")
+                                ) {
+                                    Icon(Icons.Default.Close, contentDescription = "Close Customer Folder")
                                 }
                             }
-                    ) {
-                        if (inspectOrder.receiptImageUrl.isNotBlank()) {
-                            AsyncImage(
-                                model = ProductImageHelper.buildImageRequest(
-                                    context = context,
-                                    imageUrl = inspectOrder.receiptImageUrl,
-                                    title = "Receipt ${inspectOrder.orderId}",
-                                    highRes = true
-                                ),
-                                contentDescription = "Full Uploaded Payment Receipt Photo (Tap to zoom)",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Fit,
-                                filterQuality = FilterQuality.High
-                            )
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = Color.Black.copy(alpha = 0.65f),
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(8.dp)
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text(
-                                    text = "Tap to Pinch-Zoom",
-                                    color = Color.White,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
-                            }
-                        } else {
-                            Column(
-                                modifier = Modifier.fillMaxSize().padding(16.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Icon(Icons.Default.ReceiptLong, contentDescription = null, tint = AccentGold, modifier = Modifier.size(52.dp))
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text("Payment Reference Recorded", fontWeight = FontWeight.Bold)
-                                Text("STAN / Ref: ${inspectOrder.paymentReference}", fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        if (inspectOrder.status == OrderStatus.PENDING_VERIFICATION) {
-                            if (!inspectOrder.isCreditAlertConfirmed) {
-                                OutlinedButton(
-                                    onClick = {
-                                        viewModel.recordOrderCreditAlertReceived(inspectOrder.orderId)
-                                        Toast.makeText(context, "✅ ODIYA Credit Alert Recorded! Payment Confirmation is now ON.", Toast.LENGTH_SHORT).show()
-                                    },
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = CyberCyan.copy(alpha = 0.12f),
                                     modifier = Modifier.weight(1f)
                                 ) {
-                                    Text("Confirm Credit Alert", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Column(modifier = Modifier.padding(8.dp)) {
+                                        Text("Files in Folder", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text("${folder.orders.size} Order(s) + Receipt(s)", fontWeight = FontWeight.Black, fontSize = 12.sp, color = CyberCyan)
+                                    }
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = SuccessGreen.copy(alpha = 0.12f),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Column(modifier = Modifier.padding(8.dp)) {
+                                        Text("Customer Total", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(nairaFormat.format(folder.totalAmount), fontWeight = FontWeight.Black, fontSize = 12.sp, color = SuccessGreen)
+                                    }
                                 }
                             }
-                            Button(
-                                enabled = inspectOrder.isCreditAlertConfirmed,
-                                onClick = {
-                                    viewModel.updateOrderStatus(inspectOrder.orderId, OrderStatus.CONFIRMED, "Order confirmed & approved by Admin Cashier after ODIYA credit alert")
-                                    Toast.makeText(context, "Order ${inspectOrder.orderId} Confirmed! Status changed to ORDER CONFIRMED.", Toast.LENGTH_SHORT).show()
-                                    viewingReceiptImageOrder = null
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
-                                modifier = Modifier.weight(1.2f)
-                            ) {
-                                Icon(Icons.Default.Verified, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
+                        }
+                    }
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentPadding = PaddingValues(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        items(folder.orders, key = { it.orderId }) { ord ->
+                            AdminFullOrderAndReceiptBlock(
+                                order = ord,
+                                customerFolderName = folder.customerName,
+                                nairaFormat = nairaFormat,
+                                dateFormat = dateFormat,
+                                context = context,
+                                viewModel = viewModel,
+                                onZoomReceipt = { url -> fullZoomReceiptUrl = url },
+                                onOpenOrderReceiptPage = { viewingReceiptImageOrderId = ord.orderId }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. FULL-SCREEN ORDER & RECEIPT INSPECTOR PAGE WHEN CLICKED BY ADMIN
+    viewingReceiptImageOrder?.let { inspectOrder ->
+        Dialog(
+            onDismissRequest = { viewingReceiptImageOrderId = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .testTag("admin_full_order_receipt_page_${inspectOrder.orderId}"),
+                color = MaterialTheme.colorScheme.background
+            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 4.dp,
+                        shadowElevation = 4.dp
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = if (inspectOrder.isCreditAlertConfirmed) "Payment Confirmation ON" else "Awaiting Credit Alert",
-                                    fontSize = 12.sp,
+                                    text = inspectOrder.customerName.ifBlank { "Customer" }.uppercase(),
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Black,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = "Full Live Order & Receipt • ${inspectOrder.orderId}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = CyberCyan,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
+                            IconButton(
+                                onClick = { viewingReceiptImageOrderId = null },
+                                modifier = Modifier.testTag("close_full_order_receipt_page")
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Close")
+                            }
                         }
+                    }
 
-                        OutlinedButton(
-                            onClick = { viewingReceiptImageOrder = null },
-                            modifier = Modifier.weight(0.8f)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .verticalScroll(rememberScrollState())
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        AdminFullOrderAndReceiptBlock(
+                            order = inspectOrder,
+                            customerFolderName = inspectOrder.customerName.ifBlank { "Customer" },
+                            nairaFormat = nairaFormat,
+                            dateFormat = dateFormat,
+                            context = context,
+                            viewModel = viewModel,
+                            onZoomReceipt = { url -> fullZoomReceiptUrl = url },
+                            onOpenOrderReceiptPage = null
+                        )
+
+                        Button(
+                            onClick = { viewingReceiptImageOrderId = null },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
                         ) {
-                            Text("Close Inspector", fontSize = 12.sp)
+                            Text("Back to Customer Folders", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -4974,7 +5439,7 @@ private fun PaymentReceiptsTab(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Live Orders & Receipts (${filteredOrders.size})",
+                text = "Customer Folders (${customerFolders.size}) • Orders (${filteredOrders.size})",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Black
             )
@@ -4997,6 +5462,27 @@ private fun PaymentReceiptsTab(
                 Text("Sync Cloud Orders", fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
         }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        OutlinedTextField(
+            value = customerSearchQuery,
+            onValueChange = { customerSearchQuery = it },
+            placeholder = { Text("Search customer name, phone, Order ID or ref...", fontSize = 12.sp) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+            trailingIcon = {
+                if (customerSearchQuery.isNotBlank()) {
+                    IconButton(onClick = { customerSearchQuery = "" }) {
+                        Icon(Icons.Default.Close, contentDescription = "Clear")
+                    }
+                }
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("admin_customer_folder_search_input")
+        )
 
         Spacer(modifier = Modifier.height(6.dp))
 
@@ -5063,7 +5549,7 @@ private fun PaymentReceiptsTab(
                 }
             }
 
-            if (filteredOrders.isEmpty()) {
+            if (customerFolders.isEmpty()) {
                 item(key = "live_orders_empty") {
                     Box(
                         modifier = Modifier
@@ -5071,332 +5557,148 @@ private fun PaymentReceiptsTab(
                             .padding(vertical = 48.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("No payment receipts in this category.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("No customer order folders in this category.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             } else {
-                items(filteredOrders, key = { it.orderId }) { order ->
-                    val paymentColor = when (order.paymentMethod) {
-                        PaymentMethod.PAYSTACK -> PaystackTeal
-                        PaymentMethod.OPAY -> OPayGreen
-                        PaymentMethod.MONIEPOINT -> MoniepointBlue
-                        PaymentMethod.PALMPAY -> PalmPayPurple
-                        PaymentMethod.POS_TRANSFER -> PosPurple
-                        PaymentMethod.CASH_ON_DELIVERY -> CodOrange
-                    }
-
+                items(customerFolders, key = { it.folderKey }) { folder ->
                     Card(
-                        shape = RoundedCornerShape(16.dp),
+                        onClick = { selectedCustomerFolderKey = folder.folderKey },
+                        shape = RoundedCornerShape(18.dp),
                         colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.48f)
                         ),
-                        modifier = Modifier.fillMaxWidth()
+                        border = BorderStroke(
+                            width = 1.4.dp,
+                            color = if (folder.pendingCount > 0) AccentGold.copy(alpha = 0.75f) else CyberCyan.copy(alpha = 0.55f)
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("admin_customer_folder_card_${folder.folderKey}")
                     ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
+                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            // Customer Folder Header with Customer Name prominently on TOP
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column {
-                                    Text(order.orderId, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
-                                    Text(
-                                        text = dateFormat.format(java.util.Date(order.createdAt)),
-                                        fontSize = 10.5.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = paymentColor.copy(alpha = 0.15f)
-                                ) {
-                                    Text(order.paymentMethod.title, color = paymentColor, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text("Customer: ${order.customerName} (${order.customerPhone})", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
-                            Text("Delivery: ${order.deliveryAddress}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (order.paymentAccount.isNotBlank()) {
-                                Text("Paid To: ${order.paymentAccount}", style = MaterialTheme.typography.bodySmall, color = CyberCyan, fontWeight = FontWeight.SemiBold)
-                            }
-                            Text("Total Settlement: ${nairaFormat.format(order.totalAmount)}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.ExtraBold)
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Total Profit from Order: ${nairaFormat.format(order.profit)}", style = MaterialTheme.typography.bodySmall, color = SuccessGreen, fontWeight = FontWeight.Bold)
-                                Text("10% from Profit: ${nairaFormat.format(order.profit * 0.10)}", style = MaterialTheme.typography.bodySmall, color = AccentGold, fontWeight = FontWeight.Bold)
-                            }
-                            Text("Payment Ref / STAN: ${order.paymentReference}", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
-
-                            if (order.verificationNote.isNotBlank()) {
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Surface(
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = CyberCyan.copy(alpha = 0.08f),
-                                    border = BorderStroke(1.dp, CyberCyan.copy(alpha = 0.28f)),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Column(modifier = Modifier.padding(10.dp)) {
-                                        Text(
-                                            text = "RECEIPT & VERIFICATION MESSAGE",
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Black,
-                                            color = CyberCyan
-                                        )
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = order.verificationNote,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            fontSize = 11.5.sp,
-                                            lineHeight = 16.sp,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                    }
-                                }
-                            }
-
-                            // TOTAL PROFIT MADE FROM EACH ITEM BREAKDOWN
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = MaterialTheme.colorScheme.surface,
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Column(modifier = Modifier.padding(10.dp)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = CyberCyan.copy(alpha = 0.16f),
+                                        modifier = Modifier.size(42.dp)
                                     ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(Icons.Default.Folder, contentDescription = null, tint = CyberCyan, modifier = Modifier.size(22.dp))
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
                                         Text(
-                                            text = "TOTAL PROFIT MADE FROM EACH ITEM:",
-                                            style = MaterialTheme.typography.labelSmall,
+                                            text = folder.customerName.uppercase(),
+                                            style = MaterialTheme.typography.titleMedium,
                                             fontWeight = FontWeight.Black,
-                                            color = CyberCyan
+                                            color = MaterialTheme.colorScheme.primary
                                         )
                                         Text(
-                                            text = "+${nairaFormat.format(order.profit)}",
-                                            fontWeight = FontWeight.Black,
+                                            text = "${folder.customerPhone.ifBlank { "No Phone" }} • ${folder.orders.size} Order & Receipt File(s)",
                                             fontSize = 11.sp,
-                                            color = SuccessGreen
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    order.itemsSummary.split(";", "\n").filter { it.isNotBlank() }.forEach { line ->
-                                        Text(
-                                            text = "• ${line.trim()}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            fontSize = 11.sp,
-                                            lineHeight = 15.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                        Spacer(modifier = Modifier.height(2.dp))
+                                }
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        text = nairaFormat.format(folder.totalAmount),
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 13.sp,
+                                        color = SuccessGreen
+                                    )
+                                    if (folder.pendingCount > 0) {
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = AccentGold.copy(alpha = 0.2f)
+                                        ) {
+                                            Text(
+                                                text = "${folder.pendingCount} Pending",
+                                                color = AccentGold,
+                                                fontSize = 9.5.sp,
+                                                fontWeight = FontWeight.Black,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
                                     }
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
-                                    Spacer(modifier = Modifier.height(4.dp))
+                                }
+                            }
+
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+
+                            // Separated Orders + Receipts paired inside this single Customer Folder
+                            folder.orders.forEach { ord ->
+                                Card(
+                                    onClick = { viewingReceiptImageOrderId = ord.orderId },
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("admin_folder_order_item_${ord.orderId}")
+                                ) {
                                     Row(
-                                        modifier = Modifier.fillMaxWidth(),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
-                                        Text("10% Made from Order Profit:", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = AccentGold)
-                                        Text(nairaFormat.format(order.profit * 0.10), fontSize = 11.sp, fontWeight = FontWeight.Black, color = AccentGold)
-                                    }
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            // Uploaded Payment Receipt Photo Card Section
-                            Card(
-                                onClick = { viewingReceiptImageOrder = order },
-                                shape = RoundedCornerShape(12.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                                border = BorderStroke(1.dp, if (order.receiptImageUrl.isNotBlank()) SuccessGreen.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant),
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                        if (order.receiptImageUrl.isNotBlank()) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(54.dp)
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .border(1.dp, SuccessGreen, RoundedCornerShape(8.dp))
-                                            ) {
-                                                AsyncImage(
-                                                    model = ProductImageHelper.buildImageRequest(
-                                                        context = context,
-                                                        imageUrl = order.receiptImageUrl,
-                                                        title = "Receipt ${order.orderId}"
-                                                    ),
-                                                    contentDescription = "Receipt Photo Thumbnail",
-                                                    modifier = Modifier.fillMaxSize(),
-                                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                                                )
-                                            }
-                                        } else {
-                                            Surface(
-                                                shape = RoundedCornerShape(8.dp),
-                                                color = AccentGold.copy(alpha = 0.15f),
-                                                modifier = Modifier.size(54.dp)
-                                            ) {
-                                                Box(contentAlignment = Alignment.Center) {
-                                                    Icon(Icons.Default.ReceiptLong, contentDescription = null, tint = AccentGold, modifier = Modifier.size(26.dp))
-                                                }
-                                            }
-                                        }
-                                        Spacer(modifier = Modifier.width(10.dp))
-                                        Column {
+                                        Column(modifier = Modifier.weight(1f)) {
                                             Text(
-                                                text = if (order.receiptImageUrl.isNotBlank()) "📷 Payment Receipt Photo Attached" else "📄 Transfer Reference Logged",
-                                                fontWeight = FontWeight.Bold,
+                                                text = "🧾 ${ord.orderId} • ${ord.paymentMethod.title}",
+                                                fontWeight = FontWeight.Black,
                                                 fontSize = 12.sp,
-                                                color = if (order.receiptImageUrl.isNotBlank()) SuccessGreen else MaterialTheme.colorScheme.primary
+                                                fontFamily = FontFamily.Monospace
                                             )
                                             Text(
-                                                text = "Payer: ${order.senderName.ifBlank { order.customerName }}\nRef: ${order.paymentReference.ifBlank { "N/A" }}",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                lineHeight = 14.sp
+                                                text = "${dateFormat.format(Date(ord.createdAt))} • ${ord.status.label}",
+                                                fontSize = 10.5.sp,
+                                                color = if (ord.isCreditAlertConfirmed) SuccessGreen else AccentGold,
+                                                fontWeight = FontWeight.Bold
                                             )
-                                            Text("Tap to view full receipt photo", fontSize = 10.sp, color = CyberCyan, fontWeight = FontWeight.SemiBold)
+                                            Text(
+                                                text = "Ref: ${ord.paymentReference.ifBlank { "Recorded" }} • Tap to open Full Order & Receipt",
+                                                fontSize = 10.sp,
+                                                color = CyberCyan
+                                            )
                                         }
-                                    }
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = if (order.status == OrderStatus.VERIFIED || order.status == OrderStatus.DELIVERED) SuccessGreen.copy(alpha = 0.12f) else AccentGold.copy(alpha = 0.12f)
-                            ) {
-                                Text(
-                                    text = "Status: ${order.status.label}",
-                                    color = if (order.status == OrderStatus.VERIFIED || order.status == OrderStatus.DELIVERED) SuccessGreen else AccentGold,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(6.dp))
-                            val creditColor = when {
-                                order.isCreditAlertConfirmed -> SuccessGreen
-                                order.creditVerificationStatus == CreditVerificationStatus.PAYMENT_FAILED_UNCREDITED -> Color(0xFFDC2626)
-                                order.creditVerificationStatus == CreditVerificationStatus.NETWORK_DELAYED_PENDING -> AccentGold
-                                else -> Color(0xFFD97706)
-                            }
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = creditColor.copy(alpha = 0.14f),
-                                border = BorderStroke(1.dp, creditColor.copy(alpha = 0.45f))
-                            ) {
-                                Text(
-                                    text = if (order.isCreditAlertConfirmed) "ODIYA Account Credited ✓ • Payment Confirmation ON" else order.creditVerificationStatus.label,
-                                    color = creditColor,
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.Black,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            // Action buttons to update receipt status
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OutlinedButton(
-                                    onClick = { viewingReceiptImageOrder = order },
-                                    modifier = Modifier.weight(0.9f)
-                                ) {
-                                    Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Receipt", fontSize = 11.sp)
-                                }
-
-                                if (order.status == OrderStatus.PENDING_VERIFICATION) {
-                                    if (!order.isCreditAlertConfirmed) {
-                                        OutlinedButton(
-                                            onClick = {
-                                                viewModel.recordOrderCreditAlertReceived(order.orderId)
-                                                Toast.makeText(context, "✅ ODIYA Credit Alert Received! Payment Confirmation ON & Receipt sent.", Toast.LENGTH_SHORT).show()
-                                            },
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .testTag("admin_confirm_credit_alert_${order.orderId}")
-                                        ) {
-                                            Text("Verify Credit", fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                    }
-                                    Button(
-                                        enabled = order.isCreditAlertConfirmed,
-                                        onClick = {
-                                            viewModel.updateOrderStatus(order.orderId, OrderStatus.CONFIRMED, "Order confirmed & verified by Admin Cashier")
-                                            Toast.makeText(context, "Order ${order.orderId} Confirmed! Customer status changed to ORDER CONFIRMED.", Toast.LENGTH_SHORT).show()
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
-                                        modifier = Modifier
-                                            .weight(1.2f)
-                                            .testTag("admin_payment_confirmation_button_${order.orderId}")
-                                    ) {
-                                        Icon(Icons.Default.Verified, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
                                         Text(
-                                            text = if (order.isCreditAlertConfirmed) "Payment Confirmation ON" else "Locked (Uncredited)",
-                                            fontSize = 10.5.sp,
-                                            fontWeight = FontWeight.Bold
+                                            text = nairaFormat.format(ord.totalAmount),
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 12.5.sp,
+                                            color = MaterialTheme.colorScheme.primary
                                         )
                                     }
-                                } else if (order.status == OrderStatus.CONFIRMED || order.status == OrderStatus.VERIFIED) {
-                                    Button(
-                                        onClick = {
-                                            viewModel.updateOrderStatus(order.orderId, OrderStatus.OUT_FOR_DELIVERY, "Dispatched via Express Courier")
-                                            Toast.makeText(context, "Dispatched for Delivery!", Toast.LENGTH_SHORT).show()
-                                        },
-                                        modifier = Modifier.weight(1.2f)
-                                    ) {
-                                        Icon(Icons.Default.LocalShipping, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Dispatch", fontSize = 12.sp)
-                                    }
-                                } else if (order.status == OrderStatus.OUT_FOR_DELIVERY) {
-                                    Button(
-                                        onClick = {
-                                            viewModel.updateOrderStatus(order.orderId, OrderStatus.DELIVERED, "Delivered and Signed")
-                                            Toast.makeText(context, "Marked as Delivered!", Toast.LENGTH_SHORT).show()
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
-                                        modifier = Modifier.weight(1.2f)
-                                    ) {
-                                        Text("Delivered", fontSize = 12.sp)
-                                    }
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(6.dp))
-                            val adminStoreProfile by viewModel.storeProfile.collectAsState()
-                            OutlinedButton(
-                                onClick = {
-                                    WhatsAppHelper.sendAdminOrderStatusToCustomer(
-                                        context = context,
-                                        order = order,
-                                        storeProfile = adminStoreProfile
-                                    )
-                                },
-                                shape = RoundedCornerShape(10.dp),
+                            Button(
+                                onClick = { selectedCustomerFolderKey = folder.folderKey },
+                                colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = Color.Black),
+                                shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .testTag("admin_whatsapp_customer_${order.orderId}")
+                                    .height(44.dp)
+                                    .testTag("open_customer_folder_button_${folder.folderKey}")
                             ) {
-                                Icon(Icons.Default.Chat, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("WhatsApp Customer (${order.status.label})", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = SuccessGreen)
+                                Text(
+                                    text = "OPEN ${folder.customerName.uppercase()} FOLDER (FULL ORDERS & RECEIPTS)",
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
                         }
                     }
@@ -8607,6 +8909,296 @@ private fun PromoActivationTab(viewModel: MainViewModel) {
                         Text(
                             text = if (isEditingUnlocked) "SAVE & LOCK BARGAIN CONFIG" else "🔒 BARGAIN CONFIG SAVED & LOCKED",
                             fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+
+        // ==========================================
+        // ADMIN REGULAR CUSTOMER LOYALTY REWARD CONTROL (EDITABLE + CATEGORY SCOPED)
+        // ==========================================
+        item {
+            val loyaltyCfg by viewModel.adminLoyaltyOfferConfig.collectAsState()
+            var loyaltyActive by remember(loyaltyCfg.isActive) { mutableStateOf(loyaltyCfg.isActive) }
+            var loyaltyTitleInput by remember(loyaltyCfg.title) { mutableStateOf(loyaltyCfg.title) }
+            var loyaltyCategoryInput by remember(loyaltyCfg.designatedCategory) { mutableStateOf(loyaltyCfg.designatedCategory) }
+            var loyaltyVisitsInput by remember(loyaltyCfg.minPatronages) { mutableStateOf(loyaltyCfg.minPatronages.toString()) }
+            var loyaltyWindowDaysInput by remember(loyaltyCfg.windowDays) { mutableStateOf(loyaltyCfg.windowDays.toString()) }
+            var loyaltyMinCheckoutInput by remember(loyaltyCfg.minRecurrentCheckoutAmount) { mutableStateOf(loyaltyCfg.minRecurrentCheckoutAmount.toLong().toString()) }
+            var loyaltyPerVisitInput by remember(loyaltyCfg.rewardPerPatronage) { mutableStateOf(loyaltyCfg.rewardPerPatronage.toLong().toString()) }
+            var loyaltyClaimTotalInput by remember(loyaltyCfg.claimableTotalReward) { mutableStateOf(loyaltyCfg.claimableTotalReward.toLong().toString()) }
+            var isLoyaltyUnlocked by remember { mutableStateOf(false) }
+
+            val allCatOptions = listOf("All") + com.example.data.model.ProductCategory.values().map { it.displayName }
+
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (loyaltyActive) SuccessGreen.copy(alpha = 0.08f) else AccentGold.copy(alpha = 0.06f)
+                ),
+                border = BorderStroke(2.dp, if (loyaltyActive) SuccessGreen else AccentGold),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("admin_loyalty_offer_control_box")
+            ) {
+                Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Surface(
+                                shape = CircleShape,
+                                color = (if (loyaltyActive) SuccessGreen else AccentGold).copy(alpha = 0.2f),
+                                modifier = Modifier.size(44.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Loyalty,
+                                        contentDescription = null,
+                                        tint = if (loyaltyActive) SuccessGreen else AccentGold,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "REGULAR CUSTOMER LOYALTY OFFER",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Black
+                                )
+                                Text(
+                                    text = if (loyaltyActive) "ACTIVE • Regular customers earn ₦${loyaltyCfg.rewardPerPatronage.toInt()}/visit (${loyaltyCfg.minPatronages}x in ${loyaltyCfg.windowDays}d = ₦${loyaltyCfg.claimableTotalReward.toInt()})" else "PAUSED • Configure & Activate below",
+                                    fontSize = 10.5.sp,
+                                    color = if (loyaltyActive) SuccessGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = loyaltyActive,
+                            onCheckedChange = { checked ->
+                                loyaltyActive = checked
+                                if (!checked) isLoyaltyUnlocked = false
+                                viewModel.toggleAdminLoyaltyOfferActive(checked)
+                                Toast.makeText(
+                                    context,
+                                    if (checked) "🎁 Regular Customer Loyalty Offer ACTIVATED!" else "🔒 Regular Customer Loyalty Offer PAUSED.",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            modifier = Modifier.testTag("admin_loyalty_offer_switch")
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                loyaltyActive = true
+                                isLoyaltyUnlocked = true
+                                viewModel.toggleAdminLoyaltyOfferActive(true)
+                                Toast.makeText(context, "🔓 Loyalty Offer Box UNLOCKED for editing!", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isLoyaltyUnlocked) SuccessGreen else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (isLoyaltyUnlocked) Color.White else MaterialTheme.colorScheme.onSurface
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f).height(44.dp).testTag("admin_loyalty_offer_unlock_button")
+                        ) {
+                            Icon(Icons.Default.LockOpen, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("OPEN & UNLOCK", fontWeight = FontWeight.Bold, fontSize = 11.5.sp)
+                        }
+                        Button(
+                            onClick = {
+                                loyaltyActive = false
+                                isLoyaltyUnlocked = false
+                                viewModel.toggleAdminLoyaltyOfferActive(false)
+                                Toast.makeText(context, "🔒 Loyalty Offer LOCKED & Paused!", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (!loyaltyActive && !isLoyaltyUnlocked) Color(0xFFEF4444) else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (!loyaltyActive && !isLoyaltyUnlocked) Color.White else MaterialTheme.colorScheme.onSurface
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f).height(44.dp)
+                        ) {
+                            Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("PAUSE & LOCK", fontWeight = FontWeight.Bold, fontSize = 11.5.sp)
+                        }
+                    }
+
+                    Text(
+                        text = "🎯 Product Category Scope: '$loyaltyCategoryInput'",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        allCatOptions.forEach { catName ->
+                            val isSelected = loyaltyCategoryInput.equals(catName, ignoreCase = true)
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = {
+                                    if (isLoyaltyUnlocked) {
+                                        loyaltyCategoryInput = catName
+                                    } else {
+                                        Toast.makeText(context, "Tap 'OPEN & UNLOCK' to change loyalty category", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                label = {
+                                    Text(
+                                        text = if (catName == "All") "🌟 All Categories" else catName,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isSelected) FontWeight.Black else FontWeight.Medium
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = SuccessGreen,
+                                    selectedLabelColor = Color.White
+                                )
+                            )
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = loyaltyTitleInput,
+                        onValueChange = { loyaltyTitleInput = it },
+                        enabled = isLoyaltyUnlocked,
+                        label = { Text("Special Offer Title") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = loyaltyVisitsInput,
+                            onValueChange = {
+                                loyaltyVisitsInput = it
+                                val v = it.toIntOrNull()
+                                val per = loyaltyPerVisitInput.toDoubleOrNull()
+                                if (v != null && per != null) {
+                                    loyaltyClaimTotalInput = (v * per).toLong().toString()
+                                }
+                            },
+                            enabled = isLoyaltyUnlocked,
+                            label = { Text("Min Patronages") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                            modifier = Modifier.weight(1f).testTag("loyalty_min_patronages_input")
+                        )
+                        OutlinedTextField(
+                            value = loyaltyWindowDaysInput,
+                            onValueChange = { loyaltyWindowDaysInput = it },
+                            enabled = isLoyaltyUnlocked,
+                            label = { Text("Window (Days)") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                            modifier = Modifier.weight(1f).testTag("loyalty_window_days_input")
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = loyaltyMinCheckoutInput,
+                        onValueChange = { loyaltyMinCheckoutInput = it },
+                        enabled = isLoyaltyUnlocked,
+                        label = { Text("Min Recurrent Checkout Amount (₦)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("loyalty_min_checkout_input")
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = loyaltyPerVisitInput,
+                            onValueChange = {
+                                loyaltyPerVisitInput = it
+                                val per = it.toDoubleOrNull()
+                                val v = loyaltyVisitsInput.toIntOrNull()
+                                if (per != null && v != null) {
+                                    loyaltyClaimTotalInput = (v * per).toLong().toString()
+                                }
+                            },
+                            enabled = isLoyaltyUnlocked,
+                            label = { Text("Earned / Visit (₦)") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                            modifier = Modifier.weight(1f).testTag("loyalty_per_visit_input")
+                        )
+                        OutlinedTextField(
+                            value = loyaltyClaimTotalInput,
+                            onValueChange = { loyaltyClaimTotalInput = it },
+                            enabled = isLoyaltyUnlocked,
+                            label = { Text("5th Visit Claim (₦)") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                            modifier = Modifier.weight(1f).testTag("loyalty_claim_total_input")
+                        )
+                    }
+
+                    Button(
+                        onClick = {
+                            if (!isLoyaltyUnlocked) {
+                                Toast.makeText(context, "🔒 Click 'OPEN & UNLOCK' first to edit and activate!", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            val visits = loyaltyVisitsInput.toIntOrNull() ?: 5
+                            val days = loyaltyWindowDaysInput.toIntOrNull() ?: 60
+                            val minChk = loyaltyMinCheckoutInput.toDoubleOrNull() ?: 100_000.0
+                            val perVisit = loyaltyPerVisitInput.toDoubleOrNull() ?: 500.0
+                            val claimTotal = loyaltyClaimTotalInput.toDoubleOrNull() ?: (visits * perVisit)
+                            viewModel.updateAdminLoyaltyOfferConfig(
+                                isActive = loyaltyActive,
+                                title = loyaltyTitleInput,
+                                designatedCategory = loyaltyCategoryInput,
+                                minPatronages = visits,
+                                windowDays = days,
+                                minRecurrentCheckoutAmount = minChk,
+                                rewardPerPatronage = perVisit,
+                                claimableTotalReward = claimTotal
+                            )
+                            isLoyaltyUnlocked = false
+                            Toast.makeText(
+                                context,
+                                "✅ Saved Loyalty Offer: ${visits}x in ${days}d (Min ₦${minChk.toInt()}) -> Claim -₦${claimTotal.toInt()} [$loyaltyCategoryInput]",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isLoyaltyUnlocked) SuccessGreen else MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = if (isLoyaltyUnlocked) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                            .testTag("save_loyalty_offer_button")
+                    ) {
+                        Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (isLoyaltyUnlocked) "ACTIVATE & LOCK LOYALTY OFFER" else "🔒 LOYALTY OFFER SAVED & LOCKED",
+                            fontWeight = FontWeight.Black
                         )
                     }
                 }

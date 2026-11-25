@@ -226,7 +226,7 @@ fun ProductDetailScreen(
                             viewModel.toggleWishlist(product.id) { added ->
                                 Toast.makeText(
                                     context,
-                                    if (added) "Saved to your Wishlist in Supabase Cloud!" else "Removed from Wishlist",
+                                    if (added) "Saved to your secured Wishlist!" else "Removed from Wishlist",
                                     Toast.LENGTH_SHORT
                                 ).show()
                             }

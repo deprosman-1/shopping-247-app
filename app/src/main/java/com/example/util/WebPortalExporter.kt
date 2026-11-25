@@ -574,6 +574,46 @@ object WebPortalExporter {
     .prod-title { font-size: 14px; color: #FFFFFF; font-weight: 800; line-height: 1.3; margin-bottom: 4px; overflow-wrap: anywhere; cursor: pointer; }
     .prod-price { font-size: 15px; font-weight: 900; color: #FDE68A; }
     .prod-old { font-size: 12px; color: rgba(255, 255, 255, 0.6); text-decoration: line-through; margin-left: 6px; }
+    .qr-card {
+      background: rgba(5, 46, 22, 0.9);
+      border: 1.5px solid rgba(56, 189, 248, 0.45);
+      border-radius: 18px;
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+    .qr-layout {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      align-items: center;
+      justify-content: center;
+    }
+    .qr-canvas-wrap {
+      background: #FFFFFF;
+      border-radius: 14px;
+      padding: 8px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.32);
+    }
+    .qr-meta {
+      flex: 1 1 230px;
+      min-width: 0;
+    }
+    .qr-url-box {
+      font-family: monospace;
+      font-size: 11px;
+      color: #A7F3D0;
+      background: rgba(0, 0, 0, 0.28);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 10px;
+      padding: 8px 10px;
+      word-break: break-all;
+      margin: 8px 0;
+      max-height: 62px;
+      overflow-y: auto;
+    }
     .field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 10px; margin-bottom: 10px; }
     .label { display: block; font-size: 12px; font-weight: 800; color: #A7F3D0; margin-bottom: 5px; }
     .cart-row {
@@ -763,7 +803,32 @@ object WebPortalExporter {
       <div class="card">
         <div class="card-head">
           <h2>🛍️ Live Storefront Catalog</h2>
-          <input class="input search" id="searchBox" type="search" placeholder="Search shoes, clothes, gadgets..." oninput="renderProducts()" />
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;flex:1;justify-content:flex-end;">
+            <input class="input search" id="searchBox" type="search" placeholder="Search shoes, clothes, gadgets..." oninput="renderProducts()" />
+            <button id="toggleCatalogQrBtn" type="button" class="btn btn-dark btn-sm" onclick="toggleCatalogQrCard()">📱 Catalog QR</button>
+          </div>
+        </div>
+        <div id="catalogQrCard" class="qr-card">
+          <div class="qr-layout">
+            <div class="qr-canvas-wrap">
+              <canvas id="catalogQrCanvas" width="210" height="210" aria-label="Dynamic Catalog QR Code"></canvas>
+            </div>
+            <div class="qr-meta">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
+                <span style="font-size:14px;font-weight:900;color:#FFFFFF;">📱 Dynamic Catalog QR Code</span>
+                <span id="catalogQrScope" class="badge badge-ok">All Products</span>
+              </div>
+              <div style="font-size:12px;color:#E2E8F0;line-height:1.4;">
+                Walk-in shoppers can scan this live QR code to open this exact digital storefront view or download the app. Updates automatically as you change category or search!
+              </div>
+              <div id="catalogQrUrlPreview" class="qr-url-box"></div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button id="copyCatalogQrLinkBtn" type="button" class="btn btn-cyan btn-sm" onclick="copyCatalogQrLink()">📋 Copy Catalog Link</button>
+                <button id="downloadCatalogQrBtn" type="button" class="btn btn-gold btn-sm" onclick="downloadCatalogQrPoster()">🖼️ Save QR Poster</button>
+                <button id="shareCatalogQrWaBtn" type="button" class="btn btn-green btn-sm" onclick="shareCatalogOnWhatsApp()">💬 Share</button>
+              </div>
+            </div>
+          </div>
         </div>
         <div id="categoryChips" class="cats"></div>
         <div id="catalogContainer" class="empty">Connecting to live store inventory...</div>
@@ -847,7 +912,7 @@ object WebPortalExporter {
             <button id="trackSearchBtn" class="btn btn-cyan" style="width:100%;" onclick="trackOrders()">🔍 Track My Orders</button>
           </div>
         </div>
-        <div id="trackResults" class="empty">Enter your phone number or Order ID above to view real-time status from Supabase.</div>
+        <div id="trackResults" class="empty">Enter your phone number or Order ID above to view real-time status &mdash; all customer data is encrypted &amp; well secured.</div>
       </div>
     </section>
 
@@ -994,6 +1059,9 @@ object WebPortalExporter {
     const installBtn = document.getElementById("installWebBtn");
     const statusNote = document.getElementById("syncStatusNote");
     const cleanApkUrl = (typeof APK_DOWNLOAD_URL === "string" ? APK_DOWNLOAD_URL.trim() : "");
+    const urlCatParam = (params.get("cat") || params.get("category") || "").trim();
+    const urlSearchParam = (params.get("q") || params.get("search") || "").trim();
+    const DEFAULT_APK_FILENAME = "Odiya_Official.apk";
 
     if (isIOS) {
       apkBtn.style.display = "none";
@@ -1002,61 +1070,97 @@ object WebPortalExporter {
       installBtn.innerText = "📱 Install on iPhone (Safari)";
     } else if (cleanApkUrl && /^https?:\/\/[^\s<>]+$/i.test(cleanApkUrl) && !cleanApkUrl.includes("<")) {
       apkBtn.href = cleanApkUrl;
-      apkBtn.setAttribute("download", "Odiya_Official.apk");
+      apkBtn.setAttribute("download", DEFAULT_APK_FILENAME);
+      apkBtn.setAttribute("rel", "noopener");
       apkBtn.style.display = "flex";
     } else {
       apkBtn.removeAttribute("href");
       apkBtn.style.display = "none";
     }
 
-    const customSchemeLink = (sbUrl && sbKey)
-      ? ("depros://connect?sb_url=" + encodeURIComponent(sbUrl) + "&sb_key=" + encodeURIComponent(sbKey))
-      : "depros://open";
+    function buildAppDeepLinks(catFilter, queryFilter) {
+      const extra = [];
+      if (sbUrl && sbKey) {
+        extra.push("sb_url=" + encodeURIComponent(sbUrl));
+        extra.push("sb_key=" + encodeURIComponent(sbKey));
+      }
+      if (catFilter && catFilter !== "All") {
+        extra.push("cat=" + encodeURIComponent(catFilter));
+      }
+      if (queryFilter) {
+        extra.push("q=" + encodeURIComponent(queryFilter));
+      }
+      const queryStr = extra.length ? ("?" + extra.join("&")) : "";
+      const pathVerb = (sbUrl && sbKey) ? "connect" : "open";
+      const customScheme = "depros://" + pathVerb + queryStr;
 
-    let webFallbackUrl = "";
-    try {
-      const fb = new URL(window.location.href);
-      fb.searchParams.delete("open_app");
-      fb.searchParams.set("web", "1");
-      webFallbackUrl = fb.toString();
-    } catch (_) {}
-    const fbSuffix = webFallbackUrl ? (";S.browser_fallback_url=" + encodeURIComponent(webFallbackUrl)) : "";
+      let webFallbackUrl = "";
+      try {
+        const fb = new URL(window.location.href);
+        fb.searchParams.delete("open_app");
+        fb.searchParams.set("web", "1");
+        if (catFilter && catFilter !== "All") fb.searchParams.set("cat", catFilter);
+        else fb.searchParams.delete("cat");
+        if (queryFilter) fb.searchParams.set("q", queryFilter);
+        else fb.searchParams.delete("q");
+        webFallbackUrl = fb.toString();
+      } catch (_) {}
+      const fbSuffix = webFallbackUrl ? (";S.browser_fallback_url=" + encodeURIComponent(webFallbackUrl)) : "";
+      const intentUri = "intent://" + pathVerb + queryStr + "#Intent;scheme=depros;package=" + ANDROID_PACKAGE + fbSuffix + ";end";
+      return { customSchemeLink: customScheme, androidIntentLink: intentUri };
+    }
 
-    const androidIntentLink = (sbUrl && sbKey)
-      ? ("intent://connect?sb_url=" + encodeURIComponent(sbUrl) + "&sb_key=" + encodeURIComponent(sbKey) + "#Intent;scheme=depros;package=" + ANDROID_PACKAGE + fbSuffix + ";end")
-      : ("intent://open#Intent;scheme=depros;package=" + ANDROID_PACKAGE + fbSuffix + ";end");
+    const initialDeepLinks = buildAppDeepLinks(urlCatParam, urlSearchParam);
+    const customSchemeLink = initialDeepLinks.customSchemeLink;
+    const androidIntentLink = initialDeepLinks.androidIntentLink;
 
     openBtn.href = (isChromeAndroid || isWebView) ? androidIntentLink : customSchemeLink;
+
+    function launchAndroidApkDownload() {
+      if (cleanApkUrl && /^https?:\/\/[^\s<>]+$/i.test(cleanApkUrl)) {
+        window.location.href = cleanApkUrl;
+      }
+    }
 
     openBtn.addEventListener("click", function(e) {
       if (isAndroid) {
         e.preventDefault();
+        const activeCat = (typeof selectedCategory !== "undefined" ? selectedCategory : urlCatParam);
+        const searchEl = document.getElementById("searchBox");
+        const activeQ = searchEl ? searchEl.value.trim() : urlSearchParam;
+        const liveLinks = buildAppDeepLinks(activeCat, activeQ);
         let leftPage = false;
         const onHide = function() { if (document.hidden) leftPage = true; };
         document.addEventListener("visibilitychange", onHide, { once: true });
         try {
-          window.location.href = (isChromeAndroid || isWebView) ? androidIntentLink : customSchemeLink;
+          window.location.href = (isChromeAndroid || isWebView) ? liveLinks.androidIntentLink : liveLinks.customSchemeLink;
         } catch (_) {}
         if (!isChromeAndroid) {
           setTimeout(function() {
             if (!leftPage && !document.hidden) {
-              try { window.location.href = customSchemeLink; } catch (_) {}
+              try { window.location.href = liveLinks.customSchemeLink; } catch (_) {}
             }
           }, 260);
         }
         setTimeout(function() {
           document.removeEventListener("visibilitychange", onHide);
           if (!leftPage && !document.hidden && statusNote) {
-            statusNote.innerHTML = "⚠️ <strong>App not opening from this browser?</strong> Tap <strong>Copy Store Sync Link</strong> above &rarr; paste inside ODIYA &rarr; <strong>Account &rarr; Link Now</strong>, or tap <strong>Download Android APK</strong>!";
+            const dlCta = cleanApkUrl
+              ? ' <button type="button" class="btn btn-gold btn-sm" style="margin-top:8px;" onclick="launchAndroidApkDownload()">⬇️ Download &amp; Install ' + escapeHtml("$safeHtmlName") + ' APK Now</button>'
+              : '';
+            statusNote.innerHTML = "📲 <strong>$safeHtmlName App not installed or blocked by browser?</strong> Tap <strong>Download Android APK</strong> above to install directly, or tap <strong>Copy Store Sync Link</strong> and paste inside App &rarr; Account &rarr; Link Now." + dlCta;
           }
-        }, 1500);
+        }, 1250);
       }
     });
 
     const stayOnWeb = params.get("web") === "1";
     const isHttpsOrigin = window.location.protocol === "https:" || window.location.protocol === "http:";
     if (stayOnWeb && isAndroid && statusNote) {
-      statusNote.innerHTML = "⬇️ <strong>Update / APK Storefront Mode:</strong> Tap <strong>Download Android APK</strong> above to install the newest ODIYA build cleanly, or tap <strong>Open $safeHtmlName App</strong> anytime.";
+      const dlCta = cleanApkUrl
+        ? ' <div style="margin-top:8px;"><button type="button" class="btn btn-gold btn-sm" onclick="launchAndroidApkDownload()">⬇️ Download &amp; Install ' + escapeHtml("$safeHtmlName") + ' APK Now</button></div>'
+        : '';
+      statusNote.innerHTML = "⬇️ <strong>Install / Update Mode:</strong> Tap <strong>Download Android APK</strong> above to download and install the latest $safeHtmlName APK, or tap <strong>Open $safeHtmlName App</strong> if already installed." + dlCta;
     }
     const wantsAutoLaunch = params.get("open_app") === "1" || params.has("sb_url") || params.get("open") === "1";
     if (isAndroid && isHttpsOrigin && !window.AndroidBridge && !stayOnWeb && wantsAutoLaunch) {
@@ -1341,8 +1445,13 @@ object WebPortalExporter {
 
     let allProducts = [];
     let allPartners = [];
-    let selectedCategory = "All";
+    let selectedCategory = urlCatParam || "All";
     let modalProduct = null;
+
+    if (urlSearchParam) {
+      const sbElInit = document.getElementById("searchBox");
+      if (sbElInit) sbElInit.value = urlSearchParam;
+    }
 
     async function loadLiveCatalog() {
       const container = document.getElementById("catalogContainer");
@@ -1379,7 +1488,7 @@ object WebPortalExporter {
         if (c && cats.indexOf(c) === -1) cats.push(c);
       });
       document.getElementById("categoryChips").innerHTML = cats.map(function(c) {
-        const active = c === selectedCategory ? "active" : "";
+        const active = c.toLowerCase() === selectedCategory.toLowerCase() ? "active" : "";
         return '<button class="cat-chip ' + active + '" onclick="selectCategory(\'' + escapeHtml(c).replace(/'/g, "\\'") + '\')">' + escapeHtml(c) + '</button>';
       }).join("");
     }
@@ -1393,8 +1502,9 @@ object WebPortalExporter {
     function renderProducts() {
       const container = document.getElementById("catalogContainer");
       const q = (document.getElementById("searchBox").value || "").trim().toLowerCase();
+      updateDynamicCatalogQr();
       const filtered = allProducts.filter(function(p) {
-        const catMatch = selectedCategory === "All" || (p.category || "").trim() === selectedCategory;
+        const catMatch = selectedCategory === "All" || (p.category || "").trim().toLowerCase() === selectedCategory.toLowerCase();
         const textMatch = !q || (p.title || "").toLowerCase().includes(q) || (p.category || "").toLowerCase().includes(q) || (p.brand || "").toLowerCase().includes(q);
         return catMatch && textMatch;
       });
@@ -2165,10 +2275,481 @@ object WebPortalExporter {
       }
     }
 
+    // =========================================================================
+    // DYNAMIC CATALOG QR CODE GENERATOR (Pure-JS ISO/IEC 18004 Versions 1..18)
+    // =========================================================================
+    const QR_GF_EXP = new Uint8Array(512);
+    const QR_GF_LOG = new Uint8Array(256);
+    (function initQrGf() {
+      let x = 1;
+      for (let i = 0; i < 255; i++) {
+        QR_GF_EXP[i] = x;
+        QR_GF_LOG[x] = i;
+        x <<= 1;
+        if (x & 0x100) x ^= 0x11d;
+      }
+      for (let i = 255; i < 512; i++) QR_GF_EXP[i] = QR_GF_EXP[i - 255];
+    })();
+
+    function qrGfMul(a, b) {
+      return (a === 0 || b === 0) ? 0 : QR_GF_EXP[QR_GF_LOG[a] + QR_GF_LOG[b]];
+    }
+
+    function qrRsRemainder(data, ecCount) {
+      let gen = [1];
+      for (let i = 0; i < ecCount; i++) {
+        const next = new Array(gen.length + 1).fill(0);
+        const factor = QR_GF_EXP[i];
+        for (let j = 0; j < gen.length; j++) {
+          next[j] ^= gen[j];
+          next[j + 1] ^= qrGfMul(gen[j], factor);
+        }
+        gen = next;
+      }
+      const rem = new Array(ecCount).fill(0);
+      for (let i = 0; i < data.length; i++) {
+        const top = data[i] ^ rem[0];
+        for (let j = 0; j < ecCount - 1; j++) {
+          rem[j] = rem[j + 1] ^ qrGfMul(gen[j + 1], top);
+        }
+        rem[ecCount - 1] = qrGfMul(gen[ecCount], top);
+      }
+      return rem;
+    }
+
+    // ECC Level L capacity & block layout [totalCW, ecPerBlk, g1Count, g1Data, g2Count, g2Data]
+    const QR_SPEC_L = [
+      null,
+      [26, 7, 1, 19, 0, 0],
+      [44, 10, 1, 34, 0, 0],
+      [70, 15, 1, 55, 0, 0],
+      [100, 20, 1, 80, 0, 0],
+      [134, 26, 1, 108, 0, 0],
+      [172, 18, 2, 68, 0, 0],
+      [196, 20, 2, 78, 0, 0],
+      [242, 24, 2, 97, 0, 0],
+      [292, 30, 2, 116, 0, 0],
+      [346, 18, 2, 68, 2, 69],
+      [404, 20, 4, 81, 0, 0],
+      [466, 24, 2, 92, 2, 93],
+      [532, 26, 4, 107, 0, 0],
+      [581, 30, 3, 115, 1, 116],
+      [655, 22, 5, 87, 1, 88],
+      [733, 24, 5, 98, 1, 99],
+      [815, 28, 1, 107, 5, 108],
+      [901, 30, 5, 120, 1, 121]
+    ];
+
+    const QR_ALIGN = [
+      [], [], [6,18], [6,22], [6,26], [6,30], [6,34], [6,22,38], [6,24,42],
+      [6,26,46], [6,28,50], [6,30,54], [6,32,58], [6,34,62], [6,26,46,66],
+      [6,26,48,70], [6,26,50,74], [6,30,54,78], [6,30,56,82]
+    ];
+
+    const QR_FORMAT_L = [
+      0x77c4, 0x72f3, 0x7daa, 0x789d, 0x662f, 0x6318, 0x6c41, 0x6976
+    ];
+
+    const QR_VER_BITS = {
+      7: 0x07c94, 8: 0x085bc, 9: 0x09a99, 10: 0x0a4d3, 11: 0x0bbf6, 12: 0x0c762,
+      13: 0x0d847, 14: 0x0e60d, 15: 0x0f928, 16: 0x10b78, 17: 0x1145d, 18: 0x12a17
+    };
+
+    function encodeUtf8Bytes(str) {
+      if (typeof TextEncoder !== "undefined") return Array.from(new TextEncoder().encode(str));
+      const enc = unescape(encodeURIComponent(str));
+      const arr = [];
+      for (let i = 0; i < enc.length; i++) arr.push(enc.charCodeAt(i) & 0xff);
+      return arr;
+    }
+
+    function generateQrMatrix(text) {
+      const bytes = encodeUtf8Bytes(String(text || ""));
+      let ver = 0;
+      for (let v = 1; v < QR_SPEC_L.length; v++) {
+        const sp = QR_SPEC_L[v];
+        const totalData = sp[2] * sp[3] + sp[4] * sp[5];
+        const headerBits = v < 10 ? 12 : 20;
+        const maxDataBytes = Math.floor((totalData * 8 - headerBits) / 8);
+        if (bytes.length <= maxDataBytes) { ver = v; break; }
+      }
+      if (!ver) return null;
+
+      const spec = QR_SPEC_L[ver];
+      const totalDataCW = spec[2] * spec[3] + spec[4] * spec[5];
+      const bits = [];
+      function pushBits(val, len) {
+        for (let i = len - 1; i >= 0; i--) bits.push((val >> i) & 1);
+      }
+      pushBits(4, 4); // Byte mode indicator
+      pushBits(bytes.length, ver < 10 ? 8 : 16);
+      for (let i = 0; i < bytes.length; i++) pushBits(bytes[i], 8);
+      for (let i = 0; i < 4 && bits.length < totalDataCW * 8; i++) bits.push(0);
+      while (bits.length % 8 !== 0) bits.push(0);
+      const dataCWs = [];
+      for (let i = 0; i < bits.length; i += 8) {
+        let b = 0;
+        for (let k = 0; k < 8; k++) b = (b << 1) | bits[i + k];
+        dataCWs.push(b);
+      }
+      let padToggle = true;
+      while (dataCWs.length < totalDataCW) {
+        dataCWs.push(padToggle ? 0xec : 0x11);
+        padToggle = !padToggle;
+      }
+
+      const dataBlocks = [];
+      const ecBlocks = [];
+      let offset = 0;
+      for (let g = 0; g < 2; g++) {
+        const blkCount = spec[2 + g * 2];
+        const blkLen = spec[3 + g * 2];
+        for (let b = 0; b < blkCount; b++) {
+          const slice = dataCWs.slice(offset, offset + blkLen);
+          offset += blkLen;
+          dataBlocks.push(slice);
+          ecBlocks.push(qrRsRemainder(slice, spec[1]));
+        }
+      }
+
+      const finalBits = [];
+      const maxBlkData = Math.max(spec[3], spec[5]);
+      for (let i = 0; i < maxBlkData; i++) {
+        for (let b = 0; b < dataBlocks.length; b++) {
+          if (i < dataBlocks[b].length) {
+            const cw = dataBlocks[b][i];
+            for (let k = 7; k >= 0; k--) finalBits.push((cw >> k) & 1);
+          }
+        }
+      }
+      for (let i = 0; i < spec[1]; i++) {
+        for (let b = 0; b < ecBlocks.length; b++) {
+          const cw = ecBlocks[b][i];
+          for (let k = 7; k >= 0; k--) finalBits.push((cw >> k) & 1);
+        }
+      }
+
+      const size = 17 + ver * 4;
+      const baseMods = Array.from({ length: size }, function() { return new Array(size).fill(-1); });
+      const isFunc = Array.from({ length: size }, function() { return new Array(size).fill(false); });
+
+      function setFunc(r, c, dark) {
+        if (r >= 0 && r < size && c >= 0 && c < size) {
+          baseMods[r][c] = dark ? 1 : 0;
+          isFunc[r][c] = true;
+        }
+      }
+
+      function drawFinder(topR, leftC) {
+        for (let dr = -1; dr <= 7; dr++) {
+          for (let dc = -1; dc <= 7; dc++) {
+            const r = topR + dr;
+            const c = leftC + dc;
+            if (r < 0 || r >= size || c < 0 || c >= size) continue;
+            const inOuter = (dr >= 0 && dr <= 6 && dc >= 0 && dc <= 6) && (dr === 0 || dr === 6 || dc === 0 || dc === 6);
+            const inInner = (dr >= 2 && dr <= 4 && dc >= 2 && dc <= 4);
+            setFunc(r, c, inOuter || inInner);
+          }
+        }
+      }
+
+      drawFinder(0, 0);
+      drawFinder(0, size - 7);
+      drawFinder(size - 7, 0);
+
+      for (let i = 8; i < size - 8; i++) {
+        setFunc(6, i, i % 2 === 0);
+        setFunc(i, 6, i % 2 === 0);
+      }
+
+      const alignPos = QR_ALIGN[ver] || [];
+      for (let i = 0; i < alignPos.length; i++) {
+        for (let j = 0; j < alignPos.length; j++) {
+          const cr = alignPos[i], cc = alignPos[j];
+          if ((cr < 9 && cc < 9) || (cr < 9 && cc > size - 9) || (cr > size - 9 && cc < 9)) continue;
+          for (let dr = -2; dr <= 2; dr++) {
+            for (let dc = -2; dc <= 2; dc++) {
+              setFunc(cr + dr, cc + dc, Math.max(Math.abs(dr), Math.abs(dc)) !== 1);
+            }
+          }
+        }
+      }
+
+      setFunc(size - 8, 8, true);
+
+      // Reserve format areas
+      for (let i = 0; i <= 8; i++) {
+        if (i !== 6) { setFunc(8, i, false); setFunc(i, 8, false); }
+      }
+      for (let i = 0; i < 8; i++) {
+        setFunc(8, size - 1 - i, false);
+        if (i < 7) setFunc(size - 1 - i, 8, false);
+      }
+
+      if (ver >= 7 && QR_VER_BITS[ver]) {
+        const vBits = QR_VER_BITS[ver];
+        for (let i = 0; i < 18; i++) {
+          const dark = ((vBits >> i) & 1) === 1;
+          const a = Math.floor(i / 3), b = i % 3;
+          setFunc(a, size - 11 + b, dark);
+          setFunc(size - 11 + b, a, dark);
+        }
+      }
+
+      // Place data bits in zig-zag
+      let bitIdx = 0;
+      let up = true;
+      for (let right = size - 1; right >= 1; right -= 2) {
+        if (right === 6) right = 5;
+        for (let step = 0; step < size; step++) {
+          const r = up ? (size - 1 - step) : step;
+          for (let dx = 0; dx < 2; dx++) {
+            const c = right - dx;
+            if (!isFunc[r][c]) {
+              baseMods[r][c] = (bitIdx < finalBits.length) ? finalBits[bitIdx++] : 0;
+            }
+          }
+        }
+        up = !up;
+      }
+
+      function applyMaskAndFormat(maskId) {
+        const g = baseMods.map(function(row) { return row.slice(); });
+        for (let r = 0; r < size; r++) {
+          for (let c = 0; c < size; c++) {
+            if (!isFunc[r][c]) {
+              let inv = false;
+              if (maskId === 0) inv = (r + c) % 2 === 0;
+              else if (maskId === 1) inv = r % 2 === 0;
+              else if (maskId === 2) inv = c % 3 === 0;
+              else if (maskId === 3) inv = (r + c) % 3 === 0;
+              else if (maskId === 4) inv = (Math.floor(r / 2) + Math.floor(c / 3)) % 2 === 0;
+              else if (maskId === 5) inv = ((r * c) % 2 + (r * c) % 3) === 0;
+              else if (maskId === 6) inv = (((r * c) % 2 + (r * c) % 3) % 2) === 0;
+              else inv = (((r + c) % 2 + (r * c) % 3) % 2) === 0;
+              if (inv) g[r][c] ^= 1;
+            }
+          }
+        }
+        const fmt = QR_FORMAT_L[maskId];
+        for (let i = 0; i < 15; i++) {
+          const b = (fmt >> i) & 1;
+          if (i < 6) g[8][i] = b;
+          else if (i < 8) g[8][i + 1] = b;
+          else g[14 - i][8] = b;
+
+          if (i < 7) g[size - 1 - i][8] = b;
+          else if (i === 7) g[8][size - 8] = b;
+          else g[8][size - 15 + i] = b;
+        }
+        return g;
+      }
+
+      function scorePenalty(g) {
+        let p = 0;
+        for (let r = 0; r < size; r++) {
+          let run = 1;
+          for (let c = 1; c < size; c++) {
+            if (g[r][c] === g[r][c - 1]) {
+              run++;
+              if (run === 5) p += 3;
+              else if (run > 5) p += 1;
+            } else run = 1;
+          }
+        }
+        for (let c = 0; c < size; c++) {
+          let run = 1;
+          for (let r = 1; r < size; r++) {
+            if (g[r][c] === g[r - 1][c]) {
+              run++;
+              if (run === 5) p += 3;
+              else if (run > 5) p += 1;
+            } else run = 1;
+          }
+        }
+        for (let r = 0; r < size - 1; r++) {
+          for (let c = 0; c < size - 1; c++) {
+            const v = g[r][c];
+            if (v === g[r][c + 1] && v === g[r + 1][c] && v === g[r + 1][c + 1]) p += 3;
+          }
+        }
+        return p;
+      }
+
+      let bestGrid = null;
+      let bestScore = Infinity;
+      for (let m = 0; m < 8; m++) {
+        const cand = applyMaskAndFormat(m);
+        const sc = scorePenalty(cand);
+        if (sc < bestScore) { bestScore = sc; bestGrid = cand; }
+      }
+      return bestGrid;
+    }
+
+    function getCurrentCatalogShareUrl() {
+      const searchInput = document.getElementById("searchBox");
+      const qVal = searchInput ? searchInput.value.trim() : "";
+      try {
+        const baseClean = window.location.protocol.startsWith("http")
+          ? (window.location.origin + window.location.pathname)
+          : "https://deprosman-1.github.io/shopping-247-app/";
+        const u = new URL(baseClean);
+        u.searchParams.set("open_app", "1");
+        if (sbUrl && sbKey) {
+          u.searchParams.set("sb_url", sbUrl);
+          u.searchParams.set("sb_key", sbKey);
+        }
+        if (selectedCategory && selectedCategory !== "All") {
+          u.searchParams.set("cat", selectedCategory);
+        }
+        if (qVal) {
+          u.searchParams.set("q", qVal);
+        }
+        return u.toString();
+      } catch (_) {
+        const parts = ["open_app=1"];
+        if (sbUrl && sbKey) {
+          parts.push("sb_url=" + encodeURIComponent(sbUrl));
+          parts.push("sb_key=" + encodeURIComponent(sbKey));
+        }
+        if (selectedCategory && selectedCategory !== "All") parts.push("cat=" + encodeURIComponent(selectedCategory));
+        if (qVal) parts.push("q=" + encodeURIComponent(qVal));
+        return "https://deprosman-1.github.io/shopping-247-app/?" + parts.join("&");
+      }
+    }
+
+    function renderQrToCanvas(canvas, content, targetPx) {
+      if (!canvas) return false;
+      const matrix = generateQrMatrix(content);
+      if (!matrix) return false;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return false;
+      const quiet = 3;
+      const totalMods = matrix.length + quiet * 2;
+      const modPx = Math.max(3, Math.floor((targetPx || 210) / totalMods));
+      const pxSize = totalMods * modPx;
+      canvas.width = pxSize;
+      canvas.height = pxSize;
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(0, 0, pxSize, pxSize);
+      ctx.fillStyle = "#052E16";
+      for (let r = 0; r < matrix.length; r++) {
+        for (let c = 0; c < matrix.length; c++) {
+          if (matrix[r][c] === 1) {
+            ctx.fillRect((c + quiet) * modPx, (r + quiet) * modPx, modPx, modPx);
+          }
+        }
+      }
+      return true;
+    }
+
+    function updateDynamicCatalogQr() {
+      const url = getCurrentCatalogShareUrl();
+      const canvas = document.getElementById("catalogQrCanvas");
+      const previewEl = document.getElementById("catalogQrUrlPreview");
+      const scopeEl = document.getElementById("catalogQrScope");
+      const searchInput = document.getElementById("searchBox");
+      const qVal = searchInput ? searchInput.value.trim() : "";
+
+      if (scopeEl) {
+        const parts = [];
+        parts.push(selectedCategory && selectedCategory !== "All" ? ("Category: " + selectedCategory) : "All Products");
+        if (qVal) parts.push("Search: \"" + qVal + "\"");
+        scopeEl.innerText = parts.join(" • ");
+      }
+      if (previewEl) previewEl.innerText = url;
+      renderQrToCanvas(canvas, url, 210);
+    }
+
+    function toggleCatalogQrCard() {
+      const card = document.getElementById("catalogQrCard");
+      const btn = document.getElementById("toggleCatalogQrBtn");
+      if (!card) return;
+      const isHidden = card.style.display === "none";
+      card.style.display = isHidden ? "block" : "none";
+      if (btn) btn.innerText = isHidden ? "📱 Hide QR" : "📱 Catalog QR";
+      if (isHidden) updateDynamicCatalogQr();
+    }
+
+    function copyCatalogQrLink() {
+      const url = getCurrentCatalogShareUrl();
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(function() {
+          showGlobalAlert("✅ Catalog storefront link copied! Ready to paste or share.", true);
+        }).catch(function() {
+          window.prompt("Copy Catalog Storefront Link:", url);
+        });
+      } else {
+        window.prompt("Copy Catalog Storefront Link:", url);
+      }
+    }
+
+    function shareCatalogOnWhatsApp() {
+      const url = getCurrentCatalogShareUrl();
+      const scope = (document.getElementById("catalogQrScope") && document.getElementById("catalogQrScope").innerText) || "Live Catalog";
+      const txt = "🛍️ Shop $safeHtmlName (" + scope + "):\n" + url;
+      window.open("https://api.whatsapp.com/send?text=" + encodeURIComponent(txt), "_blank", "noopener");
+    }
+
+    function downloadCatalogQrPoster() {
+      const url = getCurrentCatalogShareUrl();
+      const matrix = generateQrMatrix(url);
+      if (!matrix) {
+        showGlobalAlert("Could not render QR image for current link.", false);
+        return;
+      }
+      const poster = document.createElement("canvas");
+      poster.width = 760;
+      poster.height = 940;
+      const pctx = poster.getContext("2d");
+      pctx.fillStyle = "#FFFFFF";
+      pctx.fillRect(0, 0, poster.width, poster.height);
+      pctx.fillStyle = "#064E3B";
+      pctx.fillRect(24, 24, poster.width - 48, 128);
+      pctx.fillStyle = "#FFFFFF";
+      pctx.font = "bold 36px sans-serif";
+      pctx.textAlign = "center";
+      pctx.fillText("$safeHtmlName", poster.width / 2, 82);
+      const scope = (document.getElementById("catalogQrScope") && document.getElementById("catalogQrScope").innerText) || "All Products";
+      pctx.fillStyle = "#A7F3D0";
+      pctx.font = "bold 20px sans-serif";
+      pctx.fillText("Scan to Browse: " + scope, poster.width / 2, 122);
+
+      const qrTargetSide = 580;
+      const quiet = 3;
+      const modPx = Math.floor(qrTargetSide / (matrix.length + quiet * 2));
+      const drawnSide = (matrix.length + quiet * 2) * modPx;
+      const qrLeft = Math.floor((poster.width - drawnSide) / 2);
+      const qrTop = 188;
+      pctx.fillStyle = "#052E16";
+      for (let r = 0; r < matrix.length; r++) {
+        for (let c = 0; c < matrix.length; c++) {
+          if (matrix[r][c] === 1) {
+            pctx.fillRect(qrLeft + (c + quiet) * modPx, qrTop + (r + quiet) * modPx, modPx, modPx);
+          }
+        }
+      }
+      pctx.fillStyle = "#0F172A";
+      pctx.font = "bold 24px sans-serif";
+      pctx.fillText("Point Phone Camera or QR Scanner Here", poster.width / 2, 835);
+      pctx.fillStyle = "#047857";
+      pctx.font = "16px monospace";
+      pctx.fillText(url.length > 68 ? (url.slice(0, 65) + "...") : url, poster.width / 2, 875);
+
+      const link = document.createElement("a");
+      link.download = "Odiya_Catalog_QR_Poster.png";
+      link.href = poster.toDataURL("image/png");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      showGlobalAlert("🖼️ Downloaded scannable Catalog QR Poster PNG!", true);
+    }
+
     applyPermanentCustomerCredentials();
     updateWishlistBadge();
     renderWishlist();
     updateCartBadge();
+    updateDynamicCatalogQr();
     loadLiveCatalog();
     verifyPaystackCallbackIfPresent();
   </script>

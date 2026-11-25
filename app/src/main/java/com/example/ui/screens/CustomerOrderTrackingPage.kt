@@ -189,7 +189,7 @@ fun CustomerOrderTrackingContent(
             .fillMaxWidth()
             .testTag("account_order_tracking_page")
     ) {
-        // Hero Header Card showing Live Supabase 'orders' Sync Status
+        // Hero Header Card showing Live Encrypted Order Sync Status
         Surface(
             shape = RoundedCornerShape(20.dp),
             border = BorderStroke(1.2.dp, AccentGold.copy(alpha = 0.65f)),
@@ -243,7 +243,7 @@ fun CustomerOrderTrackingContent(
                                     color = AccentGold
                                 )
                                 Text(
-                                    text = "Real-time delivery milestones from Supabase",
+                                    text = "Real-time encrypted delivery milestones",
                                     fontSize = 11.5.sp,
                                     color = Color.White.copy(alpha = 0.85f)
                                 )
@@ -262,7 +262,7 @@ fun CustomerOrderTrackingContent(
                             ) {
                                 Icon(
                                     imageVector = if (liveBadge) Icons.Default.CloudDone else Icons.Default.CloudOff,
-                                    contentDescription = if (liveBadge) "Supabase Live Connected" else "Cached Status",
+                                    contentDescription = if (liveBadge) "Live Connected" else "Cached Status",
                                     tint = if (liveBadge) SuccessGreen else AccentGold,
                                     modifier = Modifier.size(13.dp)
                                 )
@@ -310,7 +310,7 @@ fun CustomerOrderTrackingContent(
                             text = if (trackingState.lastSyncedAtMillis > 0L) {
                                 "Updated ${dateFormat.format(Date(trackingState.lastSyncedAtMillis))}"
                             } else {
-                                "Tap refresh to query Supabase 'orders' table"
+                                "Tap refresh for live order delivery updates"
                             },
                             fontSize = 11.sp,
                             color = Color.White.copy(alpha = 0.78f),
@@ -481,7 +481,7 @@ fun CustomerOrderTrackingContent(
                         text = if (trackingState.hasActiveSearch) {
                             "Double-check the Order ID (e.g. ORD-1234567), payment reference, or phone number and tap Track."
                         } else {
-                            "Orders placed from your account or tracked by ID appear here with live milestones from Supabase 'orders'."
+                            "Orders placed from your account or tracked by ID appear here with live encrypted delivery milestones."
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -713,7 +713,7 @@ private fun TrackedOrderDetailCard(
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
 
             Text(
-                text = "STATUS TIMELINE (SUPABASE 'orders')",
+                text = "LIVE DELIVERY TIMELINE",
                 fontSize = 10.5.sp,
                 fontWeight = FontWeight.Black,
                 letterSpacing = 0.8.sp,

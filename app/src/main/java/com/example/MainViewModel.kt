@@ -89,6 +89,7 @@ enum class CustomerAccountDestination {
     MENU,
     WELCOME_PROFILE,
     INBOX,
+    PRE_ORDER,
     ORDER_TRACKING,
     RATINGS_AND_REVIEWS,
     VOUCHERS,
@@ -121,6 +122,32 @@ data class AdminPromoConfig(
     val title: String = "ODIYA Special Promo",
     val targetCategory: String? = null, // null indicates storewide across all categories
     val expiresAtMillis: Long = 0L
+)
+
+data class AdminLoyaltyOfferConfig(
+    val isActive: Boolean = false,
+    val title: String = "ODIYA Regular Customer Loyalty Offer",
+    val designatedCategory: String = "All", // "All" or ProductCategory.displayName
+    val minPatronages: Int = 5,
+    val windowDays: Int = 60,
+    val minRecurrentCheckoutAmount: Double = 100_000.0,
+    val rewardPerPatronage: Double = 500.0,
+    val claimableTotalReward: Double = 2_500.0
+)
+
+data class CustomerLoyaltyOfferStatus(
+    val config: AdminLoyaltyOfferConfig,
+    val qualifyingPriorOrderIds: List<String>,
+    val qualifyingPriorVisitsInWindow: Int,
+    val earnedProgressAmount: Double,
+    val remainingPatronagesToClaim: Int,
+    val currentCartEligibleForVisit: Boolean,
+    val categoryMatched: Boolean,
+    val minAmountMet: Boolean,
+    val isClaimBoxActivated: Boolean,
+    val claimableAmount: Double,
+    val statusHeadline: String,
+    val statusDetail: String
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -364,7 +391,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val latestVersionName: StateFlow<String> = _latestVersionName.asStateFlow()
 
     private val _releaseNotes = MutableStateFlow(
-        "New layout upgrades, performance boosts, and instant Supabase sync enhancements."
+        "New layout upgrades, performance boosts, and instant encrypted sync enhancements."
     )
     val releaseNotes: StateFlow<String> = _releaseNotes.asStateFlow()
 
@@ -1903,6 +1930,201 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _adminBargainConfig.value = _adminBargainConfig.value.copy(isActive = isActive)
     }
 
+    // Admin Special Offer Loyalty Program (5 patronages in 60 days >= ₦100,000 => ₦500/visit = ₦2,500 claimable on 5th checkout)
+    private fun loadAdminLoyaltyOfferConfig(): AdminLoyaltyOfferConfig {
+        val minVisits = adminPrefs.getInt("loyalty_offer_min_patronages", 5).coerceAtLeast(1)
+        val perVisit = adminPrefs.getFloat("loyalty_offer_reward_per_visit", 500.0f).toDouble().coerceAtLeast(0.0)
+        val defaultTotal = perVisit * minVisits
+        return AdminLoyaltyOfferConfig(
+            isActive = adminPrefs.getBoolean("loyalty_offer_is_active", false),
+            title = adminPrefs.getString("loyalty_offer_title", "ODIYA Regular Customer Loyalty Offer")
+                ?: "ODIYA Regular Customer Loyalty Offer",
+            designatedCategory = adminPrefs.getString("loyalty_offer_category", "All") ?: "All",
+            minPatronages = minVisits,
+            windowDays = adminPrefs.getInt("loyalty_offer_window_days", 60).coerceAtLeast(1),
+            minRecurrentCheckoutAmount = adminPrefs.getFloat("loyalty_offer_min_checkout", 100_000.0f).toDouble().coerceAtLeast(0.0),
+            rewardPerPatronage = perVisit,
+            claimableTotalReward = adminPrefs.getFloat("loyalty_offer_claimable_total", defaultTotal.toFloat()).toDouble().coerceAtLeast(0.0)
+        )
+    }
+
+    private val _adminLoyaltyOfferConfig = MutableStateFlow(loadAdminLoyaltyOfferConfig())
+    val adminLoyaltyOfferConfig: StateFlow<AdminLoyaltyOfferConfig> = _adminLoyaltyOfferConfig.asStateFlow()
+
+    private fun loadClaimedLoyaltyOfferOrderIds(): Set<String> {
+        val raw = adminPrefs.getString("loyalty_offer_claimed_order_ids_json", null) ?: return emptySet()
+        return try {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).mapNotNull { arr.optString(it).takeIf { id -> id.isNotBlank() } }.toSet()
+        } catch (_: Exception) {
+            emptySet()
+        }
+    }
+
+    private fun persistClaimedLoyaltyOfferOrderIds(ids: Set<String>) {
+        val arr = JSONArray().apply { ids.forEach { put(it) } }
+        adminPrefs.edit().putString("loyalty_offer_claimed_order_ids_json", arr.toString()).apply()
+    }
+
+    fun updateAdminLoyaltyOfferConfig(
+        isActive: Boolean,
+        title: String,
+        designatedCategory: String,
+        minPatronages: Int,
+        windowDays: Int,
+        minRecurrentCheckoutAmount: Double,
+        rewardPerPatronage: Double,
+        claimableTotalReward: Double
+    ) {
+        val safeVisits = minPatronages.coerceIn(1, 30)
+        val safeDays = windowDays.coerceIn(1, 365)
+        val safeMinCheckout = minRecurrentCheckoutAmount.coerceAtLeast(0.0)
+        val safePerVisit = rewardPerPatronage.coerceAtLeast(0.0)
+        val safeTotal = claimableTotalReward.coerceAtLeast(0.0)
+        val cleanTitle = title.trim().ifBlank { "ODIYA Regular Customer Loyalty Offer" }
+        val cleanCategory = designatedCategory.trim().ifBlank { "All" }
+
+        adminPrefs.edit()
+            .putBoolean("loyalty_offer_is_active", isActive)
+            .putString("loyalty_offer_title", cleanTitle)
+            .putString("loyalty_offer_category", cleanCategory)
+            .putInt("loyalty_offer_min_patronages", safeVisits)
+            .putInt("loyalty_offer_window_days", safeDays)
+            .putFloat("loyalty_offer_min_checkout", safeMinCheckout.toFloat())
+            .putFloat("loyalty_offer_reward_per_visit", safePerVisit.toFloat())
+            .putFloat("loyalty_offer_claimable_total", safeTotal.toFloat())
+            .apply()
+
+        _adminLoyaltyOfferConfig.value = AdminLoyaltyOfferConfig(
+            isActive = isActive,
+            title = cleanTitle,
+            designatedCategory = cleanCategory,
+            minPatronages = safeVisits,
+            windowDays = safeDays,
+            minRecurrentCheckoutAmount = safeMinCheckout,
+            rewardPerPatronage = safePerVisit,
+            claimableTotalReward = safeTotal
+        )
+    }
+
+    fun toggleAdminLoyaltyOfferActive(isActive: Boolean) {
+        adminPrefs.edit().putBoolean("loyalty_offer_is_active", isActive).apply()
+        _adminLoyaltyOfferConfig.value = _adminLoyaltyOfferConfig.value.copy(isActive = isActive)
+    }
+
+    private fun normalizePhoneTail(phone: String): String {
+        val digits = phone.filter { it.isDigit() }
+        return if (digits.length >= 10) digits.takeLast(10) else digits
+    }
+
+    private fun recordOrderCategoriesForLoyalty(orderId: String, categories: List<String>) {
+        val cleanCats = categories.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        if (orderId.isBlank() || cleanCats.isEmpty()) return
+        val existingRaw = adminPrefs.getString("loyalty_order_cats_map_json", "{}").orEmpty()
+        val obj = runCatching { org.json.JSONObject(existingRaw) }.getOrElse { org.json.JSONObject() }
+        obj.put(orderId, JSONArray().apply { cleanCats.forEach { put(it) } })
+        adminPrefs.edit().putString("loyalty_order_cats_map_json", obj.toString()).apply()
+    }
+
+    private fun orderMatchesCategoryScope(order: Order, designatedCategory: String): Boolean {
+        if (designatedCategory.equals("All", ignoreCase = true)) return true
+        val existingRaw = adminPrefs.getString("loyalty_order_cats_map_json", "").orEmpty()
+        if (existingRaw.isNotBlank()) {
+            val recordedCats = runCatching {
+                val obj = org.json.JSONObject(existingRaw)
+                val arr = obj.optJSONArray(order.orderId)
+                if (arr != null) (0 until arr.length()).map { arr.optString(it) } else emptyList()
+            }.getOrDefault(emptyList())
+            if (recordedCats.any { it.equals(designatedCategory, ignoreCase = true) }) {
+                return true
+            }
+        }
+        val summary = order.itemsSummary.lowercase()
+        if (summary.contains(designatedCategory.lowercase())) return true
+        val categoryProductTitles = allProducts.value
+            .filter { it.category.equals(designatedCategory, ignoreCase = true) }
+            .map { it.title.trim().lowercase() }
+            .filter { it.isNotBlank() }
+        return categoryProductTitles.any { summary.contains(it) }
+    }
+
+    fun evaluateCustomerLoyaltyOffer(
+        customerPhone: String,
+        customerName: String,
+        cartItems: List<CartItem>,
+        currentCheckoutSubtotalBeforeLoyalty: Double,
+        nowMillis: Long = System.currentTimeMillis()
+    ): CustomerLoyaltyOfferStatus {
+        val cfg = _adminLoyaltyOfferConfig.value
+        val phoneTail = normalizePhoneTail(customerPhone)
+        val cleanName = customerName.trim().lowercase()
+        val currentCustId = _currentCustomer.value?.id.orEmpty()
+        val windowStart = nowMillis - (cfg.windowDays.toLong() * 86_400_000L)
+        val claimedIds = loadClaimedLoyaltyOfferOrderIds()
+
+        val categoryMatched = cfg.designatedCategory.equals("All", ignoreCase = true) ||
+            cartItems.any { it.product.category.equals(cfg.designatedCategory, ignoreCase = true) }
+        val minAmountMet = currentCheckoutSubtotalBeforeLoyalty >= cfg.minRecurrentCheckoutAmount
+        val currentCartEligible = cfg.isActive && cartItems.isNotEmpty() && categoryMatched && minAmountMet
+
+        val matchingPriorOrders = allOrders.value.filter { order ->
+            if (order.status == OrderStatus.CANCELLED) return@filter false
+            if (order.orderId in claimedIds) return@filter false
+            if (order.createdAt < windowStart || order.createdAt > nowMillis) return@filter false
+            if (order.totalAmount < cfg.minRecurrentCheckoutAmount) return@filter false
+            if (!orderMatchesCategoryScope(order, cfg.designatedCategory)) return@filter false
+
+            val ordPhoneTail = normalizePhoneTail(order.customerPhone)
+            val phoneMatch = phoneTail.length >= 7 && ordPhoneTail.length >= 7 && phoneTail == ordPhoneTail
+            val idMatch = currentCustId.isNotBlank() && order.customerId == currentCustId
+            val nameMatch = cleanName.length >= 3 && order.customerName.trim().lowercase() == cleanName
+            phoneMatch || idMatch || (phoneTail.isBlank() && nameMatch)
+        }.sortedBy { it.createdAt }
+
+        val priorVisits = matchingPriorOrders.size
+        val visitsCountingCurrent = if (currentCartEligible) priorVisits + 1 else priorVisits
+        val isClaimReady = cfg.isActive && currentCartEligible && visitsCountingCurrent >= cfg.minPatronages
+        val cappedProgressVisits = visitsCountingCurrent.coerceAtMost(cfg.minPatronages)
+        val earnedProgress = (cappedProgressVisits * cfg.rewardPerPatronage).coerceAtMost(cfg.claimableTotalReward)
+        val remaining = (cfg.minPatronages - visitsCountingCurrent).coerceAtLeast(0)
+
+        val scopeLabel = if (cfg.designatedCategory.equals("All", ignoreCase = true)) "All Store Categories" else "${cfg.designatedCategory} Category"
+        val headline = when {
+            !cfg.isActive -> "Regular Customer Loyalty Offer (Paused by Admin)"
+            isClaimReady -> "🎁 REGULAR CUSTOMER OFFER ACTIVATED — Click & Claim -₦${cfg.claimableTotalReward.toInt()}!"
+            else -> "🌟 Loyalty Offer Progress: $cappedProgressVisits / ${cfg.minPatronages} Patronages ($scopeLabel)"
+        }
+        val detail = when {
+            !cfg.isActive -> "Offer currently inactive."
+            isClaimReady -> "You completed ${cfg.minPatronages} qualifying checkouts (≥ ₦${cfg.minRecurrentCheckoutAmount.toInt()} each) within ${cfg.windowDays} days! Tap 'Click & Claim' to deduct ₦${cfg.claimableTotalReward.toInt()} from your payable checkout total."
+            !categoryMatched -> "Applies to ${cfg.designatedCategory} items. Add any eligible item (≥ ₦${cfg.minRecurrentCheckoutAmount.toInt()}) to advance your ${cfg.windowDays}-day cycle."
+            !minAmountMet -> "Checkout subtotal must be at least ₦${cfg.minRecurrentCheckoutAmount.toInt()} to earn ₦${cfg.rewardPerPatronage.toInt()} toward your ₦${cfg.claimableTotalReward.toInt()} 5th-visit claim."
+            else -> "$remaining more qualifying checkout(s) of ≥ ₦${cfg.minRecurrentCheckoutAmount.toInt()} within ${cfg.windowDays} days to unlock the ₦${cfg.claimableTotalReward.toInt()} claim box."
+        }
+
+        return CustomerLoyaltyOfferStatus(
+            config = cfg,
+            qualifyingPriorOrderIds = matchingPriorOrders.map { it.orderId },
+            qualifyingPriorVisitsInWindow = priorVisits,
+            earnedProgressAmount = earnedProgress,
+            remainingPatronagesToClaim = remaining,
+            currentCartEligibleForVisit = currentCartEligible,
+            categoryMatched = categoryMatched,
+            minAmountMet = minAmountMet,
+            isClaimBoxActivated = isClaimReady,
+            claimableAmount = if (isClaimReady) cfg.claimableTotalReward else 0.0,
+            statusHeadline = headline,
+            statusDetail = detail
+        )
+    }
+
+    private fun markSpecialLoyaltyOfferClaimed(priorOrderIds: List<String>, redeemedOrderId: String) {
+        val current = loadClaimedLoyaltyOfferOrderIds().toMutableSet()
+        current.addAll(priorOrderIds)
+        current.add(redeemedOrderId)
+        persistClaimedLoyaltyOfferOrderIds(current)
+    }
+
     data class BargainEvaluationResult(
         val approvedPrice: Double,
         val approvedDiscountPercent: Double,
@@ -2308,7 +2530,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ?: profile.latestAppVersionName.ifBlank { installedName }
             val effectiveNotes = remoteManifest?.releaseNotes?.takeIf { it.isNotBlank() }
                 ?: profile.updateReleaseNotes
+            val directManifestUrl = remoteManifest?.downloadUrl?.let {
+                com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(it)
+            }.orEmpty().takeIf { com.example.util.WebPortalExporter.isDirectApkReleaseUrl(it) }
+            val profileDirectApkUrl = com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(profile.apkDownloadUrl)
+                .takeIf { com.example.util.WebPortalExporter.isDirectApkReleaseUrl(it) }
+
             val effectiveDownloadUrl = listOfNotNull(
+                directManifestUrl,
+                profileDirectApkUrl,
+                com.example.util.WebPortalExporter.DEFAULT_GITHUB_APK_RELEASE_URL,
                 remoteManifest?.downloadUrl,
                 profile.apkDownloadUrl,
                 portalUrl,
@@ -2321,13 +2552,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }.orEmpty()
 
             if (effectiveDownloadUrl.isNotBlank()) {
-                if (!com.example.util.WebPortalExporter.isDirectApkReleaseUrl(effectiveDownloadUrl) &&
+                val remoteOrPortal = com.example.util.WebPortalExporter.normalizePortalUrl(portalUrl)
+                if (remoteOrPortal.isNotBlank() &&
                     com.example.util.WebPortalExporter.getSavedCustomPortalUrl(getApplication()).isBlank()
                 ) {
-                    com.example.util.WebPortalExporter.saveCustomPortalUrl(getApplication(), effectiveDownloadUrl)
+                    com.example.util.WebPortalExporter.saveCustomPortalUrl(getApplication(), remoteOrPortal)
                 }
                 val cleanCurrentApk = com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(profile.apkDownloadUrl)
-                if (cleanCurrentApk.isBlank() || cleanCurrentApk != profile.apkDownloadUrl) {
+                if (cleanCurrentApk.isBlank() ||
+                    (!com.example.util.WebPortalExporter.isDirectApkReleaseUrl(cleanCurrentApk) &&
+                        com.example.util.WebPortalExporter.isDirectApkReleaseUrl(effectiveDownloadUrl))
+                ) {
                     updateStoreProfile(profile.copy(apkDownloadUrl = effectiveDownloadUrl))
                 }
             }
@@ -2689,6 +2924,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         couponDiscountAmount: Double = 0.0,
         loyaltyPointsRedeemed: Int = 0,
         loyaltyDiscountAmount: Double = 0.0,
+        specialLoyaltyOfferClaimed: Boolean = false,
+        specialLoyaltyPriorOrderIds: List<String> = emptyList(),
         isCreditAlertReceived: Boolean = false,
         creditVerificationStatus: CreditVerificationStatus = CreditVerificationStatus.PENDING_CREDIT,
         onSuccess: (Order) -> Unit,
@@ -2728,9 +2965,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val couponNoteSuffix = if (appliedCouponCode.isNotBlank() && safeCouponDiscount > 0.0) {
                 " [Coupon: ${appliedCouponCode.uppercase()} (-₦${safeCouponDiscount.toInt()})]"
             } else ""
-            val loyaltyNoteSuffix = if (loyaltyPointsRedeemed > 0 && safeLoyaltyDiscount > 0.0) {
-                " [Loyalty: -$loyaltyPointsRedeemed pts (-₦${safeLoyaltyDiscount.toInt()})]"
-            } else ""
+            val loyaltyNoteSuffix = when {
+                specialLoyaltyOfferClaimed && safeLoyaltyDiscount > 0.0 ->
+                    " [Regular Customer 5th-Patronage Loyalty Claim (-₦${safeLoyaltyDiscount.toInt()})]"
+                loyaltyPointsRedeemed > 0 && safeLoyaltyDiscount > 0.0 ->
+                    " [Loyalty: -$loyaltyPointsRedeemed pts (-₦${safeLoyaltyDiscount.toInt()})]"
+                else -> ""
+            }
 
             val partnerItems = items.filter { it.product.partnerId.isNotBlank() }
             val primaryPartnerId = partnerItems.firstOrNull()?.product?.partnerId ?: ""
@@ -2795,6 +3036,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     confirmed = isCreditAlertReceived,
                     status = creditVerificationStatus
                 )
+                recordOrderCategoriesForLoyalty(
+                    orderId = savedOrder.orderId,
+                    categories = items.map { it.product.category }
+                )
+                if (specialLoyaltyOfferClaimed) {
+                    markSpecialLoyaltyOfferClaimed(
+                        priorOrderIds = specialLoyaltyPriorOrderIds,
+                        redeemedOrderId = savedOrder.orderId
+                    )
+                }
                 persistDeliveryInfoLocally(
                     fullName = customerName,
                     phoneNumber = customerPhone,
@@ -2869,7 +3120,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 val syncErr = repository.lastCloudSyncError
                 if (syncErr.isNullOrBlank()) {
-                    _cloudStatusMessage.value = "✅ Order ${savedOrder.orderId} & receipt synced to Supabase Cloud!"
+                    _cloudStatusMessage.value = "✅ Order ${savedOrder.orderId} & receipt synced cleanly to Secured Store Cloud!"
                 } else {
                     _cloudStatusMessage.value = "⚠️ Order ${savedOrder.orderId} saved locally, queued for reconnect ($syncErr)"
                     if (!isOnline.value) {
@@ -2910,6 +3161,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         couponDiscountAmount: Double = 0.0,
         loyaltyPointsRedeemed: Int = 0,
         loyaltyDiscountAmount: Double = 0.0,
+        specialLoyaltyOfferClaimed: Boolean = false,
+        specialLoyaltyPriorOrderIds: List<String> = emptyList(),
         onSuccess: (Order) -> Unit,
         onFailure: (String) -> Unit
     ) {
@@ -2940,6 +3193,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             couponDiscountAmount = couponDiscountAmount,
             loyaltyPointsRedeemed = loyaltyPointsRedeemed,
             loyaltyDiscountAmount = loyaltyDiscountAmount,
+            specialLoyaltyOfferClaimed = specialLoyaltyOfferClaimed,
+            specialLoyaltyPriorOrderIds = specialLoyaltyPriorOrderIds,
             isCreditAlertReceived = effectiveConfirmed,
             creditVerificationStatus = effectiveStatus,
             onSuccess = onSuccess,
@@ -3051,6 +3306,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         couponDiscountAmount: Double = 0.0,
         loyaltyPointsRedeemed: Int = 0,
         loyaltyDiscountAmount: Double = 0.0,
+        specialLoyaltyOfferClaimed: Boolean = false,
+        specialLoyaltyPriorOrderIds: List<String> = emptyList(),
         onReadyToOpenUrl: (authorizationUrl: String, order: Order, reference: String) -> Unit,
         onFailure: (String) -> Unit
     ) {
@@ -3105,6 +3362,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             couponDiscountAmount = couponDiscountAmount,
             loyaltyPointsRedeemed = loyaltyPointsRedeemed,
             loyaltyDiscountAmount = loyaltyDiscountAmount,
+            specialLoyaltyOfferClaimed = specialLoyaltyOfferClaimed,
+            specialLoyaltyPriorOrderIds = specialLoyaltyPriorOrderIds,
             isCreditAlertReceived = false,
             creditVerificationStatus = CreditVerificationStatus.PENDING_CREDIT,
             onSuccess = { createdOrder ->
@@ -3878,6 +4137,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val sep = if (baseWithRootSlash.contains("?")) "&" else "?"
             "${baseWithRootSlash}${sep}open_app=1&sb_url=$encUrl&sb_key=$encKey"
         }
+    }
+
+    fun buildCatalogShareLink(
+        baseShareUrl: String? = null,
+        category: String? = _selectedCategory.value,
+        query: String = _searchQuery.value
+    ): String {
+        val savedPortal = getSavedCustomPortalUrl()
+        val resolvedBase = baseShareUrl
+            ?.let { com.example.util.WebPortalExporter.normalizePortalUrl(it) }
+            ?.takeIf { it.isNotBlank() }
+            ?: savedPortal.ifBlank { com.example.util.WebPortalExporter.DEFAULT_LIVE_PORTAL_URL }
+        val baseWithSync = buildCustomerSyncLink(resolvedBase) ?: run {
+            val clean = if (!resolvedBase.contains("?") && resolvedBase.count { it == '/' } == 2) "$resolvedBase/" else resolvedBase
+            val sep = if (clean.contains("?")) "&" else "?"
+            "${clean}${sep}open_app=1"
+        }
+        val extraParams = buildList {
+            val cat = category?.trim().takeIf { !it.isNullOrBlank() && !it.equals("All", ignoreCase = true) }
+            if (cat != null) {
+                add("cat=${java.net.URLEncoder.encode(cat, "UTF-8")}")
+            }
+            val q = query.trim().takeIf { it.isNotBlank() }
+            if (q != null) {
+                add("q=${java.net.URLEncoder.encode(q, "UTF-8")}")
+            }
+        }
+        return if (extraParams.isEmpty()) baseWithSync else "$baseWithSync&${extraParams.joinToString("&")}"
     }
 
     fun handleIncomingSharedReceipt(

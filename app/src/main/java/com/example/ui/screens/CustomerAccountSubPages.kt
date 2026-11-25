@@ -63,6 +63,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import com.example.ui.components.CustomerPreOrdersList
+import com.example.ui.components.PreOrderRequestCard
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -306,7 +308,7 @@ fun WelcomeCustomerOnlyPage(
                 title = { Text("Delete Account & Data?", fontWeight = FontWeight.Black) },
                 text = {
                     Text(
-                        "This permanently removes your customer profile, saved delivery details, and wishlist from this device and synced Supabase Cloud storage. Active paid order tax/audit receipts remain archived if legally required.",
+                        "This permanently removes your customer profile, saved delivery details, and wishlist from this device and encrypted cloud storage. All customer data collected is well secured.",
                         style = MaterialTheme.typography.bodySmall
                     )
                 },
@@ -1091,5 +1093,39 @@ fun FollowStorePage(
             Spacer(modifier = Modifier.width(8.dp))
             Text("Share ODIYA QR & Invite", fontWeight = FontWeight.Bold)
         }
+    }
+}
+
+@Composable
+fun CustomerPreOrderPage(viewModel: MainViewModel) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("account_pre_order_page")
+    ) {
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+            border = BorderStroke(1.dp, CyberCyan.copy(alpha = 0.45f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "🛍️ Custom Pre-Order & Special Brand Requests",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Black,
+                    color = CyberCyan
+                )
+                Text(
+                    text = "Submit custom item requests, preferred sizes, or upcoming releases and monitor Admin replies here. All details you submit are encrypted and well secured.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        CustomerPreOrdersList(viewModel = viewModel)
+        PreOrderRequestCard(viewModel = viewModel)
     }
 }

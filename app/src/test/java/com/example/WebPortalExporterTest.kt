@@ -86,6 +86,17 @@ class WebPortalExporterTest {
         org.junit.Assert.assertTrue(html.contains("odiya_web_wishlist"))
         org.junit.Assert.assertTrue(html.contains("toggleWishlistProduct"))
         org.junit.Assert.assertTrue(html.contains("Add to Wishlist"))
+        org.junit.Assert.assertTrue(html.contains("id=\"catalogQrCard\""))
+        org.junit.Assert.assertTrue(html.contains("id=\"catalogQrCanvas\""))
+        org.junit.Assert.assertTrue(html.contains("function generateQrMatrix(text)"))
+        org.junit.Assert.assertTrue(html.contains("function updateDynamicCatalogQr()"))
+        org.junit.Assert.assertTrue(html.contains("function buildAppDeepLinks(catFilter, queryFilter)"))
+        org.junit.Assert.assertTrue(html.contains("function launchAndroidApkDownload()"))
+        org.junit.Assert.assertTrue(html.contains("urlCatParam"))
+        org.junit.Assert.assertTrue(html.contains("urlSearchParam"))
+        org.junit.Assert.assertTrue(html.contains("encrypted &amp; well secured"))
+        val htmlBodyOnly = html.substringBefore("<script>")
+        org.junit.Assert.assertFalse(htmlBodyOnly.contains("Supabase", ignoreCase = true))
     }
 
     @Test
