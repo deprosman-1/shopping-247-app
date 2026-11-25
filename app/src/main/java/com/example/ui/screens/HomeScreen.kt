@@ -610,70 +610,22 @@ fun HomeScreen(
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = (if (hasCredentials) SuccessGreen else AccentGold).copy(alpha = 0.16f),
-                        border = BorderStroke(
-                            0.8.dp,
-                            (if (hasCredentials) SuccessGreen else AccentGold).copy(alpha = 0.55f)
-                        )
-                    ) {
-                        Text(
-                            text = if (currentCustomer != null) "ACTIVE" else if (hasCredentials) "SAVED" else "SIGN IN",
-                            fontSize = 9.5.sp,
-                            fontWeight = FontWeight.Black,
-                            color = if (hasCredentials) SuccessGreen else AccentGold,
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
-                        )
-                    }
-                }
-            }
-
-            // Offline Mode & Queued Sync Status Strip
-            if (!isOnline || offlineQueue.isNotEmpty()) {
-                Surface(
-                    onClick = {
-                        if (isOnline && offlineQueue.isNotEmpty()) {
-                            viewModel.triggerOfflineQueueSync { count ->
-                                Toast.makeText(context, "Synced $count queued action(s)!", Toast.LENGTH_SHORT).show()
-                            }
-                        } else {
-                            Toast.makeText(context, "Offline mode active — actions are queued safely and sync automatically on reconnect.", Toast.LENGTH_LONG).show()
-                        }
-                    },
-                    shape = RoundedCornerShape(10.dp),
-                    color = if (!isOnline) Color(0xFFB45309).copy(alpha = 0.16f) else CyberCyan.copy(alpha = 0.14f),
-                    border = BorderStroke(1.dp, if (!isOnline) AccentGold else CyberCyan),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 2.dp)
-                        .testTag("home_offline_status_banner")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                            Icon(
-                                imageVector = if (!isOnline) Icons.Default.CloudOff else Icons.Default.Sync,
-                                contentDescription = "Connectivity status",
-                                tint = if (!isOnline) AccentGold else CyberCyan,
-                                modifier = Modifier.size(16.dp)
+                    if (currentCustomer == null && !hasCredentials) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = AccentGold.copy(alpha = 0.16f),
+                            border = BorderStroke(
+                                0.8.dp,
+                                AccentGold.copy(alpha = 0.55f)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
+                        ) {
                             Text(
-                                text = if (!isOnline) {
-                                    "Offline Mode (${offlineQueue.size} queued) — Will sync when reconnected"
-                                } else {
-                                    "${offlineQueue.size} queued action(s) ready — Tap to sync now"
-                                },
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (!isOnline) AccentGold else CyberCyan,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                text = "SIGN IN",
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Black,
+                                color = AccentGold,
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
                             )
                         }
                     }

@@ -391,32 +391,35 @@ fun PreOrderRequestCard(
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            val isAdminViewing by viewModel.isAdminUnlocked.collectAsState()
+            if (isAdminViewing || currentCustomer?.isAdmin == true) {
+                Spacer(modifier = Modifier.height(10.dp))
 
-            val syncBadgeTint = when {
-                isOnline && isSupabaseConnected -> SuccessGreen
-                else -> AccentGold
-            }
-            val syncBadgeText = when {
-                isOnline && isSupabaseConnected -> "☁️ Cloud Sync Live — delivers directly to Admin Control Room"
-                !isOnline -> "📴 Offline — saves on device & auto-delivers to Admin once back online"
-                else -> "⚠️ Store Cloud not linked on this phone yet — saves & queues until linked"
-            }
-            Surface(
-                shape = RoundedCornerShape(10.dp),
-                color = syncBadgeTint.copy(alpha = 0.12f),
-                border = BorderStroke(1.dp, syncBadgeTint.copy(alpha = 0.35f)),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("preorder_cloud_status_badge")
-            ) {
-                Text(
-                    text = syncBadgeText,
-                    fontSize = 10.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = syncBadgeTint,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
-                )
+                val syncBadgeTint = when {
+                    isOnline && isSupabaseConnected -> SuccessGreen
+                    else -> AccentGold
+                }
+                val syncBadgeText = when {
+                    isOnline && isSupabaseConnected -> "☁️ Cloud Sync Live — delivers directly to Admin Control Room"
+                    !isOnline -> "📴 Offline — saves on device & auto-delivers to Admin once back online"
+                    else -> "⚠️ Store Cloud not linked on this phone yet — saves & queues until linked"
+                }
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = syncBadgeTint.copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, syncBadgeTint.copy(alpha = 0.35f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("preorder_cloud_status_badge")
+                ) {
+                    Text(
+                        text = syncBadgeText,
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = syncBadgeTint,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(10.dp))

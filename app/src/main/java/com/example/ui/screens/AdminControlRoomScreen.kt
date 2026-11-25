@@ -241,6 +241,10 @@ fun AdminControlRoomScreen(
     val supportTickets by viewModel.supportTickets.collectAsState()
     val cloudStatusMsg by viewModel.cloudStatusMessage.collectAsState()
     val isWideDualAxisMode by viewModel.isWideDualAxisMode.collectAsState()
+    val onlineCustomers by viewModel.onlineCustomers.collectAsState()
+    val latestCustomerOnlineNotice by viewModel.latestCustomerOnlineNotice.collectAsState()
+    val isAdminNetOnline by viewModel.isOnline.collectAsState()
+    val offlineQueue by viewModel.offlineQueue.collectAsState()
 
     var selectedCustomerFile by remember { mutableStateOf<Customer?>(null) }
 
@@ -369,6 +373,134 @@ fun AdminControlRoomScreen(
                 }
             }
 
+            // Admin-Only Live Customer Online Notice & Sync Monitor (Hidden from Customer View)
+            Surface(
+                color = if (onlineCustomers.isNotEmpty()) Color(0xFF052E16) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(
+                    1.dp,
+                    if (onlineCustomers.isNotEmpty()) SuccessGreen.copy(alpha = 0.7f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 2.dp)
+                    .testTag("admin_customer_online_notice_card")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(9.dp)
+                                    .clip(CircleShape)
+                                    .background(if (onlineCustomers.isNotEmpty()) SuccessGreen else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f))
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (onlineCustomers.isNotEmpty()) {
+                                    "${onlineCustomers.size} Customer(s) Online Now"
+                                } else {
+                                    "Customer Presence Monitor • 0 Online"
+                                },
+                                fontWeight = FontWeight.Black,
+                                fontSize = 11.sp,
+                                color = if (onlineCustomers.isNotEmpty()) SuccessGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.refreshOnlineCustomersNow()
+                                    selectedTab = 1
+                                    viewModel.selectAdminTab(1)
+                                },
+                                shape = RoundedCornerShape(6.dp),
+                                border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.65f)),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier.height(26.dp).testTag("admin_view_online_customers_btn")
+                            ) {
+                                Text(
+                                    text = "VIEW",
+                                    fontSize = 9.5.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = if (onlineCustomers.isNotEmpty()) SuccessGreen else MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
+
+                    if (!latestCustomerOnlineNotice.isNullOrBlank()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(SuccessGreen.copy(alpha = 0.14f))
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = latestCustomerOnlineNotice!!,
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(
+                                onClick = { viewModel.dismissCustomerOnlineNotice() },
+                                modifier = Modifier.size(22.dp)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Dismiss online notice", tint = Color.White, modifier = Modifier.size(14.dp))
+                            }
+                        }
+                    }
+
+                    if (!isAdminNetOnline || offlineQueue.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(AccentGold.copy(alpha = 0.14f))
+                                .clickable {
+                                    if (isAdminNetOnline && offlineQueue.isNotEmpty()) {
+                                        viewModel.triggerOfflineQueueSync { count ->
+                                            Toast.makeText(context, "Synced $count queued action(s)!", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (!isAdminNetOnline) {
+                                    "Offline Mode (${offlineQueue.size} queued) — Will auto-sync on reconnect"
+                                } else {
+                                    "${offlineQueue.size} queued action(s) ready — Tap to sync now"
+                                },
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = AccentGold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+
             // Tabs Bar
             ScrollableTabRow(
                 selectedTabIndex = selectedTab,
@@ -384,7 +516,15 @@ fun AdminControlRoomScreen(
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1; viewModel.selectAdminTab(1) },
-                    text = { Text("Customer Order Files (${customers.size})") },
+                    text = {
+                        Text(
+                            if (onlineCustomers.isNotEmpty()) {
+                                "Customer Order Files (${customers.size}) • 🟢 ${onlineCustomers.size} Online"
+                            } else {
+                                "Customer Order Files (${customers.size})"
+                            }
+                        )
+                    },
                     icon = { Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
                 Tab(
@@ -661,6 +801,23 @@ private fun CustomerFileModal(
                                         color = AccentGold,
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     )
+                                }
+                                val modalOnlinePresence = viewModel.findCustomerOnlinePresence(customer)
+                                if (modalOnlinePresence != null) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = SuccessGreen.copy(alpha = 0.2f),
+                                        border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.65f))
+                                    ) {
+                                        Text(
+                                            text = "🟢 ONLINE",
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = SuccessGreen,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
                                 }
                             }
                             Text(
@@ -4187,16 +4344,17 @@ private fun CustomerIdentityTab(
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     val cloudStatus by viewModel.cloudStatusMessage.collectAsState()
     val preOrders by viewModel.preOrderRequests.collectAsState()
+    val onlineCustomers by viewModel.onlineCustomers.collectAsState()
     val nairaFormat = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "NG")).apply {
             maximumFractionDigits = 0
         }
     }
     val dateTimeFormat = remember { SimpleDateFormat("dd MMM yyyy 'at' hh:mm a", Locale.getDefault()) }
-    val nowMillis = remember(customers.size) { System.currentTimeMillis() }
+    val nowMillis = remember(customers.size, onlineCustomers.size) { System.currentTimeMillis() }
 
     var searchQuery by remember { mutableStateOf("") }
-    var filterType by remember { mutableStateOf("ALL") } // ALL, RECENT, ACTIVE, DELIVERED, NO_ORDERS, PREORDERS
+    var filterType by remember { mutableStateOf("ALL") } // ALL, ONLINE, RECENT, ACTIVE, DELIVERED, NO_ORDERS, PREORDERS
 
     val unmatchedPreOrdersCount = remember(preOrders, customers) {
         preOrders.count { req -> customers.none { cust -> matchesCustomerPreOrder(req, cust) } }
@@ -4206,6 +4364,7 @@ private fun CustomerIdentityTab(
         val custOrders = orders.filter { matchesCustomerFolder(it, cust) }
         val custPreOrders = preOrders.filter { matchesCustomerPreOrder(it, cust) }
         val isRecentSignUp = cust.createdAt > 0L && (nowMillis - cust.createdAt) < 172_800_000L
+        val custOnlinePresence = viewModel.findCustomerOnlinePresence(cust, nowMillis)
 
         val matchesSearch = searchQuery.isBlank() ||
                 cust.fullName.contains(searchQuery, ignoreCase = true) ||
@@ -4221,6 +4380,7 @@ private fun CustomerIdentityTab(
                 }
 
         val matchesFilter = when (filterType) {
+            "ONLINE" -> custOnlinePresence != null
             "RECENT" -> isRecentSignUp || custOrders.isEmpty()
             "ACTIVE" -> custOrders.any {
                 it.status == OrderStatus.PENDING_VERIFICATION ||
@@ -4379,6 +4539,92 @@ private fun CustomerIdentityTab(
             )
         }
 
+        // Admin-Only Live Online Customers Card (shows all online customers & visitors)
+        if (onlineCustomers.isNotEmpty()) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF052E16)),
+                    border = BorderStroke(1.2.dp, SuccessGreen.copy(alpha = 0.7f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("admin_live_online_customers_list_card")
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "🟢 Live Online Customers (${onlineCustomers.size})",
+                                color = SuccessGreen,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 14.sp
+                            )
+                            Text(
+                                text = "Admin Only",
+                                color = AccentGold,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.5.sp
+                            )
+                        }
+                        onlineCustomers.forEach { presence ->
+                            val matchedCust = customers.firstOrNull { cust ->
+                                viewModel.findCustomerOnlinePresence(cust, nowMillis)?.sessionId == presence.sessionId
+                            }
+                            Surface(
+                                onClick = { matchedCust?.let { onCustomerClick(it) } },
+                                shape = RoundedCornerShape(10.dp),
+                                color = Color(0xFF064E3B),
+                                border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.45f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = presence.customerName,
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 12.5.sp
+                                        )
+                                        Text(
+                                            text = listOfNotNull(
+                                                presence.customerPhone.takeIf { it.isNotBlank() },
+                                                "Screen: ${presence.currentScreen}"
+                                            ).joinToString(" • "),
+                                            color = CyberCyan,
+                                            fontSize = 10.5.sp
+                                        )
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = SuccessGreen.copy(alpha = 0.22f)
+                                    ) {
+                                        val secAgo = ((nowMillis - presence.lastSeenAt).coerceAtLeast(0L) / 1000L)
+                                        Text(
+                                            text = if (secAgo < 15L) "ONLINE NOW" else "ONLINE (${secAgo}s)",
+                                            color = SuccessGreen,
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 9.5.sp,
+                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Filter Pills
         item {
             Row(
@@ -4391,6 +4637,15 @@ private fun CustomerIdentityTab(
                     selected = filterType == "ALL",
                     onClick = { filterType = "ALL" },
                     label = { Text("All Folders (${customers.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                )
+                FilterChip(
+                    selected = filterType == "ONLINE",
+                    onClick = { filterType = "ONLINE" },
+                    label = {
+                        val onlineCount = customers.count { viewModel.isCustomerOnline(it, nowMillis) }
+                        Text("🟢 Online Now ($onlineCount)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    },
+                    modifier = Modifier.testTag("admin_filter_online_customers")
                 )
                 FilterChip(
                     selected = filterType == "PREORDERS",
@@ -4505,6 +4760,23 @@ private fun CustomerIdentityTab(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(bottom = 4.dp)
                     ) {
+                        val folderPresence = viewModel.findCustomerOnlinePresence(customer, nowMillis)
+                        if (folderPresence != null) {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = SuccessGreen.copy(alpha = 0.22f),
+                                border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.65f)),
+                                modifier = Modifier.testTag("customer_online_badge_${customer.id}")
+                            ) {
+                                Text(
+                                    text = "🟢 ONLINE • ${folderPresence.currentScreen}",
+                                    color = SuccessGreen,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Black,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
                         if (isNewSignUp && !isLegacyDemo) {
                             Surface(
                                 shape = RoundedCornerShape(6.dp),

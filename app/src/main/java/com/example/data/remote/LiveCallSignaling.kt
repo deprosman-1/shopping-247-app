@@ -88,6 +88,16 @@ data class LiveCallSignalEvent(
     val payload: JSONObject
 )
 
+data class CustomerOnlinePresence(
+    val sessionId: String,
+    val customerId: String = "",
+    val customerName: String = "Customer",
+    val customerPhone: String = "",
+    val currentScreen: String = "HOME",
+    val isOnline: Boolean = true,
+    val lastSeenAt: Long = System.currentTimeMillis()
+)
+
 data class LiveCallLobbySnapshot(
     val adminOnline: Boolean = false,
     val updatedAt: Long = 0L,
@@ -371,6 +381,119 @@ class LiveCallSignalingClient(
             }
         }
         null
+    }
+
+    suspend fun fetchOnlineCustomersPresence(
+        supabaseUrl: String,
+        anonKey: String,
+        ttlMillis: Long = 90_000L
+    ): List<CustomerOnlinePresence> = withContext(Dispatchers.IO) {
+        val baseUrl = cleanUrlFn(supabaseUrl)
+        val cleanKey = anonKey.trim()
+        if (baseUrl.isBlank() || cleanKey.isBlank()) return@withContext emptyList()
+        val ts = System.currentTimeMillis()
+        for (bucket in listOf("product-media", "shop-receipts")) {
+            try {
+                val req = Request.Builder()
+                    .url("$baseUrl/storage/v1/object/public/$bucket/system/online_customers_presence.json?t=$ts")
+                    .header("apikey", cleanKey)
+                    .get()
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val raw = resp.body?.string()?.trim().orEmpty()
+                        if (raw.startsWith("{")) {
+                            val obj = JSONObject(raw)
+                            val arr = obj.optJSONArray("customers") ?: JSONArray()
+                            val list = mutableListOf<CustomerOnlinePresence>()
+                            for (i in 0 until arr.length()) {
+                                val item = arr.optJSONObject(i) ?: continue
+                                val lastSeen = item.optLong("lastSeenAt", 0L)
+                                val isOnlineFlag = item.optBoolean("isOnline", true)
+                                val sessId = item.optString("sessionId").trim()
+                                if (isOnlineFlag && sessId.isNotBlank() && ts - lastSeen <= ttlMillis) {
+                                    list.add(
+                                        CustomerOnlinePresence(
+                                            sessionId = sessId,
+                                            customerId = item.optString("customerId", ""),
+                                            customerName = item.optString("customerName", "Customer"),
+                                            customerPhone = item.optString("customerPhone", ""),
+                                            currentScreen = item.optString("currentScreen", "HOME"),
+                                            isOnline = true,
+                                            lastSeenAt = lastSeen
+                                        )
+                                    )
+                                }
+                            }
+                            return@withContext list.sortedByDescending { it.lastSeenAt }
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+        emptyList()
+    }
+
+    suspend fun publishCustomerPresenceSnapshot(
+        supabaseUrl: String,
+        anonKey: String,
+        presence: CustomerOnlinePresence,
+        ttlMillis: Long = 90_000L
+    ) = withContext(Dispatchers.IO) {
+        val baseUrl = cleanUrlFn(supabaseUrl)
+        val cleanKey = anonKey.trim()
+        if (baseUrl.isBlank() || cleanKey.isBlank()) return@withContext
+        val now = System.currentTimeMillis()
+        val existing = try {
+            fetchOnlineCustomersPresence(baseUrl, cleanKey, ttlMillis)
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val merged = buildList {
+            existing.filterNot { it.sessionId == presence.sessionId }.forEach {
+                if (it.isOnline && now - it.lastSeenAt <= ttlMillis) add(it)
+            }
+            if (presence.isOnline) {
+                add(presence.copy(lastSeenAt = now))
+            }
+        }.sortedByDescending { it.lastSeenAt }.take(100)
+
+        val json = JSONObject().apply {
+            put("updatedAt", now)
+            put("customers", JSONArray().apply {
+                merged.forEach { c ->
+                    put(JSONObject().apply {
+                        put("sessionId", c.sessionId)
+                        put("customerId", c.customerId)
+                        put("customerName", c.customerName)
+                        put("customerPhone", c.customerPhone)
+                        put("currentScreen", c.currentScreen)
+                        put("isOnline", c.isOnline)
+                        put("lastSeenAt", c.lastSeenAt)
+                    })
+                }
+            })
+        }.toString()
+
+        val bytes = json.toByteArray(Charsets.UTF_8)
+        val mediaType = "application/json".toMediaType()
+        for (bucket in listOf("product-media", "shop-receipts")) {
+            try {
+                val req = Request.Builder()
+                    .url("$baseUrl/storage/v1/object/$bucket/system/online_customers_presence.json")
+                    .header("apikey", cleanKey)
+                    .header("Authorization", "Bearer $cleanKey")
+                    .header("Content-Type", "application/json")
+                    .header("x-upsert", "true")
+                    .post(bytes.toRequestBody(mediaType))
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful || resp.code in 200..201) return@withContext
+                }
+            } catch (_: Exception) {
+            }
+        }
     }
 
     fun disconnect() {

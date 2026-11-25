@@ -199,7 +199,7 @@ fun LiveCallScreen(
                             text = if (isCallInProgress) {
                                 "${callState.phase.label} • ${formatCallDuration(callState.elapsedSeconds)}"
                             } else {
-                                if (callState.isRealtimeConnected) "Live Cloud Ready" else "Store Interactive Desk"
+                                if (showAdminControl && callState.isRealtimeConnected) "Live Cloud Ready" else "Store Interactive Desk"
                             },
                             fontSize = 11.sp,
                             color = AccentGold
@@ -294,8 +294,8 @@ fun LiveCallScreen(
                         modifier = Modifier.widthIn(max = 600.dp).fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        // Store Cloud Status Notice
-                        if (!isSupabaseConnected) {
+                        // Store Cloud Status Notice (Admin only)
+                        if (showAdminControl && !isSupabaseConnected) {
                             Surface(
                                 shape = RoundedCornerShape(14.dp),
                                 color = Color(0xFF78350F).copy(alpha = 0.45f),

@@ -249,32 +249,6 @@ fun CustomerOrderTrackingContent(
                                 )
                             }
                         }
-
-                        val liveBadge = trackingState.isLiveSynced || isSupabaseConnected
-                        Surface(
-                            shape = RoundedCornerShape(50),
-                            color = (if (liveBadge) SuccessGreen else AccentGold).copy(alpha = 0.18f),
-                            border = BorderStroke(1.dp, (if (liveBadge) SuccessGreen else AccentGold).copy(alpha = 0.6f))
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (liveBadge) Icons.Default.CloudDone else Icons.Default.CloudOff,
-                                    contentDescription = if (liveBadge) "Live Connected" else "Cached Status",
-                                    tint = if (liveBadge) SuccessGreen else AccentGold,
-                                    modifier = Modifier.size(13.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = if (liveBadge) "LIVE" else "CACHE",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Black,
-                                    color = if (liveBadge) SuccessGreen else AccentGold
-                                )
-                            }
-                        }
                     }
 
                     Row(

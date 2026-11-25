@@ -585,7 +585,7 @@ fun DeprosApp(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            if (!isOnline && currentScreen != AppScreen.HOME) {
+            if (showAdminControl && currentScreen == AppScreen.ADMIN_CONTROL_ROOM && !isOnline) {
                 Surface(
                     color = Color(0xFF78350F),
                     border = androidx.compose.foundation.BorderStroke(1.dp, AccentGold.copy(alpha = 0.7f)),
@@ -610,7 +610,7 @@ fun DeprosApp(
                             text = if (offlineQueue.isNotEmpty()) {
                                 "No Internet Connection • ${offlineQueue.size} action(s) queued to auto-sync"
                             } else {
-                                "No Internet Connection • Browsing cached store data"
+                                "No Internet Connection • Admin offline mode"
                             },
                             color = Color.White,
                             fontSize = 11.5.sp,

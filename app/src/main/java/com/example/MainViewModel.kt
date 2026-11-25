@@ -40,6 +40,7 @@ import com.example.data.model.StoreProfileConfig
 import com.example.data.model.SupabaseConfig
 import com.example.data.model.SupportTicket
 import com.example.data.model.SupportTicketStatus
+import com.example.data.remote.CustomerOnlinePresence
 import com.example.data.remote.LiveCallMessage
 import com.example.data.remote.LiveCallMode
 import com.example.data.remote.LiveCallPhase
@@ -2210,6 +2211,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val offlineConnectivityManager = OfflineConnectivityManager(application) {
         viewModelScope.launch {
             flushOfflineQueue()
+            reportCustomerOnlineHeartbeat(isOnlineNow = true)
         }
     }
     val isOnline: StateFlow<Boolean> = offlineConnectivityManager.isOnline
@@ -2608,6 +2610,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_currentScreen.value != screen) {
             screenStack.add(_currentScreen.value)
             _currentScreen.value = screen
+            if (screen != AppScreen.ADMIN_CONTROL_ROOM && !(screen == AppScreen.AUTH && _currentCustomer.value == null)) {
+                reportCustomerOnlineHeartbeat(screenName = screen.name)
+            }
         }
     }
 
@@ -2623,11 +2628,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun navigateBack(): Boolean {
         if (screenStack.isNotEmpty()) {
-            _currentScreen.value = screenStack.removeAt(screenStack.size - 1)
+            val dest = screenStack.removeAt(screenStack.size - 1)
+            _currentScreen.value = dest
+            if (dest != AppScreen.ADMIN_CONTROL_ROOM) {
+                reportCustomerOnlineHeartbeat(screenName = dest.name)
+            }
             return true
         }
         if (_currentScreen.value != AppScreen.HOME) {
             _currentScreen.value = AppScreen.HOME
+            reportCustomerOnlineHeartbeat(screenName = AppScreen.HOME.name)
             return true
         }
         return false
@@ -2636,6 +2646,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun navigateToHome() {
         screenStack.clear()
         _currentScreen.value = AppScreen.HOME
+        reportCustomerOnlineHeartbeat(screenName = AppScreen.HOME.name)
     }
 
     fun selectCategory(category: String?) {
@@ -3747,6 +3758,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                     voiceManager.speakCustomerSignIn(customer.fullName)
+                    reportCustomerOnlineHeartbeat(isOnlineNow = true, explicitCustomer = customer)
                     onSuccess()
                 },
                 onFailure = { error ->
@@ -3772,6 +3784,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         _cloudStatusMessage.value = "⚠️ Account saved on this phone only ($syncErr)"
                     }
                     voiceManager.speakCustomerSignIn(customer.fullName)
+                    reportCustomerOnlineHeartbeat(isOnlineNow = true, explicitCustomer = customer)
                     onSuccess()
                 },
                 onFailure = { error ->
@@ -3782,6 +3795,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun signOut() {
+        val prevCust = _currentCustomer.value
         adminPrefs.edit()
             .remove("logged_in_customer_id")
             .putBoolean("is_admin_device_authorized", false)
@@ -3790,6 +3804,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _isAdminUnlocked.value = false
         _isAdminDeviceAuthorized.value = false
         _wishlistIds.value = emptySet()
+        reportCustomerOnlineHeartbeat(isOnlineNow = false, explicitCustomer = prevCust)
         navigateTo(AppScreen.AUTH)
     }
 
@@ -6472,10 +6487,148 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _inboundWebRtcSignal = MutableStateFlow<String?>(null)
     val inboundWebRtcSignal: StateFlow<String?> = _inboundWebRtcSignal.asStateFlow()
 
+    // Admin-only live customer online visibility & Admin Control Room notices
+    private val _onlineCustomers = MutableStateFlow<List<CustomerOnlinePresence>>(emptyList())
+    val onlineCustomers: StateFlow<List<CustomerOnlinePresence>> = _onlineCustomers.asStateFlow()
+
+    private val _latestCustomerOnlineNotice = MutableStateFlow<String?>(null)
+    val latestCustomerOnlineNotice: StateFlow<String?> = _latestCustomerOnlineNotice.asStateFlow()
+
     private var liveCallObserverStarted = false
     private var liveCallTimerJob: kotlinx.coroutines.Job? = null
     private var liveLobbyPollJob: kotlinx.coroutines.Job? = null
     private var lastAlertedRoomId: String = ""
+    private var presencePollCycleCount: Int = 0
+
+    fun dismissCustomerOnlineNotice() {
+        _latestCustomerOnlineNotice.value = null
+    }
+
+    fun refreshOnlineCustomersNow() {
+        if (!isKnownAdminDevice() && !_isAdminUnlocked.value) return
+        val cfg = repository.supabaseSync.getConfig()
+        if (cfg.url.isBlank() || cfg.anonKey.isBlank() || repository.supabaseSync.isPlaceholderConfig(cfg.url, cfg.anonKey)) {
+            return
+        }
+        viewModelScope.launch {
+            val remoteList = liveCallClient.fetchOnlineCustomersPresence(cfg.url, cfg.anonKey)
+            mergeAdminOnlineCustomers(remoteList)
+        }
+    }
+
+    fun findCustomerOnlinePresence(
+        customer: Customer,
+        nowMillis: Long = System.currentTimeMillis()
+    ): CustomerOnlinePresence? {
+        val custDigits = customer.phoneNumber.filter { it.isDigit() }
+        return _onlineCustomers.value.firstOrNull { p ->
+            if (!p.isOnline || nowMillis - p.lastSeenAt > 90_000L) return@firstOrNull false
+            if (p.customerId.isNotBlank() && p.customerId == customer.id) return@firstOrNull true
+            val pDigits = p.customerPhone.filter { it.isDigit() }
+            if (custDigits.length >= 7 && pDigits.length >= 7) {
+                val len = minOf(10, minOf(custDigits.length, pDigits.length))
+                if (custDigits.takeLast(len) == pDigits.takeLast(len)) return@firstOrNull true
+            }
+            customer.fullName.isNotBlank() &&
+                p.customerName.isNotBlank() &&
+                p.customerName.equals(customer.fullName, ignoreCase = true)
+        }
+    }
+
+    fun isCustomerOnline(customer: Customer, nowMillis: Long = System.currentTimeMillis()): Boolean {
+        return findCustomerOnlinePresence(customer, nowMillis) != null
+    }
+
+    fun reportCustomerOnlineHeartbeat(
+        isOnlineNow: Boolean = isOnline.value,
+        screenName: String = _currentScreen.value.name,
+        explicitCustomer: Customer? = _currentCustomer.value
+    ) {
+        if (_isAdminUnlocked.value || explicitCustomer?.isAdmin == true) return
+        val resolvedName = explicitCustomer?.fullName?.takeIf { it.isNotBlank() }
+            ?: _savedDeliveryInfo.value.fullName.takeIf { it.isNotBlank() }
+            ?: "Guest Shopper"
+        val resolvedPhone = explicitCustomer?.phoneNumber?.takeIf { it.isNotBlank() }
+            ?: _savedDeliveryInfo.value.phoneNumber.trim()
+        val resolvedId = explicitCustomer?.id?.takeIf { it.isNotBlank() } ?: deviceCallSenderId
+        val now = System.currentTimeMillis()
+
+        val presence = CustomerOnlinePresence(
+            sessionId = deviceCallSenderId,
+            customerId = resolvedId,
+            customerName = resolvedName,
+            customerPhone = resolvedPhone,
+            currentScreen = screenName,
+            isOnline = isOnlineNow,
+            lastSeenAt = now
+        )
+
+        if (isOnlineNow) {
+            mergeAdminOnlineCustomers(listOf(presence), announceNew = false)
+        } else {
+            _onlineCustomers.value = _onlineCustomers.value.filterNot { it.sessionId == deviceCallSenderId }
+        }
+
+        val curCfg = repository.supabaseSync.getConfig()
+        if (curCfg.url.isNotBlank() && curCfg.anonKey.isNotBlank() &&
+            !repository.supabaseSync.isPlaceholderConfig(curCfg.url, curCfg.anonKey)
+        ) {
+            val payload = JSONObject().apply {
+                put("sessionId", presence.sessionId)
+                put("customerId", presence.customerId)
+                put("customerName", presence.customerName)
+                put("customerPhone", presence.customerPhone)
+                put("currentScreen", presence.currentScreen)
+                put("isOnline", presence.isOnline)
+                put("lastSeenAt", presence.lastSeenAt)
+            }
+            liveCallClient.sendSignal("CUSTOMER_PRESENCE", "lobby", payload)
+            viewModelScope.launch {
+                liveCallClient.publishCustomerPresenceSnapshot(
+                    supabaseUrl = curCfg.url,
+                    anonKey = curCfg.anonKey,
+                    presence = presence
+                )
+            }
+        }
+    }
+
+    private fun mergeAdminOnlineCustomers(
+        incoming: List<CustomerOnlinePresence>,
+        announceNew: Boolean = true
+    ) {
+        val now = System.currentTimeMillis()
+        val previousActiveIds = _onlineCustomers.value
+            .filter { it.isOnline && now - it.lastSeenAt <= 90_000L }
+            .map { it.sessionId }
+            .toSet()
+
+        val bySession = linkedMapOf<String, CustomerOnlinePresence>()
+        _onlineCustomers.value.forEach { existing ->
+            if (existing.isOnline && now - existing.lastSeenAt <= 90_000L) {
+                bySession[existing.sessionId] = existing
+            }
+        }
+        incoming.forEach { item ->
+            if (!item.isOnline) {
+                bySession.remove(item.sessionId)
+            } else if (now - item.lastSeenAt <= 90_000L) {
+                bySession[item.sessionId] = item
+            }
+        }
+        val merged = bySession.values.sortedByDescending { it.lastSeenAt }
+        _onlineCustomers.value = merged
+
+        if (announceNew && (isKnownAdminDevice() || _isAdminUnlocked.value)) {
+            val newlyOnline = merged.firstOrNull { it.sessionId !in previousActiveIds && it.sessionId != deviceCallSenderId }
+                ?: merged.firstOrNull { it.sessionId !in previousActiveIds }
+            if (newlyOnline != null) {
+                val phonePart = if (newlyOnline.customerPhone.isNotBlank()) " (${newlyOnline.customerPhone})" else ""
+                _latestCustomerOnlineNotice.value =
+                    "🟢 ${newlyOnline.customerName}$phonePart is online now • ${newlyOnline.currentScreen}"
+            }
+        }
+    }
 
     private fun startLiveCallSignalingIfConfigured() {
         val cfg = repository.supabaseSync.getConfig()
@@ -6531,6 +6684,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 requests = _liveCallState.value.incomingRequests
                             )
                         }
+                        presencePollCycleCount++
+                        if (isAdminDevice || isKnownAdminDevice()) {
+                            val remoteOnline = liveCallClient.fetchOnlineCustomersPresence(curCfg.url, curCfg.anonKey)
+                            mergeAdminOnlineCustomers(remoteOnline, announceNew = true)
+                        } else if (isOnline.value && presencePollCycleCount % 3 == 1) {
+                            reportCustomerOnlineHeartbeat(isOnlineNow = true)
+                        }
                     }
                     delay(5_000L)
                 }
@@ -6542,6 +6702,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val state = _liveCallState.value
         val isAdminDevice = _isAdminUnlocked.value || (_currentCustomer.value?.isAdmin == true)
         when (ev.type) {
+            "CUSTOMER_PRESENCE" -> {
+                if (isAdminDevice || isKnownAdminDevice()) {
+                    val sessId = ev.payload.optString("sessionId", ev.senderId).trim()
+                    if (sessId.isNotBlank()) {
+                        val presence = CustomerOnlinePresence(
+                            sessionId = sessId,
+                            customerId = ev.payload.optString("customerId", ""),
+                            customerName = ev.payload.optString("customerName", "Customer"),
+                            customerPhone = ev.payload.optString("customerPhone", ""),
+                            currentScreen = ev.payload.optString("currentScreen", "HOME"),
+                            isOnline = ev.payload.optBoolean("isOnline", true),
+                            lastSeenAt = ev.payload.optLong("lastSeenAt", System.currentTimeMillis())
+                        )
+                        mergeAdminOnlineCustomers(listOf(presence), announceNew = true)
+                    }
+                }
+            }
             "RING" -> {
                 val callerName = ev.payload.optString("callerName", "Customer")
                 val callerEmail = ev.payload.optString("callerEmail", "")
