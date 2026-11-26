@@ -40,6 +40,15 @@ object PdfInvoiceExporter {
         }
     }
 
+    fun buildPdfDocumentBytes(
+        order: Order,
+        storeProfile: StoreProfileConfig
+    ): ByteArray {
+        val buffer = java.io.ByteArrayOutputStream()
+        writeInvoicePdf(buffer, order, storeProfile)
+        return buffer.toByteArray()
+    }
+
     private fun writeFallbackPlainPdf14(
         outputStream: OutputStream,
         order: Order,

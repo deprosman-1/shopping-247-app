@@ -2117,12 +2117,38 @@ private fun CustomerFileModal(
                                             }
                                         }
                                         if (customerForwardedReceipts.isNotEmpty()) {
-                                            Text("Forwarded Receipt Exports:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CyberCyan)
+                                            Text("Forwarded Receipt Exports (Synced to Supabase):", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CyberCyan)
                                             customerForwardedReceipts.forEach { log ->
-                                                Text(
-                                                    text = "• ${log.format} Receipt (${log.orderId}) via ${log.portalTitle} — ${nairaFormat.format(log.amount)} (${shortDateTimeFormat.format(Date(log.forwardedAt))})",
-                                                    fontSize = 11.sp
-                                                )
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(
+                                                        text = "• ${log.format} Receipt (${log.orderId}) via ${log.portalTitle} — ${nairaFormat.format(log.amount)} (${shortDateTimeFormat.format(Date(log.forwardedAt))})",
+                                                        fontSize = 11.sp,
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                    if (log.cloudDocumentUrl.isNotBlank()) {
+                                                        Spacer(modifier = Modifier.width(6.dp))
+                                                        OutlinedButton(
+                                                            onClick = {
+                                                                try {
+                                                                    val openIntent = Intent(Intent.ACTION_VIEW, Uri.parse(log.cloudDocumentUrl)).apply {
+                                                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                                    }
+                                                                    context.startActivity(openIntent)
+                                                                } catch (_: Exception) {
+                                                                    Toast.makeText(context, "Could not open cloud document URL", Toast.LENGTH_SHORT).show()
+                                                                }
+                                                            },
+                                                            modifier = Modifier.height(32.dp),
+                                                            contentPadding = PaddingValues(horizontal = 8.dp)
+                                                        ) {
+                                                            Text("Cloud ${log.format}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }

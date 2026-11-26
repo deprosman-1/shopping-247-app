@@ -15,6 +15,7 @@ import com.example.data.model.Customer
 import com.example.data.model.CustomerDeliveryInfo
 import com.example.data.model.DeliveryOption
 import com.example.data.model.DeliveryZoneOption
+import com.example.data.model.ForwardedReceiptLog
 import com.example.data.model.HostingPeriodUnit
 import com.example.data.model.LoyaltyAccount
 import com.example.data.model.OfflineActionType
@@ -72,6 +73,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
+import java.util.Locale
 import java.util.UUID
 
 enum class AppScreen {
@@ -100,18 +103,7 @@ enum class CustomerAccountDestination {
     FOLLOW_STORE
 }
 
-data class ForwardedReceiptLog(
-    val id: String = UUID.randomUUID().toString().take(8).uppercase(),
-    val orderId: String,
-    val customerId: String = "",
-    val customerName: String = "",
-    val customerPhone: String = "",
-    val portalTitle: String = "",
-    val format: String = "PDF",
-    val amount: Double = 0.0,
-    val accountLabel: String = "",
-    val forwardedAt: Long = System.currentTimeMillis()
-)
+typealias ForwardedReceiptLog = com.example.data.model.ForwardedReceiptLog
 
 data class CustomerChatHistoryEntry(
     val id: String = UUID.randomUUID().toString().take(8),
@@ -1351,49 +1343,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             },
             paystackCallbackUrl = adminPrefs.getString("store_paystack_callback_url", "depros://paystack-callback")
                 ?.ifBlank { "depros://paystack-callback" } ?: "depros://paystack-callback",
-            paystackEdgeFunctionBaseUrl = adminPrefs.getString("store_paystack_edge_url", "") ?: ""
+            paystackEdgeFunctionBaseUrl = adminPrefs.getString("store_paystack_edge_url", "") ?: "",
+            updatedAt = adminPrefs.getLong("store_profile_updated_at", 0L)
         )
     )
     val storeProfile: StateFlow<StoreProfileConfig> = _storeProfile.asStateFlow()
 
-    fun updateStoreProfile(config: StoreProfileConfig) {
-        val cleanPaystackPublic = com.example.util.AppDefenseManager.sanitizeTextInput(config.paystackPublicKey, 120)
-        val cleanPaystackCallback = config.paystackCallbackUrl.trim().ifBlank { "depros://paystack-callback" }
-        val cleanPaystackEdgeUrl = config.paystackEdgeFunctionBaseUrl.trim().trimEnd('/')
+    private val storeProfileSyncMutex = kotlinx.coroutines.sync.Mutex()
+    private val forwardedReceiptsSyncMutex = kotlinx.coroutines.sync.Mutex()
+
+    private fun persistStoreProfileLocally(clean: StoreProfileConfig, pendingPush: Boolean?) {
         com.example.util.EncryptedKeystoreVault.putSecret(
             getApplication(),
             "paystack_public_key",
-            cleanPaystackPublic
+            clean.paystackPublicKey
         )
-        val clean = config.copy(
-            storeName = config.storeName.trim().ifBlank { "ODIYA" },
-            tagline = config.tagline.trim().ifBlank { "Shopping with ease and comfort" },
-            phoneNumber = config.phoneNumber.trim(),
-            secondaryPhoneNumber = config.secondaryPhoneNumber.trim(),
-            whatsappNumber = config.whatsappNumber.trim(),
-            supportEmail = config.supportEmail.trim(),
-            storeAddress = config.storeAddress.trim(),
-            opayAccountNumber = config.opayAccountNumber.trim(),
-            opayAccountName = config.opayAccountName.trim().ifBlank { "ODIYA" },
-            moniepointAccountNumber = config.moniepointAccountNumber.trim(),
-            moniepointAccountName = config.moniepointAccountName.trim().ifBlank { "ODIYA" },
-            palmpayAccountNumber = config.palmpayAccountNumber.trim(),
-            palmpayAccountName = config.palmpayAccountName.trim().ifBlank { "ODIYA" },
-            posTerminalId = config.posTerminalId.trim(),
-            posTerminalName = config.posTerminalName.trim(),
-            extraBankName = config.extraBankName.trim(),
-            extraBankAccountNumber = config.extraBankAccountNumber.trim(),
-            extraBankAccountName = config.extraBankAccountName.trim(),
-            apkDownloadUrl = com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(config.apkDownloadUrl),
-            latestAppVersionCode = config.latestAppVersionCode.coerceAtLeast(1),
-            latestAppVersionName = config.latestAppVersionName.trim().ifBlank { "1.0" },
-            updateReleaseNotes = config.updateReleaseNotes.trim(),
-            maintenanceMessage = config.maintenanceMessage.trim(),
-            paystackPublicKey = cleanPaystackPublic,
-            paystackCallbackUrl = cleanPaystackCallback,
-            paystackEdgeFunctionBaseUrl = cleanPaystackEdgeUrl
-        )
-        adminPrefs.edit()
+        val editor = adminPrefs.edit()
             .putString("store_name", clean.storeName)
             .putString("store_tagline", clean.tagline)
             .putString("store_phone", clean.phoneNumber)
@@ -1421,8 +1386,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .putLong("store_maintenance_started_at", clean.maintenanceStartedAt)
             .putString("store_paystack_callback_url", clean.paystackCallbackUrl)
             .putString("store_paystack_edge_url", clean.paystackEdgeFunctionBaseUrl)
+            .putLong("store_profile_updated_at", clean.updatedAt)
             .remove("store_paystack_public_key")
-            .apply()
+        if (pendingPush != null) {
+            editor.putBoolean("store_profile_pending_push", pendingPush)
+        }
+        editor.apply()
         _storeProfile.value = clean
         _latestVersionName.value = clean.latestAppVersionName
         _releaseNotes.value = clean.updateReleaseNotes
@@ -1432,6 +1401,77 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             com.example.util.WebPortalExporter.getSavedCustomPortalUrl(getApplication()).isBlank()
         ) {
             com.example.util.WebPortalExporter.saveCustomPortalUrl(getApplication(), clean.apkDownloadUrl)
+        }
+    }
+
+    fun updateStoreProfile(config: StoreProfileConfig, syncToCloud: Boolean = true) {
+        val cleanPaystackPublic = com.example.util.AppDefenseManager.sanitizeTextInput(config.paystackPublicKey, 120)
+        val cleanPaystackCallback = config.paystackCallbackUrl.trim().ifBlank { "depros://paystack-callback" }
+        val cleanPaystackEdgeUrl = config.paystackEdgeFunctionBaseUrl.trim().trimEnd('/')
+        val effectiveUpdatedAt = if (syncToCloud) {
+            System.currentTimeMillis()
+        } else {
+            config.updatedAt.takeIf { it > 0L } ?: _storeProfile.value.updatedAt
+        }
+        val clean = config.copy(
+            storeName = config.storeName.trim().ifBlank { "ODIYA" },
+            tagline = config.tagline.trim().ifBlank { "Shopping with ease and comfort" },
+            phoneNumber = config.phoneNumber.trim(),
+            secondaryPhoneNumber = config.secondaryPhoneNumber.trim(),
+            whatsappNumber = config.whatsappNumber.trim(),
+            supportEmail = config.supportEmail.trim(),
+            storeAddress = config.storeAddress.trim(),
+            opayAccountNumber = config.opayAccountNumber.trim(),
+            opayAccountName = config.opayAccountName.trim().ifBlank { "ODIYA" },
+            moniepointAccountNumber = config.moniepointAccountNumber.trim(),
+            moniepointAccountName = config.moniepointAccountName.trim().ifBlank { "ODIYA" },
+            palmpayAccountNumber = config.palmpayAccountNumber.trim(),
+            palmpayAccountName = config.palmpayAccountName.trim().ifBlank { "ODIYA" },
+            posTerminalId = config.posTerminalId.trim(),
+            posTerminalName = config.posTerminalName.trim(),
+            extraBankName = config.extraBankName.trim(),
+            extraBankAccountNumber = config.extraBankAccountNumber.trim(),
+            extraBankAccountName = config.extraBankAccountName.trim(),
+            apkDownloadUrl = com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(config.apkDownloadUrl),
+            latestAppVersionCode = config.latestAppVersionCode.coerceAtLeast(1),
+            latestAppVersionName = config.latestAppVersionName.trim().ifBlank { "1.0" },
+            updateReleaseNotes = config.updateReleaseNotes.trim(),
+            maintenanceMessage = config.maintenanceMessage.trim(),
+            paystackPublicKey = cleanPaystackPublic,
+            paystackCallbackUrl = cleanPaystackCallback,
+            paystackEdgeFunctionBaseUrl = cleanPaystackEdgeUrl,
+            updatedAt = effectiveUpdatedAt
+        )
+        persistStoreProfileLocally(clean, pendingPush = if (syncToCloud) true else null)
+        if (syncToCloud && !repository.supabaseSync.isPlaceholderConfig()) {
+            viewModelScope.launch {
+                syncStoreProfileWithCloudInternal(preferLocal = true)
+            }
+        }
+    }
+
+    private suspend fun syncStoreProfileWithCloudInternal(preferLocal: Boolean = false): Result<StoreProfileConfig> {
+        if (repository.supabaseSync.isPlaceholderConfig()) {
+            return Result.success(_storeProfile.value)
+        }
+        return storeProfileSyncMutex.withLock {
+            val pendingPush = adminPrefs.getBoolean("store_profile_pending_push", false)
+            val res = repository.supabaseSync.syncStoreProfileWithCloud(
+                localProfile = _storeProfile.value,
+                preferLocal = preferLocal || pendingPush
+            )
+            res.onSuccess { synced ->
+                val clean = synced.copy(
+                    storeName = synced.storeName.trim().ifBlank { "ODIYA" },
+                    tagline = synced.tagline.trim().ifBlank { "Shopping with ease and comfort" },
+                    opayAccountName = synced.opayAccountName.trim().ifBlank { "ODIYA" },
+                    moniepointAccountName = synced.moniepointAccountName.trim().ifBlank { "ODIYA" },
+                    palmpayAccountName = synced.palmpayAccountName.trim().ifBlank { "ODIYA" },
+                    paystackCallbackUrl = synced.paystackCallbackUrl.trim().ifBlank { "depros://paystack-callback" }
+                )
+                persistStoreProfileLocally(clean, pendingPush = false)
+            }
+            res
         }
     }
 
@@ -2330,6 +2370,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         persistOfflineQueue(remaining)
                     }
                     syncPartnerLedgerWithCloudInternal()
+                    syncStoreProfileWithCloudInternal()
+                    syncForwardedReceiptsWithCloudInternal()
                     runAutomatic30DayHostingBilling()
                     hasCompletedInitialCloudPull = true
                     if (syncRes.isSuccess) {
@@ -2427,6 +2469,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             persistOfflineQueue(remaining)
                         }
                         syncPartnerLedgerWithCloudInternal()
+                        syncStoreProfileWithCloudInternal()
+                        syncForwardedReceiptsWithCloudInternal()
                         runAutomatic30DayHostingBilling()
                         if (syncRes.isSuccess) {
                             val summary = syncRes.getOrThrow()
@@ -2478,6 +2522,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 persistOfflineQueue(remaining)
             }
             syncPartnerLedgerWithCloudInternal()
+            syncStoreProfileWithCloudInternal()
+            syncForwardedReceiptsWithCloudInternal()
             runAutomatic30DayHostingBilling()
             _isRefreshing.value = false
             _lastSyncTimestamp.value = System.currentTimeMillis()
@@ -2517,6 +2563,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 persistOfflineQueue(remaining)
             }
             syncPartnerLedgerWithCloudInternal()
+            syncStoreProfileWithCloudInternal()
+            syncForwardedReceiptsWithCloudInternal()
             runAutomatic30DayHostingBilling()
             _isSupabaseBusy.value = false
             _isRefreshing.value = false
@@ -2593,7 +2641,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     (!com.example.util.WebPortalExporter.isDirectApkReleaseUrl(cleanCurrentApk) &&
                         com.example.util.WebPortalExporter.isDirectApkReleaseUrl(effectiveDownloadUrl))
                 ) {
-                    updateStoreProfile(profile.copy(apkDownloadUrl = effectiveDownloadUrl))
+                    updateStoreProfile(profile.copy(apkDownloadUrl = effectiveDownloadUrl), syncToCloud = false)
                 }
             }
 
@@ -4938,7 +4986,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val ordId = obj.optString("orderId").trim()
                 if (ordId.isBlank()) return@mapNotNull null
                 ForwardedReceiptLog(
-                    id = obj.optString("id", UUID.randomUUID().toString().take(8)),
+                    id = obj.optString("id", UUID.randomUUID().toString().take(8).uppercase()),
                     orderId = ordId,
                     customerId = obj.optString("customerId", ""),
                     customerName = obj.optString("customerName", ""),
@@ -4947,6 +4995,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     format = obj.optString("format", "PDF"),
                     amount = obj.optDouble("amount", 0.0),
                     accountLabel = obj.optString("accountLabel", ""),
+                    paymentReference = obj.optString("paymentReference", ""),
+                    cloudDocumentUrl = obj.optString("cloudDocumentUrl", ""),
                     forwardedAt = obj.optLong("forwardedAt", System.currentTimeMillis())
                 )
             }
@@ -4968,6 +5018,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 put("format", r.format)
                 put("amount", r.amount)
                 put("accountLabel", r.accountLabel)
+                put("paymentReference", r.paymentReference)
+                put("cloudDocumentUrl", r.cloudDocumentUrl)
                 put("forwardedAt", r.forwardedAt)
             })
         }
@@ -4977,21 +5029,117 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _forwardedReceipts = MutableStateFlow(loadForwardedReceipts())
     val forwardedReceipts: StateFlow<List<ForwardedReceiptLog>> = _forwardedReceipts.asStateFlow()
 
+    private fun generateReceiptDocumentBytes(
+        order: Order,
+        format: String,
+        profile: StoreProfileConfig
+    ): ByteArray {
+        val cleanFormat = format.trim().uppercase(Locale.US)
+        return if (cleanFormat == "WORD" || cleanFormat == "DOC") {
+            com.example.util.WordInvoiceExporter.buildWordDocumentBytes(order, profile)
+        } else {
+            com.example.util.PdfInvoiceExporter.buildPdfDocumentBytes(order, profile)
+        }
+    }
+
     fun recordForwardedReceiptToOdiya(order: Order, format: String) {
+        val cleanFormat = format.trim().uppercase(Locale.US)
         val entry = ForwardedReceiptLog(
             orderId = order.orderId,
             customerId = order.customerId,
             customerName = order.customerName,
             customerPhone = order.customerPhone,
             portalTitle = order.paymentMethod.title,
-            format = format.uppercase(),
+            format = cleanFormat,
             amount = order.totalAmount,
             accountLabel = order.paymentAccount,
+            paymentReference = order.paymentReference,
+            cloudDocumentUrl = "",
             forwardedAt = System.currentTimeMillis()
         )
         val updated = listOf(entry) + _forwardedReceipts.value
         _forwardedReceipts.value = updated
         persistForwardedReceipts(updated)
+
+        if (!repository.supabaseSync.isPlaceholderConfig()) {
+            viewModelScope.launch {
+                try {
+                    val docBytes = withContext(Dispatchers.IO) {
+                        generateReceiptDocumentBytes(order, cleanFormat, _storeProfile.value)
+                    }
+                    val uploadRes = repository.supabaseSync.uploadForwardedReceiptDocument(
+                        orderId = order.orderId,
+                        format = cleanFormat,
+                        documentBytes = docBytes,
+                        timestamp = entry.forwardedAt
+                    )
+                    val docUrl = uploadRes.getOrNull().orEmpty()
+                    if (docUrl.isNotBlank()) {
+                        val withUrl = _forwardedReceipts.value.map { item ->
+                            if (item.id == entry.id) item.copy(cloudDocumentUrl = docUrl) else item
+                        }
+                        _forwardedReceipts.value = withUrl
+                        persistForwardedReceipts(withUrl)
+                    }
+                    syncForwardedReceiptsWithCloudInternal(preferLocalIds = setOf(entry.id))
+                } catch (_: Exception) {
+                }
+            }
+        }
+    }
+
+    private suspend fun syncForwardedReceiptsWithCloudInternal(
+        preferLocalIds: Set<String> = emptySet()
+    ): Result<List<ForwardedReceiptLog>> {
+        if (repository.supabaseSync.isPlaceholderConfig()) {
+            return Result.success(_forwardedReceipts.value)
+        }
+        return forwardedReceiptsSyncMutex.withLock {
+            // Backfill cloud upload for any offline-created forwarded receipt missing its cloudDocumentUrl
+            val currentList = _forwardedReceipts.value
+            val missingUrlLogs = currentList.filter { it.cloudDocumentUrl.isBlank() }
+            if (missingUrlLogs.isNotEmpty()) {
+                val knownOrders = allOrders.value.associateBy { it.orderId }
+                val profileSnapshot = _storeProfile.value
+                var mutated = false
+                val updatedBackfill = currentList.map { log ->
+                    if (log.cloudDocumentUrl.isNotBlank()) return@map log
+                    val matchedOrder = knownOrders[log.orderId] ?: return@map log
+                    val docBytes = runCatching {
+                        withContext(Dispatchers.IO) {
+                            generateReceiptDocumentBytes(matchedOrder, log.format, profileSnapshot)
+                        }
+                    }.getOrNull() ?: return@map log
+                    val uploadedUrl = repository.supabaseSync.uploadForwardedReceiptDocument(
+                        orderId = log.orderId,
+                        format = log.format,
+                        documentBytes = docBytes,
+                        timestamp = log.forwardedAt
+                    ).getOrNull().orEmpty()
+                    if (uploadedUrl.isNotBlank()) {
+                        mutated = true
+                        log.copy(
+                            cloudDocumentUrl = uploadedUrl,
+                            paymentReference = log.paymentReference.ifBlank { matchedOrder.paymentReference }
+                        )
+                    } else log
+                }
+                if (mutated) {
+                    _forwardedReceipts.value = updatedBackfill
+                    persistForwardedReceipts(updatedBackfill)
+                }
+            }
+
+            val res = repository.supabaseSync.syncForwardedReceiptsWithCloud(
+                localList = _forwardedReceipts.value,
+                preferLocalIds = preferLocalIds
+            )
+            res.onSuccess { merged ->
+                _forwardedReceipts.value = merged
+                persistForwardedReceipts(merged)
+            }
+            res
+        }
     }
 
     private fun loadCustomerChatHistory(): List<CustomerChatHistoryEntry> {
@@ -7324,7 +7472,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         isMaintenanceMode = enabled,
                         maintenanceMessage = msg,
                         maintenanceStartedAt = if (enabled) ev.payload.optLong("timestamp", System.currentTimeMillis()) else 0L
-                    )
+                    ),
+                    syncToCloud = false
                 )
                 ShopNotificationHelper.notifyAppMaintenance(
                     context = getApplication(),

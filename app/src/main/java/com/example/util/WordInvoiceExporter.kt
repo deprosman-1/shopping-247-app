@@ -101,13 +101,19 @@ object WordInvoiceExporter {
         """.trimIndent()
     }
 
+    fun buildWordDocumentBytes(
+        order: Order,
+        storeProfile: StoreProfileConfig
+    ): ByteArray {
+        return buildWordHtmlContent(order, storeProfile).toByteArray(Charsets.UTF_8)
+    }
+
     private fun writeInvoiceWord(
         outputStream: OutputStream,
         order: Order,
         storeProfile: StoreProfileConfig
     ) {
-        val htmlDoc = buildWordHtmlContent(order, storeProfile)
-        outputStream.write(htmlDoc.toByteArray(Charsets.UTF_8))
+        outputStream.write(buildWordDocumentBytes(order, storeProfile))
     }
 
     fun generateAndGetUri(

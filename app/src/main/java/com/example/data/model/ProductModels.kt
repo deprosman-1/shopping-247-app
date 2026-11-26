@@ -382,7 +382,23 @@ data class StoreProfileConfig(
     val maintenanceStartedAt: Long = 0L,
     val paystackPublicKey: String = "",
     val paystackCallbackUrl: String = "depros://paystack-callback",
-    val paystackEdgeFunctionBaseUrl: String = ""
+    val paystackEdgeFunctionBaseUrl: String = "",
+    val updatedAt: Long = 0L
+)
+
+data class ForwardedReceiptLog(
+    val id: String = java.util.UUID.randomUUID().toString().take(8).uppercase(),
+    val orderId: String,
+    val customerId: String = "",
+    val customerName: String = "",
+    val customerPhone: String = "",
+    val portalTitle: String = "",
+    val format: String = "PDF",
+    val amount: Double = 0.0,
+    val accountLabel: String = "",
+    val paymentReference: String = "",
+    val cloudDocumentUrl: String = "",
+    val forwardedAt: Long = System.currentTimeMillis()
 )
 
 data class AppUpdateManifest(

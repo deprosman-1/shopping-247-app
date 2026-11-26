@@ -3,6 +3,7 @@ package com.example.data.remote
 import android.util.Log
 import com.example.data.model.AppUpdateManifest
 import com.example.data.model.Customer
+import com.example.data.model.ForwardedReceiptLog
 import com.example.data.model.HostingPeriodUnit
 import com.example.data.model.Order
 import com.example.data.model.PartnerAgreementStatus
@@ -15,6 +16,7 @@ import com.example.data.model.PreOrderRequest
 import com.example.data.model.PreOrderStatus
 import com.example.data.model.Product
 import com.example.data.model.ProductColor
+import com.example.data.model.StoreProfileConfig
 import com.example.data.model.SupabaseConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -921,7 +923,8 @@ class SupabaseSyncService(
     suspend fun uploadReceiptToSupabaseStorage(
         fileName: String,
         fileBytes: ByteArray,
-        bucketId: String = "shop-receipts"
+        bucketId: String = "shop-receipts",
+        mimeType: String = "image/jpeg"
     ): Result<String> = withContext(Dispatchers.IO) {
         val validationErr = validateCredentialsBeforeRequest()
         if (validationErr != null) {
@@ -931,7 +934,8 @@ class SupabaseSyncService(
             val baseUrl = cleanUrl(config.url)
             if (baseUrl.isBlank()) return@withContext Result.failure(Exception("Supabase URL is empty"))
             val cleanName = fileName.replace(" ", "_").replace(Regex("[^A-Za-z0-9._/-]"), "_")
-            val mediaType = "image/jpeg".toMediaType()
+            val effectiveMime = mimeType.trim().ifBlank { "application/octet-stream" }
+            val mediaType = effectiveMime.toMediaType()
 
             suspend fun attemptUpload(objectPath: String, useUpsert: Boolean): Result<String> {
                 val url = "$baseUrl/storage/v1/object/$bucketId/$objectPath"
@@ -939,7 +943,7 @@ class SupabaseSyncService(
                 val reqBuilder = Request.Builder()
                     .url(url)
                     .addSupabaseAuthHeaders()
-                    .header("Content-Type", "image/jpeg")
+                    .header("Content-Type", effectiveMime)
                 if (useUpsert) {
                     reqBuilder.header("x-upsert", "true")
                 }
@@ -974,6 +978,44 @@ class SupabaseSyncService(
             Log.e("SupabaseSyncService", "Storage upload failed", e)
             Result.failure(e)
         }
+    }
+
+    /**
+     * Uploads a generated Word (.doc) or PDF (.pdf) payment receipt to Supabase Storage
+     * ('shop-receipts', falling back to 'product-media') and returns the public download URL.
+     */
+    suspend fun uploadForwardedReceiptDocument(
+        orderId: String,
+        format: String,
+        documentBytes: ByteArray,
+        timestamp: Long = System.currentTimeMillis()
+    ): Result<String> {
+        if (documentBytes.isEmpty()) {
+            return Result.failure(Exception("Document bytes are empty"))
+        }
+        val cleanFormat = format.trim().uppercase(java.util.Locale.US)
+        val isWord = cleanFormat == "WORD" || cleanFormat == "DOC"
+        val ext = if (isWord) "doc" else "pdf"
+        val mime = if (isWord) "application/msword" else "application/pdf"
+        val safeOrderId = orderId.trim()
+            .replace(Regex("[^A-Za-z0-9._-]"), "_")
+            .ifBlank { "ORDER" }
+        val primaryPath = "forwarded_docs/${safeOrderId}_${ext}_$timestamp.$ext"
+        val primary = uploadReceiptToSupabaseStorage(
+            fileName = primaryPath,
+            fileBytes = documentBytes,
+            bucketId = "shop-receipts",
+            mimeType = mime
+        )
+        if (primary.isSuccess) return primary
+
+        val fallback = uploadReceiptToSupabaseStorage(
+            fileName = "receipts/$primaryPath",
+            fileBytes = documentBytes,
+            bucketId = "product-media",
+            mimeType = mime
+        )
+        return if (fallback.isSuccess) fallback else primary
     }
 
     /**
@@ -1200,12 +1242,66 @@ class SupabaseSyncService(
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
 
+            -- 1D. STORE MERCHANT ACCOUNT SETTINGS & FORWARDED RECEIPT DOCUMENTS
+            CREATE TABLE IF NOT EXISTS public.store_profile (
+                id TEXT PRIMARY KEY,
+                store_name TEXT DEFAULT 'ODIYA',
+                tagline TEXT DEFAULT 'Shopping with ease and comfort',
+                phone_number TEXT DEFAULT '',
+                secondary_phone_number TEXT DEFAULT '',
+                whatsapp_number TEXT DEFAULT '',
+                support_email TEXT DEFAULT '',
+                store_address TEXT DEFAULT '',
+                opay_account_number TEXT DEFAULT '',
+                opay_account_name TEXT DEFAULT 'ODIYA',
+                moniepoint_account_number TEXT DEFAULT '',
+                moniepoint_account_name TEXT DEFAULT 'ODIYA',
+                palmpay_account_number TEXT DEFAULT '',
+                palmpay_account_name TEXT DEFAULT 'ODIYA',
+                pos_terminal_id TEXT DEFAULT '',
+                pos_terminal_name TEXT DEFAULT '',
+                extra_bank_name TEXT DEFAULT '',
+                extra_bank_account_number TEXT DEFAULT '',
+                extra_bank_account_name TEXT DEFAULT '',
+                apk_download_url TEXT DEFAULT '',
+                latest_app_version_code INT DEFAULT 1,
+                latest_app_version_name TEXT DEFAULT '1.0',
+                update_release_notes TEXT DEFAULT '',
+                is_maintenance_mode BOOLEAN DEFAULT FALSE,
+                maintenance_message TEXT DEFAULT '',
+                maintenance_started_at BIGINT DEFAULT 0,
+                paystack_public_key TEXT DEFAULT '',
+                paystack_callback_url TEXT DEFAULT 'depros://paystack-callback',
+                paystack_edge_function_base_url TEXT DEFAULT '',
+                updated_at BIGINT DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS public.forwarded_receipts (
+                id TEXT PRIMARY KEY,
+                order_id TEXT NOT NULL,
+                customer_id TEXT DEFAULT '',
+                customer_name TEXT DEFAULT '',
+                customer_phone TEXT DEFAULT '',
+                portal_title TEXT DEFAULT '',
+                format TEXT DEFAULT 'PDF',
+                amount NUMERIC DEFAULT 0,
+                account_label TEXT DEFAULT '',
+                payment_reference TEXT DEFAULT '',
+                cloud_document_url TEXT DEFAULT '',
+                forwarded_at BIGINT DEFAULT 0
+            );
+
+            ALTER TABLE public.forwarded_receipts ADD COLUMN IF NOT EXISTS payment_reference TEXT DEFAULT '';
+            ALTER TABLE public.forwarded_receipts ADD COLUMN IF NOT EXISTS cloud_document_url TEXT DEFAULT '';
+
             -- 2. GRANTS & LEAST-PRIVILEGE ROW LEVEL SECURITY (RLS) POLICIES
             GRANT USAGE ON SCHEMA public TO anon, authenticated;
             GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.products TO anon, authenticated;
             GRANT SELECT, INSERT, UPDATE ON TABLE public.customers TO anon, authenticated;
             GRANT SELECT, INSERT, UPDATE ON TABLE public.orders TO anon, authenticated;
             GRANT SELECT, INSERT, UPDATE ON TABLE public.pre_orders TO anon, authenticated;
+            GRANT SELECT, INSERT, UPDATE ON TABLE public.store_profile TO anon, authenticated;
+            GRANT SELECT, INSERT, UPDATE ON TABLE public.forwarded_receipts TO anon, authenticated;
             GRANT SELECT ON TABLE public.paystack_transactions TO anon, authenticated;
             GRANT INSERT, SELECT ON TABLE public.app_security_telemetry TO anon, authenticated;
 
@@ -1238,6 +1334,14 @@ class SupabaseSyncService(
             CREATE POLICY "PreOrders Read Access" ON public.pre_orders FOR SELECT TO anon, authenticated USING (true);
             CREATE POLICY "PreOrders Insert Access" ON public.pre_orders FOR INSERT TO anon, authenticated WITH CHECK (true);
             CREATE POLICY "PreOrders Update Access" ON public.pre_orders FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+
+            ALTER TABLE public.store_profile ENABLE ROW LEVEL SECURITY;
+            DROP POLICY IF EXISTS "StoreProfile Read & Sync Access" ON public.store_profile;
+            CREATE POLICY "StoreProfile Read & Sync Access" ON public.store_profile FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+            ALTER TABLE public.forwarded_receipts ENABLE ROW LEVEL SECURITY;
+            DROP POLICY IF EXISTS "ForwardedReceipts Read & Sync Access" ON public.forwarded_receipts;
+            CREATE POLICY "ForwardedReceipts Read & Sync Access" ON public.forwarded_receipts FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
             ALTER TABLE public.paystack_transactions ENABLE ROW LEVEL SECURITY;
             DROP POLICY IF EXISTS "Public Read & Sync Access on paystack_transactions" ON public.paystack_transactions;
@@ -2678,6 +2782,499 @@ class SupabaseSyncService(
             Result.success(PartnerCloudLedger(mergedOrgs, mergedSubs, mergedTxns))
         } catch (e: Exception) {
             Log.e("SupabaseSyncService", "syncPartnerLedgerWithCloud failed", e)
+            Result.failure(e)
+        }
+    }
+
+    internal fun hasConfiguredMerchantDetails(profile: StoreProfileConfig): Boolean {
+        return profile.opayAccountNumber.isNotBlank() ||
+            profile.moniepointAccountNumber.isNotBlank() ||
+            profile.palmpayAccountNumber.isNotBlank() ||
+            profile.posTerminalId.isNotBlank() ||
+            profile.extraBankAccountNumber.isNotBlank() ||
+            profile.paystackPublicKey.isNotBlank() ||
+            profile.paystackEdgeFunctionBaseUrl.isNotBlank() ||
+            profile.phoneNumber.isNotBlank() ||
+            profile.whatsappNumber.isNotBlank() ||
+            profile.supportEmail.isNotBlank() ||
+            profile.storeAddress.isNotBlank() ||
+            profile.apkDownloadUrl.isNotBlank()
+    }
+
+    internal fun storeProfileToJson(profile: StoreProfileConfig, isSnakeCase: Boolean): JSONObject = JSONObject().apply {
+        val safePublicKey = profile.paystackPublicKey.trim().let { pk ->
+            if (pk.startsWith("sk_", ignoreCase = true)) "" else pk
+        }
+        if (isSnakeCase) {
+            put("id", "odiya_main")
+            put("store_name", profile.storeName)
+            put("tagline", profile.tagline)
+            put("phone_number", profile.phoneNumber)
+            put("secondary_phone_number", profile.secondaryPhoneNumber)
+            put("whatsapp_number", profile.whatsappNumber)
+            put("support_email", profile.supportEmail)
+            put("store_address", profile.storeAddress)
+            put("opay_account_number", profile.opayAccountNumber)
+            put("opay_account_name", profile.opayAccountName)
+            put("moniepoint_account_number", profile.moniepointAccountNumber)
+            put("moniepoint_account_name", profile.moniepointAccountName)
+            put("palmpay_account_number", profile.palmpayAccountNumber)
+            put("palmpay_account_name", profile.palmpayAccountName)
+            put("pos_terminal_id", profile.posTerminalId)
+            put("pos_terminal_name", profile.posTerminalName)
+            put("extra_bank_name", profile.extraBankName)
+            put("extra_bank_account_number", profile.extraBankAccountNumber)
+            put("extra_bank_account_name", profile.extraBankAccountName)
+            put("apk_download_url", profile.apkDownloadUrl)
+            put("latest_app_version_code", profile.latestAppVersionCode)
+            put("latest_app_version_name", profile.latestAppVersionName)
+            put("update_release_notes", profile.updateReleaseNotes)
+            put("is_maintenance_mode", profile.isMaintenanceMode)
+            put("maintenance_message", profile.maintenanceMessage)
+            put("maintenance_started_at", profile.maintenanceStartedAt)
+            put("paystack_public_key", safePublicKey)
+            put("paystack_callback_url", profile.paystackCallbackUrl)
+            put("paystack_edge_function_base_url", profile.paystackEdgeFunctionBaseUrl)
+            put("updated_at", profile.updatedAt)
+        } else {
+            put("id", "odiya_main")
+            put("storeName", profile.storeName)
+            put("tagline", profile.tagline)
+            put("phoneNumber", profile.phoneNumber)
+            put("secondaryPhoneNumber", profile.secondaryPhoneNumber)
+            put("whatsappNumber", profile.whatsappNumber)
+            put("supportEmail", profile.supportEmail)
+            put("storeAddress", profile.storeAddress)
+            put("opayAccountNumber", profile.opayAccountNumber)
+            put("opayAccountName", profile.opayAccountName)
+            put("moniepointAccountNumber", profile.moniepointAccountNumber)
+            put("moniepointAccountName", profile.moniepointAccountName)
+            put("palmpayAccountNumber", profile.palmpayAccountNumber)
+            put("palmpayAccountName", profile.palmpayAccountName)
+            put("posTerminalId", profile.posTerminalId)
+            put("posTerminalName", profile.posTerminalName)
+            put("extraBankName", profile.extraBankName)
+            put("extraBankAccountNumber", profile.extraBankAccountNumber)
+            put("extraBankAccountName", profile.extraBankAccountName)
+            put("apkDownloadUrl", profile.apkDownloadUrl)
+            put("latestAppVersionCode", profile.latestAppVersionCode)
+            put("latestAppVersionName", profile.latestAppVersionName)
+            put("updateReleaseNotes", profile.updateReleaseNotes)
+            put("isMaintenanceMode", profile.isMaintenanceMode)
+            put("maintenanceMessage", profile.maintenanceMessage)
+            put("maintenanceStartedAt", profile.maintenanceStartedAt)
+            put("paystackPublicKey", safePublicKey)
+            put("paystackCallbackUrl", profile.paystackCallbackUrl)
+            put("paystackEdgeFunctionBaseUrl", profile.paystackEdgeFunctionBaseUrl)
+            put("updatedAt", profile.updatedAt)
+        }
+    }
+
+    internal fun parseStoreProfileJson(
+        obj: JSONObject,
+        isSnakeCase: Boolean,
+        fallback: StoreProfileConfig = StoreProfileConfig()
+    ): StoreProfileConfig {
+        fun str(snake: String, camel: String, def: String): String {
+            val raw = obj.optCleanString(if (isSnakeCase) snake else camel, "")
+            return raw.ifBlank { def }
+        }
+        fun rawStr(snake: String, camel: String): String =
+            obj.optCleanString(if (isSnakeCase) snake else camel, "")
+
+        val remotePublicKey = rawStr("paystack_public_key", "paystackPublicKey").let { pk ->
+            if (pk.startsWith("sk_", ignoreCase = true)) "" else pk
+        }
+        return StoreProfileConfig(
+            storeName = str("store_name", "storeName", fallback.storeName.ifBlank { "ODIYA" }),
+            tagline = str("tagline", "tagline", fallback.tagline.ifBlank { "Shopping with ease and comfort" }),
+            phoneNumber = rawStr("phone_number", "phoneNumber"),
+            secondaryPhoneNumber = rawStr("secondary_phone_number", "secondaryPhoneNumber"),
+            whatsappNumber = rawStr("whatsapp_number", "whatsappNumber"),
+            supportEmail = rawStr("support_email", "supportEmail"),
+            storeAddress = rawStr("store_address", "storeAddress"),
+            opayAccountNumber = rawStr("opay_account_number", "opayAccountNumber"),
+            opayAccountName = str("opay_account_name", "opayAccountName", "ODIYA"),
+            moniepointAccountNumber = rawStr("moniepoint_account_number", "moniepointAccountNumber"),
+            moniepointAccountName = str("moniepoint_account_name", "moniepointAccountName", "ODIYA"),
+            palmpayAccountNumber = rawStr("palmpay_account_number", "palmpayAccountNumber"),
+            palmpayAccountName = str("palmpay_account_name", "palmpayAccountName", "ODIYA"),
+            posTerminalId = rawStr("pos_terminal_id", "posTerminalId"),
+            posTerminalName = rawStr("pos_terminal_name", "posTerminalName"),
+            extraBankName = rawStr("extra_bank_name", "extraBankName"),
+            extraBankAccountNumber = rawStr("extra_bank_account_number", "extraBankAccountNumber"),
+            extraBankAccountName = rawStr("extra_bank_account_name", "extraBankAccountName"),
+            apkDownloadUrl = rawStr("apk_download_url", "apkDownloadUrl"),
+            latestAppVersionCode = obj.optInt(if (isSnakeCase) "latest_app_version_code" else "latestAppVersionCode", fallback.latestAppVersionCode).coerceAtLeast(1),
+            latestAppVersionName = str("latest_app_version_name", "latestAppVersionName", fallback.latestAppVersionName.ifBlank { "1.0" }),
+            updateReleaseNotes = rawStr("update_release_notes", "updateReleaseNotes"),
+            isMaintenanceMode = obj.optBoolean(if (isSnakeCase) "is_maintenance_mode" else "isMaintenanceMode", false),
+            maintenanceMessage = rawStr("maintenance_message", "maintenanceMessage"),
+            maintenanceStartedAt = obj.optLong(if (isSnakeCase) "maintenance_started_at" else "maintenanceStartedAt", 0L),
+            paystackPublicKey = remotePublicKey.ifBlank { fallback.paystackPublicKey },
+            paystackCallbackUrl = str("paystack_callback_url", "paystackCallbackUrl", fallback.paystackCallbackUrl.ifBlank { "depros://paystack-callback" }),
+            paystackEdgeFunctionBaseUrl = rawStr("paystack_edge_function_base_url", "paystackEdgeFunctionBaseUrl"),
+            updatedAt = obj.optLong(if (isSnakeCase) "updated_at" else "updatedAt", 0L)
+        )
+    }
+
+    suspend fun syncStoreProfileWithCloud(
+        localProfile: StoreProfileConfig,
+        preferLocal: Boolean = false
+    ): Result<StoreProfileConfig> = withContext(Dispatchers.IO) {
+        val validationErr = validateCredentialsBeforeRequest()
+        if (validationErr != null) {
+            return@withContext Result.failure(Exception(validationErr))
+        }
+        try {
+            val baseUrl = cleanUrl(config.url)
+            val ts = System.currentTimeMillis()
+            val objectPath = "system/store_profile.json"
+            var remoteFromTable: StoreProfileConfig? = null
+            var remoteFromStorage: StoreProfileConfig? = null
+            var tableReadable = false
+            var sawStorageNotFound = false
+            var lastNetworkError: Exception? = null
+
+            // 1. Try public.store_profile Postgres table
+            try {
+                val req = Request.Builder()
+                    .url("$baseUrl/rest/v1/store_profile?id=eq.odiya_main&select=*&limit=1")
+                    .addSupabaseAuthHeaders()
+                    .get()
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    val body = resp.body?.string()?.trim().orEmpty()
+                    if (resp.isSuccessful && body.startsWith("[")) {
+                        tableReadable = true
+                        val arr = JSONArray(body)
+                        if (arr.length() > 0) {
+                            remoteFromTable = parseStoreProfileJson(arr.getJSONObject(0), isSnakeCase = true, fallback = localProfile)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                lastNetworkError = e
+            }
+
+            // 2. Mirror check on Supabase Storage buckets
+            val candidates = listOf(
+                "$baseUrl/storage/v1/object/public/product-media/$objectPath?t=$ts" to false,
+                "$baseUrl/storage/v1/object/public/shop-receipts/$objectPath?t=$ts" to false,
+                "$baseUrl/storage/v1/object/product-media/$objectPath?t=$ts" to true,
+                "$baseUrl/storage/v1/object/shop-receipts/$objectPath?t=$ts" to true
+            )
+            for ((url, useAuth) in candidates) {
+                try {
+                    val rb = Request.Builder().url(url).get()
+                    if (useAuth) rb.addSupabaseAuthHeaders()
+                    client.newCall(rb.build()).execute().use { resp ->
+                        val body = resp.body?.string()?.trim().orEmpty()
+                        if (resp.isSuccessful && body.startsWith("{")) {
+                            remoteFromStorage = parseStoreProfileJson(JSONObject(body), isSnakeCase = false, fallback = localProfile)
+                        } else if (resp.code == 400 || resp.code == 404) {
+                            sawStorageNotFound = true
+                        }
+                    }
+                    if (remoteFromStorage != null) break
+                } catch (e: Exception) {
+                    lastNetworkError = e
+                }
+            }
+
+            val remote = when {
+                remoteFromTable != null && remoteFromStorage != null ->
+                    if (remoteFromTable!!.updatedAt >= remoteFromStorage!!.updatedAt) remoteFromTable else remoteFromStorage
+                remoteFromTable != null -> remoteFromTable
+                else -> remoteFromStorage
+            }
+
+            if (remote == null && !tableReadable && !sawStorageNotFound && lastNetworkError != null) {
+                return@withContext Result.failure(lastNetworkError!!)
+            }
+
+            val localConfigured = hasConfiguredMerchantDetails(localProfile)
+            val shouldPushLocal = when {
+                preferLocal -> true
+                remote == null -> localConfigured
+                localProfile.updatedAt > remote.updatedAt && localProfile.updatedAt > 0L -> true
+                else -> false
+            }
+
+            val effectiveProfile = when {
+                shouldPushLocal -> {
+                    val stamped = if (localProfile.updatedAt > 0L) localProfile else localProfile.copy(updatedAt = ts)
+                    if (remote != null && !preferLocal) {
+                        stamped.copy(
+                            paystackPublicKey = stamped.paystackPublicKey.ifBlank { remote.paystackPublicKey },
+                            paystackEdgeFunctionBaseUrl = stamped.paystackEdgeFunctionBaseUrl.ifBlank { remote.paystackEdgeFunctionBaseUrl },
+                            apkDownloadUrl = stamped.apkDownloadUrl.ifBlank { remote.apkDownloadUrl }
+                        )
+                    } else {
+                        stamped
+                    }
+                }
+                remote != null -> {
+                    remote.copy(
+                        paystackPublicKey = remote.paystackPublicKey.ifBlank { localProfile.paystackPublicKey },
+                        apkDownloadUrl = remote.apkDownloadUrl.ifBlank { localProfile.apkDownloadUrl }
+                    )
+                }
+                else -> localProfile
+            }
+
+            val needsUpload = shouldPushLocal ||
+                (remote != null && (remoteFromTable == null && tableReadable || remoteFromStorage == null))
+            if (needsUpload && (hasConfiguredMerchantDetails(effectiveProfile) || preferLocal)) {
+                // Push to public.store_profile if table exists
+                try {
+                    val rowBody = storeProfileToJson(effectiveProfile, isSnakeCase = true)
+                        .toString()
+                        .toRequestBody("application/json; charset=utf-8".toMediaType())
+                    val tableReq = Request.Builder()
+                        .url("$baseUrl/rest/v1/store_profile?on_conflict=id")
+                        .addSupabaseAuthHeaders()
+                        .header("Content-Type", "application/json")
+                        .header("Prefer", "resolution=merge-duplicates,return=minimal")
+                        .post(rowBody)
+                        .build()
+                    client.newCall(tableReq).execute().close()
+                } catch (_: Exception) {
+                }
+
+                // Always mirror to Storage buckets so it works even before table DDL is run
+                val jsonBytes = storeProfileToJson(effectiveProfile, isSnakeCase = false)
+                    .toString()
+                    .toByteArray(Charsets.UTF_8)
+                val mediaType = "application/json".toMediaType()
+                suspend fun uploadToBucket(bucketId: String): Boolean {
+                    return try {
+                        val req = Request.Builder()
+                            .url("$baseUrl/storage/v1/object/$bucketId/$objectPath")
+                            .addSupabaseAuthHeaders()
+                            .header("Content-Type", "application/json")
+                            .header("x-upsert", "true")
+                            .post(jsonBytes.toRequestBody(mediaType))
+                            .build()
+                        client.newCall(req).execute().use { it.isSuccessful || it.code in 200..201 }
+                    } catch (_: Exception) {
+                        false
+                    }
+                }
+                if (!uploadToBucket("product-media")) {
+                    uploadToBucket("shop-receipts")
+                }
+            }
+
+            Result.success(effectiveProfile)
+        } catch (e: Exception) {
+            Log.e("SupabaseSyncService", "syncStoreProfileWithCloud failed", e)
+            Result.failure(e)
+        }
+    }
+
+    internal fun forwardedReceiptToJson(entry: ForwardedReceiptLog, isSnakeCase: Boolean): JSONObject = JSONObject().apply {
+        put("id", entry.id)
+        put(if (isSnakeCase) "order_id" else "orderId", entry.orderId)
+        put(if (isSnakeCase) "customer_id" else "customerId", entry.customerId)
+        put(if (isSnakeCase) "customer_name" else "customerName", entry.customerName)
+        put(if (isSnakeCase) "customer_phone" else "customerPhone", entry.customerPhone)
+        put(if (isSnakeCase) "portal_title" else "portalTitle", entry.portalTitle)
+        put("format", entry.format)
+        put("amount", entry.amount.takeIf { !it.isNaN() && !it.isInfinite() } ?: 0.0)
+        put(if (isSnakeCase) "account_label" else "accountLabel", entry.accountLabel)
+        put(if (isSnakeCase) "payment_reference" else "paymentReference", entry.paymentReference)
+        put(if (isSnakeCase) "cloud_document_url" else "cloudDocumentUrl", entry.cloudDocumentUrl)
+        put(if (isSnakeCase) "forwarded_at" else "forwardedAt", entry.forwardedAt)
+    }
+
+    internal fun parseForwardedReceiptJson(obj: JSONObject, isSnakeCase: Boolean): ForwardedReceiptLog? {
+        val id = obj.optCleanString("id").trim()
+        val orderId = obj.optCleanString(if (isSnakeCase) "order_id" else "orderId").trim()
+        if (id.isBlank() || orderId.isBlank()) return null
+        val rawAmt = obj.optDouble("amount", 0.0).takeIf { !it.isNaN() && !it.isInfinite() } ?: 0.0
+        return ForwardedReceiptLog(
+            id = id,
+            orderId = orderId,
+            customerId = obj.optCleanString(if (isSnakeCase) "customer_id" else "customerId"),
+            customerName = obj.optCleanString(if (isSnakeCase) "customer_name" else "customerName"),
+            customerPhone = obj.optCleanString(if (isSnakeCase) "customer_phone" else "customerPhone"),
+            portalTitle = obj.optCleanString(if (isSnakeCase) "portal_title" else "portalTitle"),
+            format = obj.optCleanString("format", "PDF").ifBlank { "PDF" },
+            amount = rawAmt,
+            accountLabel = obj.optCleanString(if (isSnakeCase) "account_label" else "accountLabel"),
+            paymentReference = obj.optCleanString(if (isSnakeCase) "payment_reference" else "paymentReference"),
+            cloudDocumentUrl = obj.optCleanString(if (isSnakeCase) "cloud_document_url" else "cloudDocumentUrl"),
+            forwardedAt = obj.optLong(if (isSnakeCase) "forwarded_at" else "forwardedAt", System.currentTimeMillis())
+        )
+    }
+
+    suspend fun syncForwardedReceiptsWithCloud(
+        localList: List<ForwardedReceiptLog>,
+        preferLocalIds: Set<String> = emptySet()
+    ): Result<List<ForwardedReceiptLog>> = withContext(Dispatchers.IO) {
+        val validationErr = validateCredentialsBeforeRequest()
+        if (validationErr != null) {
+            return@withContext Result.failure(Exception(validationErr))
+        }
+        try {
+            val baseUrl = cleanUrl(config.url)
+            val ts = System.currentTimeMillis()
+            val remoteById = linkedMapOf<String, ForwardedReceiptLog>()
+            val tableList = mutableListOf<ForwardedReceiptLog>()
+            val storageList = mutableListOf<ForwardedReceiptLog>()
+            var tableReadable = false
+            var sawStorageNotFound = false
+            var remoteJsonRaw: String? = null
+            var lastNetworkError: Exception? = null
+
+            // 1. Primary: Read from public.forwarded_receipts Postgres table if available
+            try {
+                val req = Request.Builder()
+                    .url("$baseUrl/rest/v1/forwarded_receipts?select=*&order=forwarded_at.desc&limit=500")
+                    .addSupabaseAuthHeaders()
+                    .get()
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    val body = resp.body?.string()?.trim().orEmpty()
+                    if (resp.isSuccessful && body.startsWith("[")) {
+                        tableReadable = true
+                        val arr = JSONArray(body)
+                        for (i in 0 until arr.length()) {
+                            val item = parseForwardedReceiptJson(arr.optJSONObject(i) ?: continue, isSnakeCase = true) ?: continue
+                            tableList.add(item)
+                            remoteById[item.id] = item
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                lastNetworkError = e
+            }
+
+            // 2. Mirror: Read system/forwarded_receipts.json from Supabase Storage buckets
+            val objectPath = "system/forwarded_receipts.json"
+            val candidates = listOf(
+                "$baseUrl/storage/v1/object/public/shop-receipts/$objectPath?t=$ts" to false,
+                "$baseUrl/storage/v1/object/public/product-media/$objectPath?t=$ts" to false,
+                "$baseUrl/storage/v1/object/shop-receipts/$objectPath?t=$ts" to true,
+                "$baseUrl/storage/v1/object/product-media/$objectPath?t=$ts" to true
+            )
+            for ((url, useAuth) in candidates) {
+                try {
+                    val rb = Request.Builder().url(url).get()
+                    if (useAuth) rb.addSupabaseAuthHeaders()
+                    client.newCall(rb.build()).execute().use { resp ->
+                        val body = resp.body?.string()?.trim().orEmpty()
+                        if (resp.isSuccessful && body.startsWith("[")) {
+                            remoteJsonRaw = body
+                        } else if (resp.code == 400 || resp.code == 404) {
+                            sawStorageNotFound = true
+                        }
+                    }
+                    if (remoteJsonRaw != null) break
+                } catch (e: Exception) {
+                    lastNetworkError = e
+                }
+            }
+
+            if (!remoteJsonRaw.isNullOrBlank()) {
+                try {
+                    val arr = JSONArray(remoteJsonRaw)
+                    for (i in 0 until arr.length()) {
+                        val item = parseForwardedReceiptJson(arr.optJSONObject(i) ?: continue, isSnakeCase = false) ?: continue
+                        storageList.add(item)
+                        val existing = remoteById[item.id]
+                        if (existing == null || (existing.cloudDocumentUrl.isBlank() && item.cloudDocumentUrl.isNotBlank())) {
+                            remoteById[item.id] = if (existing == null) item else existing.copy(
+                                cloudDocumentUrl = existing.cloudDocumentUrl.ifBlank { item.cloudDocumentUrl },
+                                paymentReference = existing.paymentReference.ifBlank { item.paymentReference }
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w("SupabaseSyncService", "Failed parsing remote forwarded_receipts.json", e)
+                }
+            }
+
+            if (!tableReadable && remoteJsonRaw == null && !sawStorageNotFound && lastNetworkError != null) {
+                return@withContext Result.failure(lastNetworkError!!)
+            }
+
+            // 3. Deterministic merge by id preserving http cloudDocumentUrl
+            val mergedById = linkedMapOf<String, ForwardedReceiptLog>()
+            remoteById.values.forEach { mergedById[it.id] = it }
+            localList.forEach { local ->
+                val remote = mergedById[local.id]
+                if (remote == null) {
+                    mergedById[local.id] = local
+                } else {
+                    val primary = if (local.id in preferLocalIds || (local.cloudDocumentUrl.startsWith("http") && !remote.cloudDocumentUrl.startsWith("http"))) local else remote
+                    val secondary = if (primary === local) remote else local
+                    mergedById[local.id] = primary.copy(
+                        cloudDocumentUrl = primary.cloudDocumentUrl.ifBlank { secondary.cloudDocumentUrl },
+                        paymentReference = primary.paymentReference.ifBlank { secondary.paymentReference },
+                        accountLabel = primary.accountLabel.ifBlank { secondary.accountLabel },
+                        customerId = primary.customerId.ifBlank { secondary.customerId },
+                        customerPhone = primary.customerPhone.ifBlank { secondary.customerPhone }
+                    )
+                }
+            }
+            val merged = mergedById.values.sortedByDescending { it.forwardedAt }.take(400)
+
+            val needsTablePush = merged.isNotEmpty() && (
+                preferLocalIds.isNotEmpty() ||
+                    merged.any { m -> tableList.none { it == m } }
+                )
+            val needsStoragePush = merged.isNotEmpty() && (
+                remoteJsonRaw == null ||
+                    preferLocalIds.isNotEmpty() ||
+                    merged.size != storageList.size ||
+                    merged != storageList
+                )
+
+            if (needsTablePush && tableReadable) {
+                try {
+                    val rows = JSONArray()
+                    merged.forEach { rows.put(forwardedReceiptToJson(it, isSnakeCase = true)) }
+                    val req = Request.Builder()
+                        .url("$baseUrl/rest/v1/forwarded_receipts?on_conflict=id")
+                        .addSupabaseAuthHeaders()
+                        .header("Content-Type", "application/json")
+                        .header("Prefer", "resolution=merge-duplicates,return=minimal")
+                        .post(rows.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
+                    client.newCall(req).execute().close()
+                } catch (_: Exception) {
+                }
+            }
+
+            if (needsStoragePush) {
+                val arr = JSONArray()
+                merged.forEach { arr.put(forwardedReceiptToJson(it, isSnakeCase = false)) }
+                val bytes = arr.toString().toByteArray(Charsets.UTF_8)
+                val mediaType = "application/json".toMediaType()
+                suspend fun uploadToBucket(bucketId: String): Boolean {
+                    return try {
+                        val req = Request.Builder()
+                            .url("$baseUrl/storage/v1/object/$bucketId/$objectPath")
+                            .addSupabaseAuthHeaders()
+                            .header("Content-Type", "application/json")
+                            .header("x-upsert", "true")
+                            .post(bytes.toRequestBody(mediaType))
+                            .build()
+                        client.newCall(req).execute().use { it.isSuccessful || it.code in 200..201 }
+                    } catch (_: Exception) {
+                        false
+                    }
+                }
+                if (!uploadToBucket("shop-receipts")) {
+                    uploadToBucket("product-media")
+                }
+            }
+
+            Result.success(merged)
+        } catch (e: Exception) {
+            Log.e("SupabaseSyncService", "syncForwardedReceiptsWithCloud failed", e)
             Result.failure(e)
         }
     }
