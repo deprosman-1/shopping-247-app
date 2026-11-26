@@ -27,6 +27,8 @@ import com.example.data.model.PartnerOrganization
 import com.example.data.model.PartnerProductSubmission
 import com.example.data.model.PartnerSubmissionStatus
 import com.example.data.model.PartnerTransactionType
+import com.example.data.model.PartnershipInterestRequest
+import com.example.data.model.PartnershipInterestStatus
 import com.example.data.model.PaymentMethod
 import com.example.data.model.PriceRangeFilter
 import com.example.data.model.Product
@@ -94,8 +96,34 @@ enum class CustomerAccountDestination {
     ORDER_TRACKING,
     RATINGS_AND_REVIEWS,
     VOUCHERS,
+    PARTNERSHIP,
     FOLLOW_STORE
 }
+
+data class ForwardedReceiptLog(
+    val id: String = UUID.randomUUID().toString().take(8).uppercase(),
+    val orderId: String,
+    val customerId: String = "",
+    val customerName: String = "",
+    val customerPhone: String = "",
+    val portalTitle: String = "",
+    val format: String = "PDF",
+    val amount: Double = 0.0,
+    val accountLabel: String = "",
+    val forwardedAt: Long = System.currentTimeMillis()
+)
+
+data class CustomerChatHistoryEntry(
+    val id: String = UUID.randomUUID().toString().take(8),
+    val roomId: String = "",
+    val customerId: String = "",
+    val customerName: String = "",
+    val customerPhone: String = "",
+    val senderName: String = "",
+    val isFromAdmin: Boolean = false,
+    val text: String = "",
+    val timestamp: Long = System.currentTimeMillis()
+)
 
 enum class OrderTrackingFilter(val label: String) {
     ALL("All"),
@@ -4436,7 +4464,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     paystackAccountNumber = obj.optString("paystackAccountNumber", ""),
                     paystackAccountName = obj.optString("paystackAccountName", ""),
                     pendingHostingFeeBalance = obj.optDouble("pendingHostingFeeBalance", 0.0),
-                    autoDeductHostingFromPaystackSplit = obj.optBoolean("autoDeductHostingFromPaystackSplit", true)
+                    autoDeductHostingFromPaystackSplit = obj.optBoolean("autoDeductHostingFromPaystackSplit", true),
+                    nextOfKinName = obj.optString("nextOfKinName", ""),
+                    nextOfKinGender = obj.optString("nextOfKinGender", ""),
+                    nextOfKinPhone = obj.optString("nextOfKinPhone", ""),
+                    customerId = obj.optString("customerId", "")
                 )
             }
         } catch (_: Exception) {
@@ -4488,6 +4520,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 put("paystackAccountName", p.paystackAccountName)
                 put("pendingHostingFeeBalance", p.pendingHostingFeeBalance)
                 put("autoDeductHostingFromPaystackSplit", p.autoDeductHostingFromPaystackSplit)
+                put("nextOfKinName", p.nextOfKinName)
+                put("nextOfKinGender", p.nextOfKinGender)
+                put("nextOfKinPhone", p.nextOfKinPhone)
+                put("customerId", p.customerId)
             })
         }
         adminPrefs.edit().putString("partner_organizations_json", arr.toString()).apply()
@@ -4692,6 +4728,344 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _latestPartnerPaymentAlert.value = null
     }
 
+    // Customer Partnership Interest Requests & Accepted Draft Pre-Fill
+    private fun loadPartnershipInterestRequests(): List<PartnershipInterestRequest> {
+        val raw = adminPrefs.getString("partnership_interest_requests_json", null) ?: return emptyList()
+        return try {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).mapNotNull { i ->
+                val obj = arr.optJSONObject(i) ?: return@mapNotNull null
+                val id = obj.optString("id").trim()
+                if (id.isBlank()) return@mapNotNull null
+                val catsArr = obj.optJSONArray("productCategories")
+                val cats = if (catsArr != null) {
+                    (0 until catsArr.length()).mapNotNull { cIdx ->
+                        catsArr.optString(cIdx).trim().takeIf { it.isNotBlank() }
+                    }
+                } else {
+                    obj.optString("productCategoriesCsv", "").split(",").map { it.trim() }.filter { it.isNotBlank() }
+                }
+                PartnershipInterestRequest(
+                    id = id,
+                    customerId = obj.optString("customerId", ""),
+                    customerName = obj.optString("customerName", ""),
+                    customerPhone = obj.optString("customerPhone", ""),
+                    customerEmail = obj.optString("customerEmail", ""),
+                    businessName = obj.optString("businessName", ""),
+                    officeAddress = obj.optString("officeAddress", ""),
+                    productCategories = cats,
+                    note = obj.optString("note", ""),
+                    status = try {
+                        PartnershipInterestStatus.valueOf(obj.optString("status", PartnershipInterestStatus.PENDING.name))
+                    } catch (_: Exception) { PartnershipInterestStatus.PENDING },
+                    adminReply = obj.optString("adminReply", ""),
+                    createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
+                    updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun persistPartnershipInterestRequests(list: List<PartnershipInterestRequest>) {
+        val arr = JSONArray()
+        list.forEach { r ->
+            arr.put(JSONObject().apply {
+                put("id", r.id)
+                put("customerId", r.customerId)
+                put("customerName", r.customerName)
+                put("customerPhone", r.customerPhone)
+                put("customerEmail", r.customerEmail)
+                put("businessName", r.businessName)
+                put("officeAddress", r.officeAddress)
+                put("productCategories", JSONArray().apply { r.productCategories.forEach { put(it) } })
+                put("note", r.note)
+                put("status", r.status.name)
+                put("adminReply", r.adminReply)
+                put("createdAt", r.createdAt)
+                put("updatedAt", r.updatedAt)
+            })
+        }
+        adminPrefs.edit().putString("partnership_interest_requests_json", arr.toString()).apply()
+    }
+
+    private val _partnershipInterestRequests = MutableStateFlow(loadPartnershipInterestRequests())
+    val partnershipInterestRequests: StateFlow<List<PartnershipInterestRequest>> = _partnershipInterestRequests.asStateFlow()
+
+    private val _pendingPartnershipDraft = MutableStateFlow<PartnershipInterestRequest?>(null)
+    val pendingPartnershipDraft: StateFlow<PartnershipInterestRequest?> = _pendingPartnershipDraft.asStateFlow()
+
+    fun notifyPartnershipInterestClicked() {
+        val cust = _currentCustomer.value
+        val name = cust?.fullName?.takeIf { it.isNotBlank() } ?: _savedDeliveryInfo.value.fullName.ifBlank { "Customer" }
+        startLiveCallSignalingIfConfigured()
+        liveCallClient.sendSignal(
+            "PARTNERSHIP_INTEREST",
+            "global_partnerships",
+            JSONObject().apply {
+                put("event", "INTEREST_CLICKED")
+                put("customerId", cust?.id.orEmpty())
+                put("customerName", name)
+                put("customerPhone", cust?.phoneNumber.orEmpty())
+            }
+        )
+        if (isKnownAdminDevice() || _isAdminUnlocked.value) {
+            ShopNotificationHelper.notifyAdminPartnershipInterest(
+                context = getApplication(),
+                customerName = name,
+                businessName = name,
+                categories = emptyList()
+            )
+        }
+    }
+
+    fun submitPartnershipInterestRequest(
+        customerName: String,
+        customerPhone: String,
+        customerEmail: String,
+        businessName: String,
+        officeAddress: String,
+        productCategories: List<String>,
+        note: String = "",
+        onComplete: (Boolean, String) -> Unit
+    ) {
+        val cleanName = customerName.trim()
+        val cleanPhone = customerPhone.trim()
+        val cleanAddress = officeAddress.trim()
+        val cleanCats = productCategories.map { it.trim() }.filter { it.isNotBlank() }
+        if (cleanName.isBlank() || cleanPhone.isBlank() || cleanAddress.isBlank() || cleanCats.isEmpty()) {
+            onComplete(false, "Please complete your name, phone number, office address, and at least one product category.")
+            return
+        }
+        val cust = _currentCustomer.value
+        val now = System.currentTimeMillis()
+        val req = PartnershipInterestRequest(
+            customerId = cust?.id.orEmpty(),
+            customerName = cleanName,
+            customerPhone = cleanPhone,
+            customerEmail = customerEmail.trim().ifBlank { cust?.email.orEmpty() },
+            businessName = businessName.trim().ifBlank { cleanName },
+            officeAddress = cleanAddress,
+            productCategories = cleanCats,
+            note = note.trim(),
+            status = PartnershipInterestStatus.PENDING,
+            adminReply = "",
+            createdAt = now,
+            updatedAt = now
+        )
+        val updated = listOf(req) + _partnershipInterestRequests.value
+        _partnershipInterestRequests.value = updated
+        persistPartnershipInterestRequests(updated)
+        startLiveCallSignalingIfConfigured()
+        liveCallClient.sendSignal(
+            "PARTNERSHIP_INTEREST",
+            "global_partnerships",
+            JSONObject().apply {
+                put("id", req.id)
+                put("customerId", req.customerId)
+                put("customerName", req.customerName)
+                put("customerPhone", req.customerPhone)
+                put("customerEmail", req.customerEmail)
+                put("businessName", req.businessName)
+                put("officeAddress", req.officeAddress)
+                put("productCategories", JSONArray().apply { req.productCategories.forEach { put(it) } })
+                put("note", req.note)
+                put("createdAt", req.createdAt)
+            }
+        )
+        ShopNotificationHelper.notifyAdminPartnershipInterest(
+            context = getApplication(),
+            customerName = req.customerName,
+            businessName = req.businessName,
+            categories = req.productCategories
+        )
+        voiceManager.speakText("Partnership interest received from ${req.businessName}. Open Admin Partners tab to accept or decline.")
+        onComplete(true, "Partnership interest sent to ODIYA Admin (${req.id})! You will be notified once Admin responds.")
+    }
+
+    fun replyPartnershipInterest(
+        requestId: String,
+        accept: Boolean,
+        adminReply: String
+    ) {
+        val now = System.currentTimeMillis()
+        val newStatus = if (accept) PartnershipInterestStatus.ACCEPTED else PartnershipInterestStatus.REJECTED
+        val finalReply = adminReply.trim().ifBlank {
+            if (accept) "Accepted! Please complete the Partnership MOU form and append your signature."
+            else "Thank you for your interest. Your partnership request was declined at this time."
+        }
+        val updated = _partnershipInterestRequests.value.map { r ->
+            if (r.id == requestId) r.copy(status = newStatus, adminReply = finalReply, updatedAt = now) else r
+        }
+        _partnershipInterestRequests.value = updated
+        persistPartnershipInterestRequests(updated)
+        ShopNotificationHelper.notifyCustomerPartnershipDecision(
+            context = getApplication(),
+            accepted = accept,
+            adminReply = finalReply
+        )
+        startLiveCallSignalingIfConfigured()
+        liveCallClient.sendSignal(
+            "PARTNERSHIP_DECISION",
+            "global_partnerships",
+            JSONObject().apply {
+                put("id", requestId)
+                put("accept", accept)
+                put("adminReply", finalReply)
+                put("updatedAt", now)
+            }
+        )
+        voiceManager.speakText(if (accept) "Partnership offer accepted." else "Partnership offer declined.")
+    }
+
+    fun openAcceptedPartnershipForm(request: PartnershipInterestRequest) {
+        _pendingPartnershipDraft.value = request
+        navigateTo(AppScreen.PARTNER_PORTAL)
+    }
+
+    fun clearPendingPartnershipDraft() {
+        _pendingPartnershipDraft.value = null
+    }
+
+    // Forwarded Receipt Logs (Word / PDF forwarded to ODIYA) & Live Chat Archive
+    private fun loadForwardedReceipts(): List<ForwardedReceiptLog> {
+        val raw = adminPrefs.getString("forwarded_receipts_json", null) ?: return emptyList()
+        return try {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).mapNotNull { i ->
+                val obj = arr.optJSONObject(i) ?: return@mapNotNull null
+                val ordId = obj.optString("orderId").trim()
+                if (ordId.isBlank()) return@mapNotNull null
+                ForwardedReceiptLog(
+                    id = obj.optString("id", UUID.randomUUID().toString().take(8)),
+                    orderId = ordId,
+                    customerId = obj.optString("customerId", ""),
+                    customerName = obj.optString("customerName", ""),
+                    customerPhone = obj.optString("customerPhone", ""),
+                    portalTitle = obj.optString("portalTitle", ""),
+                    format = obj.optString("format", "PDF"),
+                    amount = obj.optDouble("amount", 0.0),
+                    accountLabel = obj.optString("accountLabel", ""),
+                    forwardedAt = obj.optLong("forwardedAt", System.currentTimeMillis())
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun persistForwardedReceipts(list: List<ForwardedReceiptLog>) {
+        val arr = JSONArray()
+        list.take(300).forEach { r ->
+            arr.put(JSONObject().apply {
+                put("id", r.id)
+                put("orderId", r.orderId)
+                put("customerId", r.customerId)
+                put("customerName", r.customerName)
+                put("customerPhone", r.customerPhone)
+                put("portalTitle", r.portalTitle)
+                put("format", r.format)
+                put("amount", r.amount)
+                put("accountLabel", r.accountLabel)
+                put("forwardedAt", r.forwardedAt)
+            })
+        }
+        adminPrefs.edit().putString("forwarded_receipts_json", arr.toString()).apply()
+    }
+
+    private val _forwardedReceipts = MutableStateFlow(loadForwardedReceipts())
+    val forwardedReceipts: StateFlow<List<ForwardedReceiptLog>> = _forwardedReceipts.asStateFlow()
+
+    fun recordForwardedReceiptToOdiya(order: Order, format: String) {
+        val entry = ForwardedReceiptLog(
+            orderId = order.orderId,
+            customerId = order.customerId,
+            customerName = order.customerName,
+            customerPhone = order.customerPhone,
+            portalTitle = order.paymentMethod.title,
+            format = format.uppercase(),
+            amount = order.totalAmount,
+            accountLabel = order.paymentAccount,
+            forwardedAt = System.currentTimeMillis()
+        )
+        val updated = listOf(entry) + _forwardedReceipts.value
+        _forwardedReceipts.value = updated
+        persistForwardedReceipts(updated)
+    }
+
+    private fun loadCustomerChatHistory(): List<CustomerChatHistoryEntry> {
+        val raw = adminPrefs.getString("customer_live_chat_history_json", null) ?: return emptyList()
+        return try {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).mapNotNull { i ->
+                val obj = arr.optJSONObject(i) ?: return@mapNotNull null
+                val txt = obj.optString("text").trim()
+                if (txt.isBlank()) return@mapNotNull null
+                CustomerChatHistoryEntry(
+                    id = obj.optString("id", UUID.randomUUID().toString().take(8)),
+                    roomId = obj.optString("roomId", ""),
+                    customerId = obj.optString("customerId", ""),
+                    customerName = obj.optString("customerName", ""),
+                    customerPhone = obj.optString("customerPhone", ""),
+                    senderName = obj.optString("senderName", ""),
+                    isFromAdmin = obj.optBoolean("isFromAdmin", false),
+                    text = txt,
+                    timestamp = obj.optLong("timestamp", System.currentTimeMillis())
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun persistCustomerChatHistory(list: List<CustomerChatHistoryEntry>) {
+        val arr = JSONArray()
+        list.take(300).forEach { m ->
+            arr.put(JSONObject().apply {
+                put("id", m.id)
+                put("roomId", m.roomId)
+                put("customerId", m.customerId)
+                put("customerName", m.customerName)
+                put("customerPhone", m.customerPhone)
+                put("senderName", m.senderName)
+                put("isFromAdmin", m.isFromAdmin)
+                put("text", m.text)
+                put("timestamp", m.timestamp)
+            })
+        }
+        adminPrefs.edit().putString("customer_live_chat_history_json", arr.toString()).apply()
+    }
+
+    private val _customerChatHistory = MutableStateFlow(loadCustomerChatHistory())
+    val customerChatHistory: StateFlow<List<CustomerChatHistoryEntry>> = _customerChatHistory.asStateFlow()
+
+    private fun recordLiveChatHistoryEntry(
+        roomId: String,
+        customerId: String,
+        customerName: String,
+        customerPhone: String,
+        senderName: String,
+        isFromAdmin: Boolean,
+        text: String,
+        timestamp: Long = System.currentTimeMillis()
+    ) {
+        if (text.isBlank()) return
+        val entry = CustomerChatHistoryEntry(
+            roomId = roomId,
+            customerId = customerId,
+            customerName = customerName,
+            customerPhone = customerPhone,
+            senderName = senderName,
+            isFromAdmin = isFromAdmin,
+            text = text,
+            timestamp = timestamp
+        )
+        val updated = listOf(entry) + _customerChatHistory.value
+        _customerChatHistory.value = updated.take(300)
+        persistCustomerChatHistory(updated)
+    }
+
     private fun appendPartnerTransaction(txn: PartnerFolderTransaction) {
         val updated = listOf(txn) + _partnerTransactions.value
         _partnerTransactions.value = updated
@@ -4831,6 +5205,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         paystackAccountName: String = "",
         paystackSubaccountCode: String = "",
         autoDeductHostingFromPaystackSplit: Boolean = true,
+        nextOfKinName: String = "",
+        nextOfKinGender: String = "",
+        nextOfKinPhone: String = "",
+        customerId: String = _currentCustomer.value?.id.orEmpty(),
         onComplete: (PartnerOrganization) -> Unit
     ) {
         val cleanPaystackBank = paystackBankCode.trim().ifBlank {
@@ -4871,11 +5249,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             paystackAccountNumber = cleanPaystackNum,
             paystackAccountName = cleanPaystackNm,
             pendingHostingFeeBalance = 0.0,
-            autoDeductHostingFromPaystackSplit = autoDeductHostingFromPaystackSplit
+            autoDeductHostingFromPaystackSplit = autoDeductHostingFromPaystackSplit,
+            nextOfKinName = nextOfKinName.trim(),
+            nextOfKinGender = nextOfKinGender.trim(),
+            nextOfKinPhone = nextOfKinPhone.trim(),
+            customerId = customerId.trim()
         )
         val updated = listOf(newPartner) + _partnerOrganizations.value
         _partnerOrganizations.value = updated
         persistPartnerOrganizations(updated)
+        _pendingPartnershipDraft.value = null
         pushPartnerLedgerAsync(preferLocal = true)
         voiceManager.speakText("New Business Partnership & MOU application received from ${newPartner.businessName} for ${newPartner.primaryCategory}.")
         onComplete(newPartner)
@@ -6725,7 +7108,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val callerPhone = ev.payload.optString("callerPhone", "")
                 val topic = ev.payload.optString("topic", "Live Support")
                 val modeStr = ev.payload.optString("mode", "AUDIO")
-                val mode = if (modeStr.equals("VIDEO", true)) LiveCallMode.VIDEO else LiveCallMode.AUDIO
+                val mode = LiveCallMode.fromWire(modeStr, LiveCallMode.AUDIO)
                 val req = LiveCallRequest(
                     roomId = ev.roomId,
                     callerName = callerName,
@@ -6742,21 +7125,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     ShopNotificationHelper.notifyIncomingLiveCall(
                         context = getApplication(),
                         callerName = callerName,
-                        isVideoCall = mode == LiveCallMode.VIDEO
+                        isVideoCall = mode == LiveCallMode.VIDEO,
+                        isLiveChat = mode == LiveCallMode.CHAT
                     )
                     voiceManager.speakText("Incoming ${mode.label} from $callerName")
                 }
             }
             "ACCEPT" -> {
-                if (ev.roomId == state.roomId && (state.phase == LiveCallPhase.RINGING_OUTGOING || state.phase == LiveCallPhase.CONNECTING)) {
+                if (ev.roomId == state.roomId && (state.phase == LiveCallPhase.RINGING_OUTGOING || state.phase == LiveCallPhase.CONNECTING || state.phase == LiveCallPhase.CONNECTED)) {
                     val responder = ev.payload.optString("responderName", "Store Admin")
                     val modeStr = ev.payload.optString("mode", state.mode.name)
-                    val mode = if (modeStr.equals("VIDEO", true)) LiveCallMode.VIDEO else LiveCallMode.AUDIO
+                    val mode = LiveCallMode.fromWire(modeStr, state.mode)
                     _liveCallState.value = state.copy(
-                        phase = LiveCallPhase.CONNECTING,
+                        phase = if (mode == LiveCallMode.CHAT) LiveCallPhase.CONNECTED else LiveCallPhase.CONNECTING,
                         mode = mode,
                         peerName = responder,
-                        statusBanner = "$responder answered — linking live ${mode.label.lowercase()}..."
+                        statusBanner = if (mode == LiveCallMode.CHAT) {
+                            "$responder joined Live Chat"
+                        } else {
+                            "$responder answered — linking live ${mode.label.lowercase()}..."
+                        }
                     )
                 }
             }
@@ -6776,11 +7164,69 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             "MODE_SWITCH" -> {
                 if (ev.roomId == state.roomId) {
                     val modeStr = ev.payload.optString("mode", "AUDIO")
-                    val switched = if (modeStr.equals("VIDEO", true)) LiveCallMode.VIDEO else LiveCallMode.AUDIO
+                    val switched = LiveCallMode.fromWire(modeStr, state.mode)
                     val actor = ev.payload.optString("actorName", state.peerName)
                     _liveCallState.value = state.copy(
                         mode = switched,
-                        statusBanner = "$actor switched call to ${switched.label}"
+                        phase = if (switched == LiveCallMode.CHAT) LiveCallPhase.CONNECTED else state.phase,
+                        statusBanner = "$actor switched session to ${switched.label}"
+                    )
+                }
+            }
+            "PARTNERSHIP_INTEREST" -> {
+                val reqId = ev.payload.optString("id", "").trim()
+                val cName = ev.payload.optString("customerName", "Customer")
+                val cPhone = ev.payload.optString("customerPhone", "")
+                val bName = ev.payload.optString("businessName", cName)
+                val catsArr = ev.payload.optJSONArray("productCategories")
+                val cats = if (catsArr != null) {
+                    (0 until catsArr.length()).mapNotNull { i -> catsArr.optString(i).takeIf { it.isNotBlank() } }
+                } else emptyList()
+                if (reqId.isNotBlank() && _partnershipInterestRequests.value.none { it.id == reqId }) {
+                    val newReq = PartnershipInterestRequest(
+                        id = reqId,
+                        customerId = ev.payload.optString("customerId", ""),
+                        customerName = cName,
+                        customerPhone = cPhone,
+                        customerEmail = ev.payload.optString("customerEmail", ""),
+                        businessName = bName,
+                        officeAddress = ev.payload.optString("officeAddress", ""),
+                        productCategories = cats,
+                        note = ev.payload.optString("note", ""),
+                        status = PartnershipInterestStatus.PENDING,
+                        createdAt = ev.payload.optLong("createdAt", System.currentTimeMillis()),
+                        updatedAt = System.currentTimeMillis()
+                    )
+                    val updatedReqs = listOf(newReq) + _partnershipInterestRequests.value
+                    _partnershipInterestRequests.value = updatedReqs
+                    persistPartnershipInterestRequests(updatedReqs)
+                }
+                if (isAdminDevice) {
+                    ShopNotificationHelper.notifyAdminPartnershipInterest(
+                        context = getApplication(),
+                        customerName = cName,
+                        businessName = bName,
+                        categories = cats
+                    )
+                    voiceManager.speakText("Partnership interest received from $cName.")
+                }
+            }
+            "PARTNERSHIP_DECISION" -> {
+                val reqId = ev.payload.optString("id", "").trim()
+                val accept = ev.payload.optBoolean("accept", false)
+                val reply = ev.payload.optString("adminReply", "")
+                val updAt = ev.payload.optLong("updatedAt", System.currentTimeMillis())
+                if (reqId.isNotBlank()) {
+                    val nextStatus = if (accept) PartnershipInterestStatus.ACCEPTED else PartnershipInterestStatus.REJECTED
+                    val updatedReqs = _partnershipInterestRequests.value.map { r ->
+                        if (r.id == reqId) r.copy(status = nextStatus, adminReply = reply, updatedAt = updAt) else r
+                    }
+                    _partnershipInterestRequests.value = updatedReqs
+                    persistPartnershipInterestRequests(updatedReqs)
+                    ShopNotificationHelper.notifyCustomerPartnershipDecision(
+                        context = getApplication(),
+                        accepted = accept,
+                        adminReply = reply
                     )
                 }
             }
@@ -6810,17 +7256,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             "CHAT" -> {
                 if (ev.roomId == state.roomId || state.roomId.isBlank()) {
+                    val isFromAdmin = ev.payload.optBoolean("isFromAdmin", false)
+                    val senderName = ev.payload.optString("senderName", if (isFromAdmin) "Admin Desk" else "Customer")
+                    val textBody = ev.payload.optString("text", "")
+                    val tsNow = System.currentTimeMillis()
                     val msg = LiveCallMessage(
                         id = UUID.randomUUID().toString().take(8),
-                        senderName = ev.payload.optString("senderName", "Customer"),
-                        isFromAdmin = ev.payload.optBoolean("isFromAdmin", false),
-                        text = ev.payload.optString("text", ""),
+                        senderName = senderName,
+                        isFromAdmin = isFromAdmin,
+                        text = textBody,
                         attachedTag = ev.payload.optString("attachedTag", ""),
-                        timestamp = System.currentTimeMillis()
+                        timestamp = tsNow
                     )
                     if (msg.text.isNotBlank()) {
                         _liveCallState.value = state.copy(
                             chatMessages = (state.chatMessages + msg).takeLast(60)
+                        )
+                        recordLiveChatHistoryEntry(
+                            roomId = ev.roomId.ifBlank { state.roomId },
+                            customerId = ev.payload.optString("customerId", ""),
+                            customerName = ev.payload.optString("customerName", senderName),
+                            customerPhone = ev.payload.optString("customerPhone", ""),
+                            senderName = senderName,
+                            isFromAdmin = isFromAdmin,
+                            text = textBody,
+                            timestamp = tsNow
                         )
                     }
                 }
@@ -6985,19 +7445,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
         val updatedReqs = (listOf(req) + _liveCallState.value.incomingRequests.filterNot { it.roomId == roomId }).take(10)
 
+        val isChatOnly = mode == LiveCallMode.CHAT
+        val initialGreeting = if (isChatOnly) {
+            listOf(
+                LiveCallMessage(
+                    id = UUID.randomUUID().toString().take(8),
+                    senderName = "${_storeProfile.value.storeName} Live Chat Desk",
+                    isFromAdmin = true,
+                    text = "Welcome to ${_storeProfile.value.storeName} Live Chat! Topic: $cleanTopic. Type any message below — switch to Audio Talk or Video Call anytime.",
+                    timestamp = System.currentTimeMillis()
+                )
+            )
+        } else {
+            emptyList()
+        }
+
         _liveCallState.value = _liveCallState.value.copy(
-            phase = LiveCallPhase.RINGING_OUTGOING,
+            phase = if (isChatOnly) LiveCallPhase.CONNECTED else LiveCallPhase.RINGING_OUTGOING,
             mode = mode,
             roomId = roomId,
             peerName = "${_storeProfile.value.storeName} Admin",
             topic = cleanTopic,
             isAdminRole = false,
             isCallerInitiator = true,
-            isMicMuted = false,
+            isMicMuted = isChatOnly,
             elapsedSeconds = 0,
             incomingRequests = updatedReqs,
-            chatMessages = emptyList(),
-            statusBanner = "Ringing Admin Desk in ${mode.label} mode..."
+            chatMessages = initialGreeting,
+            statusBanner = if (isChatOnly) {
+                "Live Chat Connected • Switch to Audio or Video anytime"
+            } else {
+                "Ringing Admin Desk in ${mode.label} mode..."
+            }
         )
 
         val payload = JSONObject().apply {
@@ -7014,25 +7493,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             liveCallClient.publishLobbySnapshot(cfg.url, cfg.anonKey, _liveCallState.value.adminOnline, updatedReqs)
         }
 
-        // Activate full interactive Audio & Visual Desk right away so microphone/camera/concierge work seamlessly even solo or waiting on peer
+        // Activate session immediately
         startLiveCallTimer()
-        viewModelScope.launch {
-            delay(1800L)
-            val cur = _liveCallState.value
-            if (cur.roomId == roomId && cur.phase == LiveCallPhase.RINGING_OUTGOING) {
-                val greetingMsg = LiveCallMessage(
-                    id = UUID.randomUUID().toString().take(8),
-                    senderName = "${_storeProfile.value.storeName} Live Desk",
-                    isFromAdmin = true,
-                    text = "Welcome to ${_storeProfile.value.storeName} Interactive ${mode.label} Studio! Topic: $cleanTopic. Your live audio/video is active.",
-                    timestamp = System.currentTimeMillis()
-                )
-                _liveCallState.value = cur.copy(
-                    phase = LiveCallPhase.CONNECTED,
-                    statusBanner = "Live ${mode.label} Interactive Desk Active",
-                    chatMessages = (cur.chatMessages + greetingMsg).takeLast(60)
-                )
-                voiceManager.speakText("Welcome to ${_storeProfile.value.storeName} Live ${mode.label} Desk. Topic: $cleanTopic.")
+        if (!isChatOnly) {
+            viewModelScope.launch {
+                delay(1800L)
+                val cur = _liveCallState.value
+                if (cur.roomId == roomId && cur.phase == LiveCallPhase.RINGING_OUTGOING) {
+                    val greetingMsg = LiveCallMessage(
+                        id = UUID.randomUUID().toString().take(8),
+                        senderName = "${_storeProfile.value.storeName} Live Desk",
+                        isFromAdmin = true,
+                        text = "Welcome to ${_storeProfile.value.storeName} Interactive ${mode.label} Studio! Topic: $cleanTopic. Your live audio/video is active.",
+                        timestamp = System.currentTimeMillis()
+                    )
+                    _liveCallState.value = cur.copy(
+                        phase = LiveCallPhase.CONNECTED,
+                        statusBanner = "Live ${mode.label} Interactive Desk Active",
+                        chatMessages = (cur.chatMessages + greetingMsg).takeLast(60)
+                    )
+                    voiceManager.speakText("Welcome to ${_storeProfile.value.storeName} Live ${mode.label} Desk. Topic: $cleanTopic.")
+                }
             }
         }
     }
@@ -7087,21 +7568,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         startLiveCallSignalingIfConfigured()
         val adminName = _storeProfile.value.storeName.ifBlank { "ODIYA" } + " Admin"
         val remaining = _liveCallState.value.incomingRequests.filterNot { it.roomId == request.roomId }
+        val isChatOnly = answerMode == LiveCallMode.CHAT
+        val introMsgs = if (isChatOnly) {
+            listOf(
+                LiveCallMessage(
+                    id = UUID.randomUUID().toString().take(8),
+                    senderName = adminName,
+                    isFromAdmin = true,
+                    text = "Admin joined Live Chat with ${request.callerName} (Topic: ${request.topic}).",
+                    timestamp = System.currentTimeMillis()
+                )
+            )
+        } else {
+            emptyList()
+        }
         _liveCallState.value = _liveCallState.value.copy(
-            phase = LiveCallPhase.CONNECTING,
+            phase = if (isChatOnly) LiveCallPhase.CONNECTED else LiveCallPhase.CONNECTING,
             mode = answerMode,
             roomId = request.roomId,
             peerName = request.callerName,
             topic = request.topic,
             isAdminRole = true,
             isCallerInitiator = false,
-            isMicMuted = false,
+            isMicMuted = isChatOnly,
             elapsedSeconds = 0,
             adminOnline = true,
             incomingRequests = remaining,
-            chatMessages = emptyList(),
-            statusBanner = "Connecting live ${answerMode.label.lowercase()} with ${request.callerName}..."
+            chatMessages = introMsgs,
+            statusBanner = if (isChatOnly) {
+                "Live Chat active with ${request.callerName}"
+            } else {
+                "Connecting live ${answerMode.label.lowercase()} with ${request.callerName}..."
+            }
         )
+        if (isChatOnly) startLiveCallTimer()
         navigateTo(AppScreen.LIVE_CALL)
         liveCallClient.sendSignal(
             "ACCEPT",
@@ -7188,15 +7688,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             _currentCustomer.value?.fullName?.ifBlank { "Customer" } ?: "Customer"
         }
+        val tsNow = System.currentTimeMillis()
         val msg = LiveCallMessage(
             id = UUID.randomUUID().toString().take(8),
             senderName = sender,
             isFromAdmin = state.isAdminRole,
             text = clean.ifBlank { "Shared $attachedTag" },
             attachedTag = attachedTag,
-            timestamp = System.currentTimeMillis()
+            timestamp = tsNow
         )
         _liveCallState.value = state.copy(chatMessages = (state.chatMessages + msg).takeLast(60))
+        val cust = _currentCustomer.value
+        recordLiveChatHistoryEntry(
+            roomId = state.roomId,
+            customerId = cust?.id.orEmpty(),
+            customerName = if (state.isAdminRole) state.peerName else (cust?.fullName?.ifBlank { sender } ?: sender),
+            customerPhone = cust?.phoneNumber.orEmpty(),
+            senderName = sender,
+            isFromAdmin = state.isAdminRole,
+            text = msg.text,
+            timestamp = tsNow
+        )
         if (state.roomId.isNotBlank()) {
             liveCallClient.sendSignal(
                 "CHAT",
@@ -7204,11 +7716,44 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 JSONObject().apply {
                     put("senderName", sender)
                     put("isFromAdmin", state.isAdminRole)
+                    put("customerId", cust?.id.orEmpty())
+                    put("customerName", cust?.fullName.orEmpty())
+                    put("customerPhone", cust?.phoneNumber.orEmpty())
                     put("text", msg.text)
                     put("attachedTag", attachedTag)
                 }
             )
         }
+    }
+
+    fun openAdminLiveChatSession(customerName: String = "Customer", customerPhone: String = "") {
+        startLiveCallSignalingIfConfigured()
+        val roomId = "chat_" + UUID.randomUUID().toString().take(8)
+        val adminName = _storeProfile.value.storeName.ifBlank { "ODIYA" } + " Admin"
+        _liveCallState.value = _liveCallState.value.copy(
+            phase = LiveCallPhase.CONNECTED,
+            mode = LiveCallMode.CHAT,
+            roomId = roomId,
+            peerName = customerName.ifBlank { "Customer" },
+            topic = "Direct Live Chat Support",
+            isAdminRole = true,
+            isCallerInitiator = true,
+            isMicMuted = true,
+            elapsedSeconds = 0,
+            adminOnline = true,
+            chatMessages = listOf(
+                LiveCallMessage(
+                    id = UUID.randomUUID().toString().take(8),
+                    senderName = adminName,
+                    isFromAdmin = true,
+                    text = "Live Chat opened with ${customerName.ifBlank { "Customer" }}${if (customerPhone.isNotBlank()) " ($customerPhone)" else ""}.",
+                    timestamp = System.currentTimeMillis()
+                )
+            ),
+            statusBanner = "Live Chat Active • ${customerName.ifBlank { "Customer" }}"
+        )
+        startLiveCallTimer()
+        navigateTo(AppScreen.LIVE_CALL)
     }
 
     fun sendWebRtcOutboundSignal(signalJson: String) {

@@ -83,7 +83,33 @@ data class PartnerOrganization(
     val paystackAccountNumber: String = "",
     val paystackAccountName: String = "",
     val pendingHostingFeeBalance: Double = 0.0,
-    val autoDeductHostingFromPaystackSplit: Boolean = true
+    val autoDeductHostingFromPaystackSplit: Boolean = true,
+    val nextOfKinName: String = "",
+    val nextOfKinGender: String = "",
+    val nextOfKinPhone: String = "",
+    val customerId: String = ""
+)
+
+enum class PartnershipInterestStatus(val label: String) {
+    PENDING("Pending Admin Review"),
+    ACCEPTED("Accepted • Complete Full MOU"),
+    REJECTED("Declined by Admin")
+}
+
+data class PartnershipInterestRequest(
+    val id: String = "PINT-${UUID.randomUUID().toString().take(8).uppercase()}",
+    val customerId: String = "",
+    val customerName: String = "",
+    val customerPhone: String = "",
+    val customerEmail: String = "",
+    val businessName: String = "",
+    val officeAddress: String = "",
+    val productCategories: List<String> = emptyList(),
+    val note: String = "",
+    val status: PartnershipInterestStatus = PartnershipInterestStatus.PENDING,
+    val adminReply: String = "",
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
 )
 
 data class PartnerProductSubmission(

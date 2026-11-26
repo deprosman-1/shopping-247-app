@@ -98,6 +98,7 @@ import com.example.data.model.PartnerOrganization
 import com.example.data.model.PartnerProductSubmission
 import com.example.data.model.PartnerSubmissionStatus
 import com.example.data.model.PartnerTransactionType
+import com.example.data.model.PartnershipInterestStatus
 import com.example.data.model.ProductCategory
 import com.example.data.model.SalesReportPeriod
 import com.example.data.remote.PaystackGatewayService
@@ -132,6 +133,7 @@ fun AdminPartnerHubTab(
     val allProducts by viewModel.allProducts.collectAsState()
     val storeProfile by viewModel.storeProfile.collectAsState()
     val isSupabaseBusy by viewModel.isSupabaseBusy.collectAsState()
+    val interestOffers by viewModel.partnershipInterestRequests.collectAsState()
 
     var section by rememberSaveable { mutableIntStateOf(0) } // 0=MOU Agreements, 1=Staging & Batch Cloud, 2=Folders & Analytics
     var selectedFolderId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -240,7 +242,97 @@ fun AdminPartnerHubTab(
         }
 
         when (section) {
-            0 -> AdminPartnerAgreementsSection(
+            0 -> {
+                if (interestOffers.isNotEmpty()) {
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                        border = BorderStroke(1.2.dp, AccentGold.copy(alpha = 0.65f)),
+                        modifier = Modifier.fillMaxWidth().testTag("admin_partnership_interest_offers_card")
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                text = "Customer Partnership Interest Offers (${interestOffers.size})",
+                                fontWeight = FontWeight.Black,
+                                fontSize = 14.sp,
+                                color = AccentGold
+                            )
+                            interestOffers.forEach { offer ->
+                                var replyInput by remember(offer.id) { mutableStateOf(offer.adminReply) }
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.surface,
+                                    border = BorderStroke(
+                                        1.dp,
+                                        when (offer.status) {
+                                            PartnershipInterestStatus.ACCEPTED -> SuccessGreen
+                                            PartnershipInterestStatus.REJECTED -> Color(0xFFEF4444)
+                                            PartnershipInterestStatus.PENDING -> AccentGold
+                                        }
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text("${offer.customerName} (${offer.customerPhone})", fontWeight = FontWeight.Black, fontSize = 13.sp)
+                                            Text(
+                                                text = offer.status.label,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Black,
+                                                color = when (offer.status) {
+                                                    PartnershipInterestStatus.ACCEPTED -> SuccessGreen
+                                                    PartnershipInterestStatus.REJECTED -> Color(0xFFEF4444)
+                                                    PartnershipInterestStatus.PENDING -> AccentGold
+                                                }
+                                            )
+                                        }
+                                        if (offer.businessName.isNotBlank() || offer.customerEmail.isNotBlank()) {
+                                            Text("Business: ${offer.businessName.ifBlank { "Individual" }} • Email: ${offer.customerEmail.ifBlank { "N/A" }}", fontSize = 11.5.sp)
+                                        }
+                                        Text("Office: ${offer.officeAddress}", fontSize = 11.5.sp)
+                                        Text("Categories of Interest: ${offer.productCategories.joinToString()}", fontSize = 11.5.sp, color = CyberCyan)
+                                        if (offer.note.isNotBlank()) {
+                                            Text("Notes: ${offer.note}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                        OutlinedTextField(
+                                            value = replyInput,
+                                            onValueChange = { replyInput = it },
+                                            label = { Text("Reply Message to Customer") },
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Button(
+                                                onClick = {
+                                                    viewModel.replyPartnershipInterest(offer.id, accept = true, adminReply = replyInput)
+                                                    Toast.makeText(context, "Partnership Offer Accepted!", Toast.LENGTH_SHORT).show()
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
+                                                modifier = Modifier.weight(1f).height(44.dp).testTag("admin_accept_offer_${offer.id}")
+                                            ) {
+                                                Text("Accept", fontSize = 12.sp, fontWeight = FontWeight.Black)
+                                            }
+                                            OutlinedButton(
+                                                onClick = {
+                                                    viewModel.replyPartnershipInterest(offer.id, accept = false, adminReply = replyInput)
+                                                    Toast.makeText(context, "Partnership Offer Rejected.", Toast.LENGTH_SHORT).show()
+                                                },
+                                                modifier = Modifier.weight(1f).height(44.dp).testTag("admin_reject_offer_${offer.id}")
+                                            ) {
+                                                Text("Reject", fontSize = 12.sp, color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                AdminPartnerAgreementsSection(
                 partners = partners,
                 nairaFormat = nairaFormat,
                 onCounterSignAndFinalize = { partnerId, adminSigName, adminStrokes, comm, qty, unit, fee, dur, opayN, opayNm, monieN, monieNm ->
@@ -273,6 +365,7 @@ fun AdminPartnerHubTab(
                     saveMouPdfLauncher.launch("${p.id}_Signed_MOU.pdf")
                 }
             )
+            }
 
             1 -> AdminPartnerStagingBatchSection(
                 partners = partners,
@@ -544,6 +637,14 @@ private fun AdminPartnerAgreementsSection(
                 if (isExpanded) {
                     HorizontalDivider()
                     Text("Date: ${partner.agreementDate} • Address: ${partner.businessAddress.ifBlank { "On file" }}", fontSize = 11.5.sp)
+                    if (partner.nextOfKinName.isNotBlank() || partner.nextOfKinPhone.isNotBlank()) {
+                        Text(
+                            text = "Next of Kin: ${partner.nextOfKinName.ifBlank { "N/A" }} • Gender: ${partner.nextOfKinGender.ifBlank { "N/A" }} • Phone(s): ${partner.nextOfKinPhone.ifBlank { "N/A" }}",
+                            fontSize = 11.5.sp,
+                            color = CyberCyan,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
 
                     // Editable Commercial Terms
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

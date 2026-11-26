@@ -27,8 +27,15 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 enum class LiveCallMode(val label: String) {
+    CHAT("Live Chat"),
     AUDIO("Audio Talk"),
-    VIDEO("Video Call")
+    VIDEO("Video Call");
+
+    companion object {
+        fun fromWire(raw: String, fallback: LiveCallMode = AUDIO): LiveCallMode {
+            return entries.firstOrNull { it.name.equals(raw.trim(), ignoreCase = true) } ?: fallback
+        }
+    }
 }
 
 enum class LiveCallPhase(val label: String) {
@@ -355,7 +362,7 @@ class LiveCallSignalingClient(
                                 val created = item.optLong("createdAt", 0L)
                                 if (ts - created <= 120_000L) {
                                     val modeStr = item.optString("mode", "AUDIO")
-                                    val mode = if (modeStr.equals("VIDEO", true)) LiveCallMode.VIDEO else LiveCallMode.AUDIO
+                                    val mode = LiveCallMode.fromWire(modeStr, LiveCallMode.AUDIO)
                                     list.add(
                                         LiveCallRequest(
                                             roomId = item.optString("roomId"),

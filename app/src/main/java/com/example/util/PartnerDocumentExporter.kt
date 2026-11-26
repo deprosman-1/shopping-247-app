@@ -73,7 +73,92 @@ object PartnerDocumentExporter {
         partner: PartnerOrganization,
         storeProfile: StoreProfileConfig
     ) {
+        val buffer = java.io.ByteArrayOutputStream()
+        val richOk = try {
+            writeRichPartnerMouPdfWithAndroidFramework(buffer, partner, storeProfile)
+            buffer.size() > 20
+        } catch (_: Throwable) {
+            false
+        }
+        if (richOk) {
+            outputStream.write(buffer.toByteArray())
+        } else {
+            writeFallbackPlainMouPdf14(outputStream, partner, storeProfile)
+        }
+    }
+
+    private fun writeFallbackPlainMouPdf14(
+        outputStream: OutputStream,
+        partner: PartnerOrganization,
+        storeProfile: StoreProfileConfig
+    ) {
+        val naira = nairaFormatter()
+        val storeTitle = storeProfile.storeName.ifBlank { "ODIYA" }.uppercase()
+        val lines = listOf(
+            "$storeTitle - MEMORANDUM OF UNDERSTANDING (PARTNERSHIP)",
+            "Partner ID: ${partner.id} | Status: ${partner.status.label}",
+            "1. PARTIES & NEXT OF KIN DETAILS",
+            "Platform Host: ${storeProfile.storeName} (${storeProfile.phoneNumber.ifBlank { "Official Store" }})",
+            "Partner Organisation: ${partner.businessName}",
+            "Partner Owner: ${partner.ownerName} (${partner.ownerPhone})",
+            "Business Address: ${partner.businessAddress}",
+            "Next of Kin Name: ${partner.nextOfKinName.ifBlank { "-" }}",
+            "Next of Kin Gender: ${partner.nextOfKinGender.ifBlank { "-" }}",
+            "Next of Kin Phone(s): ${partner.nextOfKinPhone.ifBlank { "-" }}",
+            "2. COMMERCIAL & HOSTING TERMS",
+            "Category: ${partner.primaryCategory} | Date: ${partner.agreementDate}",
+            "Hosting Duration: ${partner.hostingDuration} | Monthly Fee: ${naira.format(partner.monthlyHostingPayment)}",
+            "Commission: ${String.format(Locale.US, "%.1f", partner.stipulatedCommissionPercent)}% per product sold",
+            "3. SIGNATORIES",
+            "Partner Signature: ${partner.partnerSignatureName.ifBlank { partner.ownerName }}",
+            "Admin Counter-Signature: ${partner.adminCounterSignatureName.ifBlank { "Pending Admin Counter-Signature" }}"
+        )
+        fun escPdf(s: String): String = s
+            .replace("\\", "\\\\")
+            .replace("(", "\\(")
+            .replace(")", "\\)")
+            .replace(Regex("[^\\x20-\\x7E]"), " ")
+
+        val contentBuilder = StringBuilder("BT\n/F1 11 Tf\n40 790 Td\n16 TL\n")
+        lines.forEachIndexed { idx, line ->
+            if (idx == 0) {
+                contentBuilder.append("(${escPdf(line)}) Tj\n")
+            } else {
+                contentBuilder.append("T* (${escPdf(line)}) Tj\n")
+            }
+        }
+        contentBuilder.append("ET\n")
+        val streamBytes = contentBuilder.toString().toByteArray(Charsets.US_ASCII)
+
+        val objs = listOf(
+            "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n",
+            "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n",
+            "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj\n",
+            "4 0 obj << /Length ${streamBytes.size} >>\nstream\n${String(streamBytes, Charsets.US_ASCII)}endstream\nendobj\n",
+            "5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n"
+        )
+        val sb = StringBuilder("%PDF-1.4\n")
+        val offsets = mutableListOf<Int>()
+        for (o in objs) {
+            offsets.add(sb.length)
+            sb.append(o)
+        }
+        val xrefPos = sb.length
+        sb.append("xref\n0 ${objs.size + 1}\n0000000000 65535 f \n")
+        for (off in offsets) {
+            sb.append(String.format(Locale.US, "%010d 00000 n \n", off))
+        }
+        sb.append("trailer << /Size ${objs.size + 1} /Root 1 0 R >>\nstartxref\n$xrefPos\n%%EOF\n")
+        outputStream.write(sb.toString().toByteArray(Charsets.US_ASCII))
+    }
+
+    private fun writeRichPartnerMouPdfWithAndroidFramework(
+        outputStream: OutputStream,
+        partner: PartnerOrganization,
+        storeProfile: StoreProfileConfig
+    ) {
         val doc = PdfDocument()
+        try {
         val page = doc.startPage(PdfDocument.PageInfo.Builder(595, 842, 1).create())
         val canvas = page.canvas
         val naira = nairaFormatter()
@@ -115,19 +200,22 @@ object PartnerDocumentExporter {
         }
         val linePaint = Paint().apply { color = Color.parseColor("#CBD5E1"); strokeWidth = 1f }
 
-        var y = 142f
+        var y = 134f
         fun drawRow(label: String, value: String) {
             canvas.drawText(label, 36f, y, labelPaint)
             canvas.drawText(value.ifBlank { "-" }.take(58), 230f, y, valuePaint)
-            y += 20f
+            y += 17.5f
         }
 
-        canvas.drawText("1. PARTIES TO THE AGREEMENT", 36f, y, sectionPaint); y += 18f
+        canvas.drawText("1. PARTIES & NEXT OF KIN DETAILS", 36f, y, sectionPaint); y += 16f
         drawRow("Platform Host:", "${storeProfile.storeName} (${storeProfile.phoneNumber.ifBlank { "Official Store" }})")
         drawRow("Partner Organisation:", partner.businessName)
         drawRow("Partner Owner:", partner.ownerName)
         drawRow("Partner Phone:", partner.ownerPhone)
         drawRow("Business Address:", partner.businessAddress)
+        drawRow("Next of Kin Name:", partner.nextOfKinName)
+        drawRow("Next of Kin Gender:", partner.nextOfKinGender)
+        drawRow("Next of Kin Phone(s):", partner.nextOfKinPhone)
 
         y += 6f; canvas.drawLine(36f, y, 559f, y, linePaint); y += 22f
         canvas.drawText("2. COMMERCIAL & HOSTING TERMS", 36f, y, sectionPaint); y += 18f
@@ -187,7 +275,9 @@ object PartnerDocumentExporter {
 
         doc.finishPage(page)
         doc.writeTo(outputStream)
-        doc.close()
+        } finally {
+            try { doc.close() } catch (_: Throwable) {}
+        }
     }
 
     fun sharePartnerMouPdf(

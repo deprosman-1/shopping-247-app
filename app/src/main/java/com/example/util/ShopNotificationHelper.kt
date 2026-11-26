@@ -235,17 +235,58 @@ object ShopNotificationHelper {
     fun notifyIncomingLiveCall(
         context: Context,
         callerName: String,
-        isVideoCall: Boolean
+        isVideoCall: Boolean,
+        isLiveChat: Boolean = false
     ) {
         if (!hasNotificationPermission(context)) return
         ensureChannels(context)
-        val kind = if (isVideoCall) "Live Video Call" else "Live Audio Call"
+        val kind = when {
+            isLiveChat -> "Live Chat"
+            isVideoCall -> "Live Video Call"
+            else -> "Live Audio Call"
+        }
         postNotification(
             context = context,
             channelId = CHANNEL_ORDERS,
             notificationId = 24805,
             title = "Incoming $kind • $callerName",
-            body = "$callerName is calling Admin live on ODIYA. Tap to answer in Audio or Video mode."
+            body = "$callerName is reaching Admin live on ODIYA. Tap to answer via Live Chat, Audio, or Video."
+        )
+    }
+
+    fun notifyAdminPartnershipInterest(
+        context: Context,
+        customerName: String,
+        businessName: String,
+        categories: List<String>
+    ) {
+        if (!hasNotificationPermission(context)) return
+        ensureChannels(context)
+        postNotification(
+            context = context,
+            channelId = CHANNEL_ORDERS,
+            notificationId = ("partner_interest_${customerName}_$businessName").hashCode(),
+            title = "Partnership Interest • ${customerName.ifBlank { "Customer" }}",
+            body = "${businessName.ifBlank { customerName }} expressed partnership interest (${categories.joinToString(", ").ifBlank { "General" }}). Open Admin Partners tab to Accept or Reject."
+        )
+    }
+
+    fun notifyCustomerPartnershipDecision(
+        context: Context,
+        accepted: Boolean,
+        adminReply: String
+    ) {
+        if (!hasNotificationPermission(context)) return
+        ensureChannels(context)
+        postNotification(
+            context = context,
+            channelId = CHANNEL_ORDERS,
+            notificationId = 24866,
+            title = if (accepted) "Partnership Offer Accepted! 🎉" else "Partnership Offer Update",
+            body = adminReply.ifBlank {
+                if (accepted) "Admin accepted your partnership offer! Complete your MOU form & append signature."
+                else "Admin reviewed your partnership offer. Open Partnership in your account to view details."
+            }
         )
     }
 

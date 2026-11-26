@@ -180,6 +180,8 @@ import com.example.data.model.Customer
 import com.example.data.model.Order
 import com.example.data.model.StatusUpdate
 import com.example.data.model.OrderStatus
+import com.example.data.model.PartnerAgreementStatus
+import com.example.data.model.PartnershipInterestStatus
 import com.example.data.model.PaymentMethod
 import com.example.data.model.PreOrderRequest
 import com.example.data.model.PreOrderStatus
@@ -192,7 +194,9 @@ import com.example.data.model.StoreProfileConfig
 import com.example.data.model.SupportTicket
 import com.example.data.model.SupportTicketStatus
 import com.example.util.BiometricLockHelper
+import com.example.util.PdfInvoiceExporter
 import com.example.util.ProductImageHelper
+import com.example.util.WordInvoiceExporter
 import com.example.ui.components.DualAxisScrollContainer
 import com.example.ui.components.QrCodeView
 import com.example.ui.components.ShareAppDialog
@@ -729,9 +733,81 @@ private fun CustomerFileModal(
     val context = LocalContext.current
     val storeProfile by viewModel.storeProfile.collectAsState()
     val allPreOrders by viewModel.preOrderRequests.collectAsState()
+    val allForwardedReceipts by viewModel.forwardedReceipts.collectAsState()
+    val allChatHistory by viewModel.customerChatHistory.collectAsState()
+    val allTickets by viewModel.supportTickets.collectAsState()
+    val promoCoupons by viewModel.promoCoupons.collectAsState()
+    val loyaltyAccount by viewModel.loyaltyAccount.collectAsState()
+    val wishlistIds by viewModel.wishlistIds.collectAsState()
+    val allProducts by viewModel.allProducts.collectAsState()
+    val allReviews by viewModel.productReviews.collectAsState()
+    val partnerOrgs by viewModel.partnerOrganizations.collectAsState()
+    val partnershipOffers by viewModel.partnershipInterestRequests.collectAsState()
+    val currentCustomerSession by viewModel.currentCustomer.collectAsState()
+
     val customerPreOrders = remember(allPreOrders, customer) {
         allPreOrders.filter { matchesCustomerPreOrder(it, customer) }
     }
+    val customerOrderIds = remember(orders) { orders.map { it.orderId }.toSet() }
+    val customerForwardedReceipts = remember(allForwardedReceipts, orders, customer) {
+        val cleanPhone = customer.phoneNumber.filter { it.isDigit() }.takeLast(10)
+        allForwardedReceipts.filter { log ->
+            log.orderId in customerOrderIds ||
+                log.customerName.equals(customer.fullName, ignoreCase = true) ||
+                (cleanPhone.length >= 7 && log.customerPhone.filter { it.isDigit() }.endsWith(cleanPhone))
+        }
+    }
+    val customerChatLogs = remember(allChatHistory, customer) {
+        val cleanPhone = customer.phoneNumber.filter { it.isDigit() }.takeLast(10)
+        allChatHistory.filter { msg ->
+            msg.customerId == customer.id ||
+                msg.customerName.equals(customer.fullName, ignoreCase = true) ||
+                (cleanPhone.length >= 7 && msg.customerPhone.filter { it.isDigit() }.endsWith(cleanPhone))
+        }
+    }
+    val customerTickets = remember(allTickets, customer) {
+        val cleanPhone = customer.phoneNumber.filter { it.isDigit() }.takeLast(10)
+        allTickets.filter { t ->
+            t.customerName.equals(customer.fullName, ignoreCase = true) ||
+                (cleanPhone.length >= 7 && t.customerPhone.filter { it.isDigit() }.endsWith(cleanPhone))
+        }
+    }
+    val isSameActiveProfile = remember(currentCustomerSession, customer) {
+        currentCustomerSession?.id == customer.id ||
+            currentCustomerSession?.phoneNumber?.filter { it.isDigit() }?.takeLast(10)?.let { p ->
+                p.length >= 7 && customer.phoneNumber.filter { it.isDigit() }.endsWith(p)
+            } == true
+    }
+    val customerWishlistProducts = remember(allProducts, wishlistIds, isSameActiveProfile) {
+        if (isSameActiveProfile || wishlistIds.isNotEmpty()) {
+            allProducts.filter { it.id in wishlistIds }
+        } else emptyList()
+    }
+    val customerReviews = remember(allReviews, customer) {
+        allReviews.filter { rev ->
+            rev.customerName.equals(customer.fullName, ignoreCase = true)
+        }
+    }
+    val matchedPartner = remember(partnerOrgs, customer) {
+        val cleanPhone = customer.phoneNumber.filter { it.isDigit() }.takeLast(10)
+        partnerOrgs.firstOrNull { p ->
+            (p.customerId.isNotBlank() && p.customerId == customer.id) ||
+                p.ownerName.equals(customer.fullName, ignoreCase = true) ||
+                (cleanPhone.length >= 7 && p.ownerPhone.filter { it.isDigit() }.endsWith(cleanPhone))
+        }
+    }
+    val customerPartnershipOffers = remember(partnershipOffers, customer) {
+        val cleanPhone = customer.phoneNumber.filter { it.isDigit() }.takeLast(10)
+        partnershipOffers.filter { offer ->
+            offer.customerId == customer.id ||
+                offer.customerName.equals(customer.fullName, ignoreCase = true) ||
+                (cleanPhone.length >= 7 && offer.customerPhone.filter { it.isDigit() }.endsWith(cleanPhone))
+        }
+    }
+    val isPartnerActive = matchedPartner != null &&
+        matchedPartner.status == PartnerAgreementStatus.FINALIZED &&
+        !matchedPartner.isCatalogLocked
+
     val nairaFormat = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "NG")).apply {
             maximumFractionDigits = 0
@@ -741,29 +817,31 @@ private fun CustomerFileModal(
     val shortDateTimeFormat = remember { SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()) }
     val timeOnlyFormat = remember { SimpleDateFormat("hh:mm:ss a", Locale.getDefault()) }
 
-    var folderSectionTab by remember { mutableIntStateOf(0) } // 0 = All, 1 = Sign-Up Credentials, 2 = Orders, 3 = Pre-Orders
+    var folderSectionTab by remember { mutableIntStateOf(0) } // 0=All, 1=Credentials/Online, 2=Orders/Receipts, 3=Pre-Orders, 4=Messages, 5=Vouchers/Wishlist, 6=Reviews, 7=Partnership
     var showPasswordPlain by remember { mutableStateOf(false) }
     var selectedOrderFilter by remember { mutableStateOf<OrderStatus?>(null) }
     var viewingReceiptUrl by remember { mutableStateOf<String?>(null) }
 
     val filteredOrders = if (selectedOrderFilter == null) orders else orders.filter { it.status == selectedOrderFilter }
+    val modalOnlinePresence = viewModel.findCustomerOnlinePresence(customer)
 
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Card(
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(22.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             border = BorderStroke(1.5.dp, CyberCyan.copy(alpha = 0.45f)),
             modifier = Modifier
-                .fillMaxWidth(0.95f)
-                .fillMaxHeight(0.92f)
+                .fillMaxWidth(0.99f)
+                .fillMaxHeight(0.97f)
+                .testTag("customer_wide_dossier_dialog")
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(16.dp)
+                    .padding(14.dp)
             ) {
                 // Top Dossier Header
                 Row(
@@ -771,7 +849,7 @@ private fun CustomerFileModal(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                         Surface(
                             shape = CircleShape,
                             color = CyberCyan.copy(alpha = 0.15f),
@@ -783,9 +861,12 @@ private fun CustomerFileModal(
                         }
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.horizontalScroll(rememberScrollState())
+                            ) {
                                 Text(
-                                    text = "OFFICIAL CUSTOMER FILE",
+                                    text = "${customer.fullName} — FULL FILE",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Black
                                 )
@@ -802,26 +883,37 @@ private fun CustomerFileModal(
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     )
                                 }
-                                val modalOnlinePresence = viewModel.findCustomerOnlinePresence(customer)
-                                if (modalOnlinePresence != null) {
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Surface(
-                                        shape = RoundedCornerShape(4.dp),
-                                        color = SuccessGreen.copy(alpha = 0.2f),
-                                        border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.65f))
-                                    ) {
-                                        Text(
-                                            text = "🟢 ONLINE",
-                                            fontSize = 9.5.sp,
-                                            fontWeight = FontWeight.Black,
-                                            color = SuccessGreen,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
-                                    }
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = if (modalOnlinePresence != null) SuccessGreen.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant,
+                                    border = BorderStroke(1.dp, if (modalOnlinePresence != null) SuccessGreen else MaterialTheme.colorScheme.outline)
+                                ) {
+                                    Text(
+                                        text = if (modalOnlinePresence != null) "🟢 ONLINE" else "⚫ OFFLINE",
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = if (modalOnlinePresence != null) SuccessGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = if (isPartnerActive) AccentGold.copy(alpha = 0.22f) else MaterialTheme.colorScheme.surfaceVariant,
+                                    border = BorderStroke(1.dp, if (isPartnerActive) AccentGold else MaterialTheme.colorScheme.outline)
+                                ) {
+                                    Text(
+                                        text = if (isPartnerActive) "PARTNER: ACTIVE" else "PARTNER: INACTIVE",
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = if (isPartnerActive) AccentGold else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
                                 }
                             }
                             Text(
-                                text = "${storeProfile.storeName} Customer & Order Dossier",
+                                text = "${storeProfile.storeName} Complete Customer Dossier • ${orders.size} Orders • ${customerPreOrders.size} Pre-Orders",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -832,35 +924,55 @@ private fun CustomerFileModal(
                     }
                 }
 
-                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-                // Folder Internal Divider Tabs: All / Credentials / Orders / Pre-Orders
+                // Folder Internal Divider Tabs across all 10 Customer Dossier Sections
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState())
                         .padding(bottom = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     FilterChip(
                         selected = folderSectionTab == 0,
                         onClick = { folderSectionTab = 0 },
-                        label = { Text("📁 Full Folder", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                        label = { Text("📁 All Details", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
                     )
                     FilterChip(
                         selected = folderSectionTab == 1,
                         onClick = { folderSectionTab = 1 },
-                        label = { Text("🔐 Sign-Up Credentials", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                        label = { Text("🔐 Credentials & Online", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
                     )
                     FilterChip(
                         selected = folderSectionTab == 2,
                         onClick = { folderSectionTab = 2 },
-                        label = { Text("📦 Orders (${orders.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                        label = { Text("📦 Orders & Receipts (${orders.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
                     )
                     FilterChip(
                         selected = folderSectionTab == 3,
                         onClick = { folderSectionTab = 3 },
                         label = { Text("✨ Pre-Orders (${customerPreOrders.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                    )
+                    FilterChip(
+                        selected = folderSectionTab == 4,
+                        onClick = { folderSectionTab = 4 },
+                        label = { Text("💬 Messages (${customerTickets.size + customerChatLogs.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                    )
+                    FilterChip(
+                        selected = folderSectionTab == 5,
+                        onClick = { folderSectionTab = 5 },
+                        label = { Text("🎟️ Vouchers & Wishlist", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                    )
+                    FilterChip(
+                        selected = folderSectionTab == 6,
+                        onClick = { folderSectionTab = 6 },
+                        label = { Text("⭐ Reviews (${customerReviews.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                    )
+                    FilterChip(
+                        selected = folderSectionTab == 7,
+                        onClick = { folderSectionTab = 7 },
+                        label = { Text("🤝 Partnership (${if (isPartnerActive) "ACTIVE" else "INACTIVE"})", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
                     )
                 }
 
@@ -1951,15 +2063,337 @@ private fun CustomerFileModal(
                             }
                         }
                     }
+
+                    // ==========================================
+                    // 4. PAYMENT RECEIPTS & FORWARDED WORD / PDF LOGS
+                    // ==========================================
+                    if (folderSectionTab == 0 || folderSectionTab == 2) {
+                        item {
+                            Card(
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                                border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.45f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(
+                                        text = "PAYMENT RECEIPTS & FORWARDED FILES (${orders.size} Orders • ${customerForwardedReceipts.size} Word/PDF Logs)",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Black,
+                                        color = SuccessGreen
+                                    )
+                                    if (orders.isEmpty() && customerForwardedReceipts.isEmpty()) {
+                                        Text("No payment receipts recorded yet for this customer.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    } else {
+                                        orders.forEach { ord ->
+                                            Surface(
+                                                shape = RoundedCornerShape(10.dp),
+                                                color = MaterialTheme.colorScheme.surface,
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween
+                                                    ) {
+                                                        Text("${ord.orderId} • ${ord.paymentMethod.title}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                                        Text(nairaFormat.format(ord.totalAmount), fontWeight = FontWeight.Black, color = SuccessGreen, fontSize = 12.sp)
+                                                    }
+                                                    Text("Ref: ${ord.paymentReference.ifBlank { "Portal" }} • Credit: ${ord.creditVerificationStatus.name}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                        if (ord.receiptImageUrl.isNotBlank()) {
+                                                            OutlinedButton(onClick = { viewingReceiptUrl = ord.receiptImageUrl }, modifier = Modifier.height(34.dp), contentPadding = PaddingValues(horizontal = 8.dp)) {
+                                                                Text("View Receipt", fontSize = 10.5.sp)
+                                                            }
+                                                        }
+                                                        OutlinedButton(onClick = { WordInvoiceExporter.forwardWordReceiptToOdiya(context, ord, storeProfile) }, modifier = Modifier.height(34.dp), contentPadding = PaddingValues(horizontal = 8.dp)) {
+                                                            Text("Word", fontSize = 10.5.sp)
+                                                        }
+                                                        OutlinedButton(onClick = { PdfInvoiceExporter.forwardPdfReceiptToOdiya(context, ord, storeProfile) }, modifier = Modifier.height(34.dp), contentPadding = PaddingValues(horizontal = 8.dp)) {
+                                                            Text("PDF", fontSize = 10.5.sp)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if (customerForwardedReceipts.isNotEmpty()) {
+                                            Text("Forwarded Receipt Exports:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CyberCyan)
+                                            customerForwardedReceipts.forEach { log ->
+                                                Text(
+                                                    text = "• ${log.format} Receipt (${log.orderId}) via ${log.portalTitle} — ${nairaFormat.format(log.amount)} (${shortDateTimeFormat.format(Date(log.forwardedAt))})",
+                                                    fontSize = 11.sp
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ==========================================
+                    // 5. SENT MESSAGES (SUPPORT TICKETS, LIVE CHAT & PRE-ORDER REPLIES)
+                    // ==========================================
+                    if (folderSectionTab == 0 || folderSectionTab == 4) {
+                        item {
+                            Card(
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                                border = BorderStroke(1.dp, CyberCyan.copy(alpha = 0.45f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "SENT MESSAGES & LIVE CHAT LOGS (${customerTickets.size + customerChatLogs.size})",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Black,
+                                            color = CyberCyan,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        OutlinedButton(
+                                            onClick = {
+                                                onDismiss()
+                                                viewModel.openAdminLiveChatSession(customer.fullName, customer.phoneNumber)
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 10.dp),
+                                            modifier = Modifier.height(34.dp)
+                                        ) {
+                                            Text("Open Live Chat", fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                    if (customerTickets.isEmpty() && customerChatLogs.isEmpty()) {
+                                        Text("No sent support tickets or live chat messages recorded yet.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    } else {
+                                        customerTickets.forEach { tkt ->
+                                            Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
+                                                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                                    Text("[Ticket] ${tkt.subject} (${tkt.status.label})", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                                    Text(tkt.message, fontSize = 11.5.sp)
+                                                    if (tkt.adminReply.isNotBlank()) {
+                                                        Text("Admin Reply: ${tkt.adminReply}", fontSize = 11.sp, color = SuccessGreen, fontWeight = FontWeight.Bold)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        customerChatLogs.take(15).forEach { msg ->
+                                            Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
+                                                Column(modifier = Modifier.padding(8.dp)) {
+                                                    Text(
+                                                        text = "[Live Chat • ${if (msg.isFromAdmin) "Admin" else "Customer"}] ${msg.senderName} • ${shortDateTimeFormat.format(Date(msg.timestamp))}",
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 10.5.sp,
+                                                        color = AccentGold
+                                                    )
+                                                    Text(msg.text, fontSize = 11.5.sp)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ==========================================
+                    // 6. VOUCHERS & WISHLIST
+                    // ==========================================
+                    if (folderSectionTab == 0 || folderSectionTab == 5) {
+                        item {
+                            Card(
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                                border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.45f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(
+                                        text = "VOUCHERS, LOYALTY & WISHLIST",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Black,
+                                        color = AccentGold
+                                    )
+                                    val activeCoupons = promoCoupons.filter { it.isActive }
+                                    Text(
+                                        text = "Active Promo Vouchers (${activeCoupons.size}): ${if (activeCoupons.isEmpty()) "None" else activeCoupons.joinToString { "${it.code} (${it.discountPercent}% OFF)" }}",
+                                        fontSize = 12.sp
+                                    )
+                                    Text(
+                                        text = "Loyalty Balance: ${loyaltyAccount.pointsBalance} pts (₦${loyaltyAccount.pointsBalance * 50}) • Referral: ${loyaltyAccount.referralCode}",
+                                        fontSize = 12.sp,
+                                        color = CyberCyan,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    HorizontalDivider()
+                                    Text("Wishlist Items (${customerWishlistProducts.size}):", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    if (customerWishlistProducts.isEmpty()) {
+                                        Text("No wishlist items synced for this profile.", fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    } else {
+                                        customerWishlistProducts.forEach { itemProd ->
+                                            Text("• ${itemProd.title} (${itemProd.brand}) — ${nairaFormat.format(itemProd.basePrice)}", fontSize = 11.5.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ==========================================
+                    // 7. RATINGS & REVIEWS
+                    // ==========================================
+                    if (folderSectionTab == 0 || folderSectionTab == 6) {
+                        item {
+                            Card(
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                                border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.45f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(
+                                        text = "RATINGS & REVIEWS (${customerReviews.size})",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Black,
+                                        color = AccentGold
+                                    )
+                                    if (customerReviews.isEmpty()) {
+                                        Text("No product ratings or reviews submitted by ${customer.fullName} yet.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    } else {
+                                        customerReviews.forEach { rev ->
+                                            val pName = allProducts.firstOrNull { it.id == rev.productId }?.title ?: rev.productId
+                                            Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
+                                                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                                    Text("$pName • ${rev.rating}★", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = AccentGold)
+                                                    Text(rev.comment, fontSize = 11.5.sp)
+                                                    if (rev.adminReply.isNotBlank()) {
+                                                        Text("Admin Reply: ${rev.adminReply}", fontSize = 11.sp, color = SuccessGreen, fontWeight = FontWeight.Bold)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ==========================================
+                    // 8. PARTNERSHIP STATUS & INTEREST OFFERS
+                    // ==========================================
+                    if (folderSectionTab == 0 || folderSectionTab == 7) {
+                        item {
+                            Card(
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                                border = BorderStroke(1.2.dp, if (isPartnerActive) SuccessGreen else AccentGold.copy(alpha = 0.5f)),
+                                modifier = Modifier.fillMaxWidth().testTag("customer_file_partnership_section")
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "PARTNERSHIP STATUS",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Black,
+                                            color = if (isPartnerActive) SuccessGreen else AccentGold
+                                        )
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = if (isPartnerActive) SuccessGreen.copy(alpha = 0.18f) else Color(0xFF94A3B8).copy(alpha = 0.22f)
+                                        ) {
+                                            Text(
+                                                text = if (isPartnerActive) "ACTIVE" else "INACTIVE",
+                                                color = if (isPartnerActive) SuccessGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                fontWeight = FontWeight.Black,
+                                                fontSize = 11.sp,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                            )
+                                        }
+                                    }
+
+                                    if (matchedPartner != null) {
+                                        Text("Partner Business: ${matchedPartner.businessName} (${matchedPartner.id})", fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
+                                        Text("Category: ${matchedPartner.primaryCategory} • Commission: ${matchedPartner.stipulatedCommissionPercent}% • Monthly Hosting: ${nairaFormat.format(matchedPartner.monthlyHostingPayment)}", fontSize = 11.5.sp)
+                                        if (matchedPartner.nextOfKinName.isNotBlank()) {
+                                            Text(
+                                                text = "Next of Kin: ${matchedPartner.nextOfKinName} (${matchedPartner.nextOfKinGender.ifBlank { "N/A" }}) • ${matchedPartner.nextOfKinPhone}",
+                                                fontSize = 11.5.sp,
+                                                color = CyberCyan,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                    }
+
+                                    if (customerPartnershipOffers.isEmpty() && matchedPartner == null) {
+                                        Text("This customer has not submitted a partnership offer or MOU yet.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    } else {
+                                        customerPartnershipOffers.forEach { offer ->
+                                            var offerReplyText by remember(offer.id) { mutableStateOf(offer.adminReply) }
+                                            Surface(
+                                                shape = RoundedCornerShape(12.dp),
+                                                color = MaterialTheme.colorScheme.surface,
+                                                border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.45f)),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                    Text("Offer ${offer.id} • ${offer.status.label}", fontWeight = FontWeight.Black, fontSize = 12.sp, color = AccentGold)
+                                                    Text("Business: ${offer.businessName.ifBlank { offer.customerName }} • Office: ${offer.officeAddress}", fontSize = 11.5.sp)
+                                                    Text("Categories: ${offer.productCategories.joinToString()}", fontSize = 11.5.sp, color = CyberCyan)
+                                                    if (offer.note.isNotBlank()) {
+                                                        Text("Note: ${offer.note}", fontSize = 11.sp)
+                                                    }
+                                                    OutlinedTextField(
+                                                        value = offerReplyText,
+                                                        onValueChange = { offerReplyText = it },
+                                                        label = { Text("Admin Reply to Customer Offer") },
+                                                        singleLine = true,
+                                                        modifier = Modifier.fillMaxWidth()
+                                                    )
+                                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                        Button(
+                                                            onClick = {
+                                                                viewModel.replyPartnershipInterest(offer.id, accept = true, adminReply = offerReplyText)
+                                                                Toast.makeText(context, "Partnership Accepted & Customer Notified!", Toast.LENGTH_SHORT).show()
+                                                            },
+                                                            colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
+                                                            modifier = Modifier.weight(1f).height(44.dp)
+                                                        ) {
+                                                            Text("Accept Offer", fontSize = 11.5.sp, fontWeight = FontWeight.Black)
+                                                        }
+                                                        OutlinedButton(
+                                                            onClick = {
+                                                                viewModel.replyPartnershipInterest(offer.id, accept = false, adminReply = offerReplyText)
+                                                                Toast.makeText(context, "Partnership Offer Declined.", Toast.LENGTH_SHORT).show()
+                                                            },
+                                                            modifier = Modifier.weight(1f).height(44.dp)
+                                                        ) {
+                                                            Text("Reject Offer", fontSize = 11.5.sp, color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(12.dp))
                 Button(
                     onClick = onDismiss,
                     modifier = Modifier.fillMaxWidth().height(48.dp),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Close Customer Order File", fontWeight = FontWeight.Bold)
+                    Text("Close Complete Customer File", fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -4332,6 +4766,7 @@ private fun AdminProductItemCard(
 // ==========================================
 // TAB 2: CUSTOMER FOLDERS, CREDENTIALS & ORDERS
 // ==========================================
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CustomerIdentityTab(
     viewModel: MainViewModel,
@@ -4345,6 +4780,7 @@ private fun CustomerIdentityTab(
     val cloudStatus by viewModel.cloudStatusMessage.collectAsState()
     val preOrders by viewModel.preOrderRequests.collectAsState()
     val onlineCustomers by viewModel.onlineCustomers.collectAsState()
+    val partnerOrgs by viewModel.partnerOrganizations.collectAsState()
     val nairaFormat = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "NG")).apply {
             maximumFractionDigits = 0
@@ -4353,14 +4789,19 @@ private fun CustomerIdentityTab(
     val dateTimeFormat = remember { SimpleDateFormat("dd MMM yyyy 'at' hh:mm a", Locale.getDefault()) }
     val nowMillis = remember(customers.size, onlineCustomers.size) { System.currentTimeMillis() }
 
+    var customerDropdownExpanded by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var filterType by remember { mutableStateOf("ALL") } // ALL, ONLINE, RECENT, ACTIVE, DELIVERED, NO_ORDERS, PREORDERS
+
+    val alphabeticalCustomers = remember(customers) {
+        customers.sortedBy { it.fullName.trim().lowercase() }
+    }
 
     val unmatchedPreOrdersCount = remember(preOrders, customers) {
         preOrders.count { req -> customers.none { cust -> matchesCustomerPreOrder(req, cust) } }
     }
 
-    val filteredCustomers = customers.filter { cust ->
+    val filteredCustomers = alphabeticalCustomers.filter { cust ->
         val custOrders = orders.filter { matchesCustomerFolder(it, cust) }
         val custPreOrders = preOrders.filter { matchesCustomerPreOrder(it, cust) }
         val isRecentSignUp = cust.createdAt > 0L && (nowMillis - cust.createdAt) < 172_800_000L
@@ -4445,7 +4886,7 @@ private fun CustomerIdentityTab(
 
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        text = "Every registered customer automatically gets a separate folder containing their Sign-Up Credentials (Name, Phone, Password, Address & Timestamp), all Customer Orders & Receipts, and Customer Pre-Orders.",
+                        text = "Select any customer from the A–Z alphabetical drop-down below to inspect their full dossier: credentials, orders, pre-orders, payment receipts, messages, vouchers, wishlist, reviews, partnership & online status.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.9f)
                     )
@@ -4517,12 +4958,72 @@ private fun CustomerIdentityTab(
             }
         }
 
-        // Search Bar for Customer Folders
+        // Alphabetical Customer Drop-Down Selector (A -> Z)
+        item {
+            ExposedDropdownMenuBox(
+                expanded = customerDropdownExpanded,
+                onExpandedChange = { customerDropdownExpanded = !customerDropdownExpanded },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                OutlinedTextField(
+                    value = "Select Customer Alphabetically (A–Z) • ${alphabeticalCustomers.size} Total",
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Customer Alphabetical Drop-Down (Tap Name to Open Full Dossier)") },
+                    leadingIcon = { Icon(Icons.Default.People, contentDescription = null, tint = CyberCyan) },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = customerDropdownExpanded) },
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .menuAnchor()
+                        .fillMaxWidth()
+                        .testTag("admin_customer_alphabetical_dropdown")
+                )
+                ExposedDropdownMenu(
+                    expanded = customerDropdownExpanded,
+                    onDismissRequest = { customerDropdownExpanded = false }
+                ) {
+                    alphabeticalCustomers.forEach { cust ->
+                        val isOnline = viewModel.findCustomerOnlinePresence(cust, nowMillis) != null
+                        val custCleanPhone = cust.phoneNumber.filter { it.isDigit() }.takeLast(10)
+                        val isPartnerActive = partnerOrgs.any { p ->
+                            p.status == PartnerAgreementStatus.FINALIZED && !p.isCatalogLocked &&
+                                ((p.customerId.isNotBlank() && p.customerId == cust.id) ||
+                                    p.ownerName.equals(cust.fullName, ignoreCase = true) ||
+                                    (custCleanPhone.length >= 7 && p.ownerPhone.filter { it.isDigit() }.endsWith(custCleanPhone)))
+                        }
+                        val custOrderCount = orders.count { matchesCustomerFolder(it, cust) }
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(
+                                        text = "${cust.fullName} (${if (isOnline) "ONLINE" else "OFFLINE"})",
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 13.sp,
+                                        color = if (isOnline) SuccessGreen else MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "${cust.phoneNumber.ifBlank { "No phone" }} • $custOrderCount orders • Partner: ${if (isPartnerActive) "ACTIVE" else "INACTIVE"}",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            },
+                            onClick = {
+                                customerDropdownExpanded = false
+                                onCustomerClick(cust)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        // Quick Search Filter Bar for Customer Folders
         item {
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                label = { Text("Search Folders by Name, Phone, Order # or Pre-Order") },
+                label = { Text("Quick Filter (Sorted A–Z by Name, Phone, or Order #)") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {
@@ -12038,13 +12539,13 @@ private fun LiveCallsAdminTab(viewModel: MainViewModel) {
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Live Audio & Video Customer Desk",
+                            text = "Live Chat, Audio & Video Customer Desk",
                             color = AccentGold,
                             fontWeight = FontWeight.Black,
                             fontSize = 16.sp
                         )
                         Text(
-                            text = if (callState.adminOnline) "ONLINE • Customers see live availability" else "Toggle ON to broadcast Admin availability to customers",
+                            text = if (callState.adminOnline) "ONLINE • Customers see live Chat, Audio & Video availability" else "Toggle ON to broadcast Admin availability to customers",
                             color = Color.White.copy(alpha = 0.85f),
                             fontSize = 12.sp
                         )
@@ -12054,24 +12555,42 @@ private fun LiveCallsAdminTab(viewModel: MainViewModel) {
                         onCheckedChange = { viewModel.setAdminCallAvailability(it) }
                     )
                 }
-                Button(
-                    onClick = { viewModel.openLiveCallScreen() },
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = Color(0xFF052E16)),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .testTag("admin_open_live_studio_button")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Default.Videocam, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Open Live Audio/Video Studio", fontWeight = FontWeight.Black, fontSize = 13.sp)
+                    Button(
+                        onClick = { viewModel.openAdminLiveChatSession() },
+                        colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = Color(0xFF052E16)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("admin_open_live_chat_desk_button")
+                    ) {
+                        Icon(Icons.Default.Chat, contentDescription = null, modifier = Modifier.size(17.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Open Live Chat", fontWeight = FontWeight.Black, fontSize = 12.5.sp)
+                    }
+                    Button(
+                        onClick = { viewModel.openLiveCallScreen() },
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = Color(0xFF052E16)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("admin_open_live_studio_button")
+                    ) {
+                        Icon(Icons.Default.Videocam, contentDescription = null, modifier = Modifier.size(17.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Open Studio", fontWeight = FontWeight.Black, fontSize = 12.5.sp)
+                    }
                 }
             }
         }
 
         Text(
-            text = "Incoming Customer Calls (${callState.incomingRequests.size})",
+            text = "Incoming Customer Requests (${callState.incomingRequests.size})",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Black,
             color = CyberCyan
@@ -12084,7 +12603,7 @@ private fun LiveCallsAdminTab(viewModel: MainViewModel) {
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "No customer is currently ringing. When a customer taps Live Audio/Video Call, they will appear right here and trigger an instant call alert.",
+                    text = "No customer is currently ringing or waiting in Live Chat. When a customer taps Live Chat, Audio, or Video, they will appear right here.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(16.dp)
@@ -12114,25 +12633,37 @@ private fun LiveCallsAdminTab(viewModel: MainViewModel) {
                         )
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
+                            Button(
+                                onClick = { viewModel.answerIncomingLiveCall(req, com.example.data.remote.LiveCallMode.CHAT) },
+                                colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = Color(0xFF052E16)),
+                                contentPadding = PaddingValues(horizontal = 8.dp),
+                                modifier = Modifier.weight(1f).height(48.dp)
+                            ) {
+                                Icon(Icons.Default.Chat, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(Modifier.width(3.dp))
+                                Text("Chat", fontSize = 11.5.sp, fontWeight = FontWeight.Black)
+                            }
                             Button(
                                 onClick = { viewModel.answerIncomingLiveCall(req, com.example.data.remote.LiveCallMode.AUDIO) },
                                 colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
+                                contentPadding = PaddingValues(horizontal = 8.dp),
                                 modifier = Modifier.weight(1f).height(48.dp)
                             ) {
-                                Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Answer Audio", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(Modifier.width(3.dp))
+                                Text("Audio", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                             }
                             Button(
                                 onClick = { viewModel.answerIncomingLiveCall(req, com.example.data.remote.LiveCallMode.VIDEO) },
                                 colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = Color(0xFF052E16)),
+                                contentPadding = PaddingValues(horizontal = 8.dp),
                                 modifier = Modifier.weight(1f).height(48.dp)
                             ) {
-                                Icon(Icons.Default.Videocam, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Answer Video", fontSize = 11.5.sp, fontWeight = FontWeight.Black)
+                                Icon(Icons.Default.Videocam, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(Modifier.width(3.dp))
+                                Text("Video", fontSize = 11.5.sp, fontWeight = FontWeight.Black)
                             }
                             IconButton(
                                 onClick = { viewModel.declineIncomingLiveCall(req) },

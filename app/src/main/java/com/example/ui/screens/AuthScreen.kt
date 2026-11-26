@@ -154,6 +154,7 @@ fun AuthScreen(
         CustomerAccountDestination.ORDER_TRACKING -> "ORDER TRACKING"
         CustomerAccountDestination.RATINGS_AND_REVIEWS -> "RATINGS AND REVIEWS"
         CustomerAccountDestination.VOUCHERS -> "VOUCHERS"
+        CustomerAccountDestination.PARTNERSHIP -> "PARTNERSHIP"
         CustomerAccountDestination.FOLLOW_STORE -> "FOLLOW ODIYA"
     }
 
@@ -425,6 +426,23 @@ fun AuthScreen(
                             accentColor = CyberCyan,
                             onClick = { viewModel.selectCustomerAccountDestination(CustomerAccountDestination.VOUCHERS) },
                             testTag = "account_menu_vouchers"
+                        )
+
+                        val myPartnershipOffers by viewModel.partnershipInterestRequests.collectAsState()
+                        val acceptedPartnerOffersCount = myPartnershipOffers.count {
+                            it.status == com.example.data.model.PartnershipInterestStatus.ACCEPTED
+                        }
+                        CustomerAccountMenuItem(
+                            title = "PARTNERSHIP",
+                            subtitle = when {
+                                acceptedPartnerOffersCount > 0 -> "Accepted! Tap to complete MOU & signatures"
+                                myPartnershipOffers.isNotEmpty() -> "${myPartnershipOffers.size} partnership offer(s) sent • View status"
+                                else -> "Tap Am Interested to partner & sell with ODIYA"
+                            },
+                            icon = Icons.Default.Handshake,
+                            accentColor = AccentGold,
+                            onClick = { viewModel.selectCustomerAccountDestination(CustomerAccountDestination.PARTNERSHIP) },
+                            testTag = "account_menu_partnership"
                         )
 
                         CustomerAccountMenuItem(
@@ -846,6 +864,7 @@ fun AuthScreen(
                     CustomerAccountDestination.ORDER_TRACKING -> CustomerOrderTrackingPage(viewModel = viewModel)
                     CustomerAccountDestination.RATINGS_AND_REVIEWS -> DeliveredRatingsAndReviewsPage(viewModel = viewModel)
                     CustomerAccountDestination.VOUCHERS -> CustomerVouchersPage(viewModel = viewModel)
+                    CustomerAccountDestination.PARTNERSHIP -> CustomerPartnershipPage(viewModel = viewModel)
                     CustomerAccountDestination.FOLLOW_STORE -> FollowStorePage(viewModel = viewModel, onShowQr = { showQrDialog = true })
                 }
             }

@@ -189,7 +189,7 @@ fun LiveCallScreen(
                 title = {
                     Column {
                         Text(
-                            text = if (isCallInProgress) callState.peerName else "Live Audio & Video Desk",
+                            text = if (isCallInProgress) callState.peerName else "Live Chat, Audio & Video",
                             fontWeight = FontWeight.Black,
                             fontSize = 16.sp,
                             maxLines = 1,
@@ -197,7 +197,7 @@ fun LiveCallScreen(
                         )
                         Text(
                             text = if (isCallInProgress) {
-                                "${callState.phase.label} • ${formatCallDuration(callState.elapsedSeconds)}"
+                                "${callState.mode.label} • ${callState.phase.label} • ${formatCallDuration(callState.elapsedSeconds)}"
                             } else {
                                 if (showAdminControl && callState.isRealtimeConnected) "Live Cloud Ready" else "Store Interactive Desk"
                             },
@@ -210,7 +210,7 @@ fun LiveCallScreen(
                     IconButton(
                         onClick = {
                             if (isCallInProgress) {
-                                Toast.makeText(context, "Call stays active in background or tap End to finish.", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Session stays active in background or tap End to finish.", Toast.LENGTH_SHORT).show()
                             }
                             viewModel.navigateBack()
                         },
@@ -220,8 +220,45 @@ fun LiveCallScreen(
                     }
                 },
                 actions = {
+                    // Instant Live Chat Pill
+                    Surface(
+                        shape = RoundedCornerShape(999.dp),
+                        color = if (callState.mode == LiveCallMode.CHAT) CyberCyan else EmeraldSurface,
+                        border = BorderStroke(1.dp, CyberCyan.copy(alpha = 0.75f)),
+                        modifier = Modifier
+                            .padding(end = 6.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                            .clickable {
+                                if (isCallInProgress) {
+                                    viewModel.switchLiveCallMode(LiveCallMode.CHAT)
+                                } else {
+                                    viewModel.selectLiveCallPreMode(LiveCallMode.CHAT)
+                                }
+                            }
+                            .testTag("switch_chat_mode_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Chat,
+                                contentDescription = "Live Chat Mode",
+                                tint = if (callState.mode == LiveCallMode.CHAT) DeepEmerald else CyberCyan,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = "Chat",
+                                color = if (callState.mode == LiveCallMode.CHAT) DeepEmerald else Color.White,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 11.5.sp
+                            )
+                        }
+                    }
+
                     // Instant Audio <-> Video Mode Switcher Pill in Header
-                    val targetMode = if (callState.mode == LiveCallMode.AUDIO) LiveCallMode.VIDEO else LiveCallMode.AUDIO
+                    val targetMode = if (callState.mode == LiveCallMode.VIDEO) LiveCallMode.AUDIO else LiveCallMode.VIDEO
                     Surface(
                         shape = RoundedCornerShape(999.dp),
                         color = if (callState.mode == LiveCallMode.VIDEO) AccentGold else EmeraldSurface,
@@ -241,21 +278,21 @@ fun LiveCallScreen(
                             .testTag("switch_audio_video_button")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
                                 imageVector = if (callState.mode == LiveCallMode.VIDEO) Icons.Default.Videocam else Icons.Default.Mic,
                                 contentDescription = "Switch between Audio and Video",
                                 tint = if (callState.mode == LiveCallMode.VIDEO) DeepEmerald else AccentGold,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(15.dp)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 text = if (callState.mode == LiveCallMode.VIDEO) "Video" else "Audio",
                                 color = if (callState.mode == LiveCallMode.VIDEO) DeepEmerald else Color.White,
                                 fontWeight = FontWeight.Black,
-                                fontSize = 12.sp
+                                fontSize = 11.5.sp
                             )
                         }
                     }
@@ -394,8 +431,20 @@ fun LiveCallScreen(
                                                     }
                                                     Row(
                                                         modifier = Modifier.fillMaxWidth(),
-                                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                                                     ) {
+                                                        Button(
+                                                            onClick = {
+                                                                viewModel.answerIncomingLiveCall(req, LiveCallMode.CHAT)
+                                                            },
+                                                            colors = ButtonDefaults.buttonColors(containerColor = CyberCyan, contentColor = DeepEmerald),
+                                                            contentPadding = PaddingValues(horizontal = 8.dp),
+                                                            modifier = Modifier.weight(1f).height(48.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.Chat, contentDescription = null, modifier = Modifier.size(15.dp))
+                                                            Spacer(Modifier.width(3.dp))
+                                                            Text("Chat", fontSize = 11.5.sp, fontWeight = FontWeight.Black)
+                                                        }
                                                         Button(
                                                             onClick = {
                                                                 ensurePermissionsAndRun(requireCamera = false) {
@@ -403,11 +452,12 @@ fun LiveCallScreen(
                                                                 }
                                                             },
                                                             colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
+                                                            contentPadding = PaddingValues(horizontal = 8.dp),
                                                             modifier = Modifier.weight(1f).height(48.dp)
                                                         ) {
-                                                            Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(16.dp))
-                                                            Spacer(Modifier.width(4.dp))
-                                                            Text("Audio", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                            Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(15.dp))
+                                                            Spacer(Modifier.width(3.dp))
+                                                            Text("Audio", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                                                         }
                                                         Button(
                                                             onClick = {
@@ -416,11 +466,12 @@ fun LiveCallScreen(
                                                                 }
                                                             },
                                                             colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = DeepEmerald),
+                                                            contentPadding = PaddingValues(horizontal = 8.dp),
                                                             modifier = Modifier.weight(1f).height(48.dp)
                                                         ) {
-                                                            Icon(Icons.Default.Videocam, contentDescription = null, modifier = Modifier.size(16.dp))
-                                                            Spacer(Modifier.width(4.dp))
-                                                            Text("Video", fontSize = 12.sp, fontWeight = FontWeight.Black)
+                                                            Icon(Icons.Default.Videocam, contentDescription = null, modifier = Modifier.size(15.dp))
+                                                            Spacer(Modifier.width(3.dp))
+                                                            Text("Video", fontSize = 11.5.sp, fontWeight = FontWeight.Black)
                                                         }
                                                         IconButton(
                                                             onClick = { viewModel.declineIncomingLiveCall(req) },
@@ -445,7 +496,7 @@ fun LiveCallScreen(
                                             .testTag("admin_studio_quick_guide_strip")
                                     ) {
                                         Text(
-                                            text = "Admin Guide: Switch Desk ON -> Tap Audio or Video when a customer rings -> Switch Audio/Video, Mute, Speaker, Flip Camera, or Chat anytime during the call.",
+                                            text = "Admin Guide: Switch Desk ON -> Tap Chat, Audio, or Video when a customer connects -> Switch between Chat, Audio & Video anytime.",
                                             color = AccentGold.copy(alpha = 0.95f),
                                             fontSize = 11.sp,
                                             lineHeight = 15.sp,
@@ -478,14 +529,18 @@ fun LiveCallScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Icon(
-                                            imageVector = if (callState.mode == LiveCallMode.VIDEO) Icons.Default.Videocam else Icons.Default.HeadsetMic,
+                                            imageVector = when (callState.mode) {
+                                                LiveCallMode.CHAT -> Icons.Default.Chat
+                                                LiveCallMode.VIDEO -> Icons.Default.Videocam
+                                                LiveCallMode.AUDIO -> Icons.Default.HeadsetMic
+                                            },
                                             contentDescription = null,
                                             tint = if (callState.adminOnline) SuccessGreen else AccentGold,
                                             modifier = Modifier.size(16.dp)
                                         )
                                         Spacer(Modifier.width(6.dp))
                                         Text(
-                                            text = if (callState.adminOnline) "Admin Online • Ready for Live Call" else "Live Call Studio • Switch Audio / Video Anytime",
+                                            text = if (callState.adminOnline) "Admin Online • Ready for Live Chat, Audio & Video" else "Interactive Desk • Chat, Audio or Video Anytime",
                                             color = Color.White,
                                             fontSize = 11.5.sp,
                                             fontWeight = FontWeight.Bold
@@ -494,24 +549,55 @@ fun LiveCallScreen(
                                 }
 
                                 Text(
-                                    text = "Talk or Video Call Admin Live",
+                                    text = "Live Chat, Talk or Video Call Admin",
                                     color = Color.White,
                                     fontWeight = FontWeight.Black,
                                     fontSize = 21.sp,
                                     textAlign = TextAlign.Center
                                 )
                                 Text(
-                                    text = "Choose Live Audio Talk or 2-Way Video Call below. You can switch smoothly between Audio and Video at any moment during the conversation.",
+                                    text = "Start an instant real-time Live Chat right away without mic/camera permissions, or choose Live Audio Talk or 2-Way Video Call and switch modes anytime.",
                                     color = Color.White.copy(alpha = 0.85f),
                                     fontSize = 13.sp,
                                     textAlign = TextAlign.Center
                                 )
 
-                                // Switchable Mode Selector Cards
+                                // Switchable 3-Way Mode Selector Cards (Live Chat, Audio Talk, Video Call)
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
+                                    val chatSelected = callState.mode == LiveCallMode.CHAT
+                                    Surface(
+                                        onClick = { viewModel.selectLiveCallPreMode(LiveCallMode.CHAT) },
+                                        shape = RoundedCornerShape(18.dp),
+                                        color = if (chatSelected) CyberCyan.copy(alpha = 0.24f) else DeepEmerald.copy(alpha = 0.7f),
+                                        border = BorderStroke(
+                                            width = if (chatSelected) 2.dp else 1.dp,
+                                            color = if (chatSelected) CyberCyan else Color.White.copy(alpha = 0.22f)
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .heightIn(min = 112.dp)
+                                            .testTag("call_mode_chat_chip")
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(10.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.Center
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Chat,
+                                                contentDescription = "Live Chat Mode",
+                                                tint = if (chatSelected) CyberCyan else Color.White,
+                                                modifier = Modifier.size(28.dp)
+                                            )
+                                            Spacer(Modifier.height(6.dp))
+                                            Text("Live Chat", color = Color.White, fontWeight = FontWeight.Black, fontSize = 13.sp, textAlign = TextAlign.Center)
+                                            Text("Instant Text", color = Color.White.copy(alpha = 0.78f), fontSize = 10.5.sp, textAlign = TextAlign.Center)
+                                        }
+                                    }
+
                                     val audioSelected = callState.mode == LiveCallMode.AUDIO
                                     Surface(
                                         onClick = { viewModel.selectLiveCallPreMode(LiveCallMode.AUDIO) },
@@ -523,11 +609,11 @@ fun LiveCallScreen(
                                         ),
                                         modifier = Modifier
                                             .weight(1f)
-                                            .heightIn(min = 108.dp)
+                                            .heightIn(min = 112.dp)
                                             .testTag("call_mode_audio_chip")
                                     ) {
                                         Column(
-                                            modifier = Modifier.padding(14.dp),
+                                            modifier = Modifier.padding(10.dp),
                                             horizontalAlignment = Alignment.CenterHorizontally,
                                             verticalArrangement = Arrangement.Center
                                         ) {
@@ -535,11 +621,11 @@ fun LiveCallScreen(
                                                 Icons.Default.Mic,
                                                 contentDescription = "Audio Talk Mode",
                                                 tint = if (audioSelected) SuccessGreen else Color.White,
-                                                modifier = Modifier.size(30.dp)
+                                                modifier = Modifier.size(28.dp)
                                             )
                                             Spacer(Modifier.height(6.dp))
-                                            Text("Audio Talk", color = Color.White, fontWeight = FontWeight.Black, fontSize = 14.sp)
-                                            Text("Voice + Waveform", color = Color.White.copy(alpha = 0.78f), fontSize = 11.sp)
+                                            Text("Audio Talk", color = Color.White, fontWeight = FontWeight.Black, fontSize = 13.sp, textAlign = TextAlign.Center)
+                                            Text("Voice Call", color = Color.White.copy(alpha = 0.78f), fontSize = 10.5.sp, textAlign = TextAlign.Center)
                                         }
                                     }
 
@@ -554,11 +640,11 @@ fun LiveCallScreen(
                                         ),
                                         modifier = Modifier
                                             .weight(1f)
-                                            .heightIn(min = 108.dp)
+                                            .heightIn(min = 112.dp)
                                             .testTag("call_mode_video_chip")
                                     ) {
                                         Column(
-                                            modifier = Modifier.padding(14.dp),
+                                            modifier = Modifier.padding(10.dp),
                                             horizontalAlignment = Alignment.CenterHorizontally,
                                             verticalArrangement = Arrangement.Center
                                         ) {
@@ -566,11 +652,11 @@ fun LiveCallScreen(
                                                 Icons.Default.Videocam,
                                                 contentDescription = "Video Call Mode",
                                                 tint = if (videoSelected) AccentGold else Color.White,
-                                                modifier = Modifier.size(30.dp)
+                                                modifier = Modifier.size(28.dp)
                                             )
                                             Spacer(Modifier.height(6.dp))
-                                            Text("Video Call", color = Color.White, fontWeight = FontWeight.Black, fontSize = 14.sp)
-                                            Text("2-Way Live Camera", color = Color.White.copy(alpha = 0.78f), fontSize = 11.sp)
+                                            Text("Video Call", color = Color.White, fontWeight = FontWeight.Black, fontSize = 13.sp, textAlign = TextAlign.Center)
+                                            Text("2-Way Cam", color = Color.White.copy(alpha = 0.78f), fontSize = 10.5.sp, textAlign = TextAlign.Center)
                                         }
                                     }
                                 }
@@ -623,18 +709,26 @@ fun LiveCallScreen(
                                     )
                                 }
 
-                                // Primary Call Launch Button
+                                // Primary Call / Chat Launch Button
                                 Button(
                                     onClick = {
-                                        val isVideo = callState.mode == LiveCallMode.VIDEO
                                         val finalTopic = customNote.trim().ifBlank { selectedTopic }
-                                        ensurePermissionsAndRun(requireCamera = isVideo) {
-                                            viewModel.startCustomerLiveCall(callState.mode, finalTopic)
+                                        if (callState.mode == LiveCallMode.CHAT) {
+                                            viewModel.startCustomerLiveCall(LiveCallMode.CHAT, finalTopic)
+                                        } else {
+                                            val isVideo = callState.mode == LiveCallMode.VIDEO
+                                            ensurePermissionsAndRun(requireCamera = isVideo) {
+                                                viewModel.startCustomerLiveCall(callState.mode, finalTopic)
+                                            }
                                         }
                                     },
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (callState.mode == LiveCallMode.VIDEO) AccentGold else SuccessGreen,
-                                        contentColor = if (callState.mode == LiveCallMode.VIDEO) DeepEmerald else Color.White
+                                        containerColor = when (callState.mode) {
+                                            LiveCallMode.CHAT -> CyberCyan
+                                            LiveCallMode.VIDEO -> AccentGold
+                                            LiveCallMode.AUDIO -> SuccessGreen
+                                        },
+                                        contentColor = if (callState.mode == LiveCallMode.AUDIO) Color.White else DeepEmerald
                                     ),
                                     shape = RoundedCornerShape(16.dp),
                                     modifier = Modifier
@@ -643,13 +737,21 @@ fun LiveCallScreen(
                                         .testTag("start_live_call_button")
                                 ) {
                                     Icon(
-                                        imageVector = if (callState.mode == LiveCallMode.VIDEO) Icons.Default.Videocam else Icons.Default.PhoneInTalk,
+                                        imageVector = when (callState.mode) {
+                                            LiveCallMode.CHAT -> Icons.Default.Chat
+                                            LiveCallMode.VIDEO -> Icons.Default.Videocam
+                                            LiveCallMode.AUDIO -> Icons.Default.PhoneInTalk
+                                        },
                                         contentDescription = null,
                                         modifier = Modifier.size(20.dp)
                                     )
                                     Spacer(Modifier.width(8.dp))
                                     Text(
-                                        text = if (callState.mode == LiveCallMode.VIDEO) "Start Live Video Call" else "Start Live Audio Call",
+                                        text = when (callState.mode) {
+                                            LiveCallMode.CHAT -> "Start Live Chat with Admin"
+                                            LiveCallMode.VIDEO -> "Start Live Video Call"
+                                            LiveCallMode.AUDIO -> "Start Live Audio Call"
+                                        },
                                         fontWeight = FontWeight.Black,
                                         fontSize = 15.sp
                                     )
@@ -780,9 +882,276 @@ fun LiveCallScreen(
                         }
                     }
                 }
+            } else if (callState.mode == LiveCallMode.CHAT) {
+                // =============================================================
+                // ACTIVE 2-WAY REAL-TIME LIVE CHAT STAGE (ALTERNATIVE TO AUDIO/VIDEO)
+                // =============================================================
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .navigationBarsPadding()
+                        .padding(12.dp)
+                        .testTag("live_chat_stage_container"),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = EmeraldSurface.copy(alpha = 0.94f),
+                        border = BorderStroke(1.dp, CyberCyan.copy(alpha = 0.65f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = if (showAdminControl) "LIVE CHAT • CUSTOMER DESK" else "LIVE CHAT WITH ODIYA ADMIN",
+                                        color = CyberCyan,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 11.5.sp
+                                    )
+                                    Text(
+                                        text = "${callState.peerName} • ${callState.topic}",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(999.dp),
+                                    color = SuccessGreen.copy(alpha = 0.22f),
+                                    border = BorderStroke(1.dp, SuccessGreen)
+                                ) {
+                                    Text(
+                                        text = formatCallDuration(callState.elapsedSeconds),
+                                        color = SuccessGreen,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 11.sp,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                            if (callState.statusBanner.isNotBlank()) {
+                                Text(
+                                    text = callState.statusBanner,
+                                    color = AccentGold,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+
+                    // Quick Interactive Prompt Strip
+                    val interactivePrompts = remember {
+                        listOf("Check Order Status", "Store Bank Accounts", "How to Pre-Order", "Catalog Highlights")
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .testTag("live_interactive_prompt_strip"),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        interactivePrompts.forEach { prompt ->
+                            Surface(
+                                onClick = { viewModel.sendInteractiveAudioVisualPrompt(prompt) },
+                                shape = RoundedCornerShape(999.dp),
+                                color = EmeraldSurface.copy(alpha = 0.92f),
+                                border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.65f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.GraphicEq, contentDescription = null, tint = AccentGold, modifier = Modifier.size(14.dp))
+                                    Spacer(Modifier.width(5.dp))
+                                    Text(prompt, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    // 2-Way Live Messages Stream
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = DeepEmerald.copy(alpha = 0.85f),
+                        border = BorderStroke(1.dp, EmeraldHighlight.copy(alpha = 0.35f)),
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                    ) {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (callState.chatMessages.isEmpty()) {
+                                item {
+                                    Text(
+                                        text = "Live Chat is open. Send a message below to talk directly with ${if (showAdminControl) "the customer" else "ODIYA Admin"} in real time, or tap a quick prompt above.",
+                                        color = Color.White.copy(alpha = 0.72f),
+                                        fontSize = 12.5.sp,
+                                        lineHeight = 18.sp
+                                    )
+                                }
+                            } else {
+                                items(callState.chatMessages, key = { it.id }) { m ->
+                                    val isMe = (showAdminControl && m.isFromAdmin) || (!showAdminControl && !m.isFromAdmin)
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalAlignment = if (isMe) Alignment.End else Alignment.Start
+                                    ) {
+                                        Surface(
+                                            shape = RoundedCornerShape(14.dp),
+                                            color = if (m.isFromAdmin) AccentGold.copy(alpha = 0.22f) else EmeraldSurface,
+                                            border = BorderStroke(
+                                                1.dp,
+                                                if (m.isFromAdmin) AccentGold.copy(alpha = 0.55f) else CyberCyan.copy(alpha = 0.45f)
+                                            ),
+                                            modifier = Modifier.widthIn(max = 310.dp)
+                                        ) {
+                                            Column(modifier = Modifier.padding(10.dp)) {
+                                                Text(
+                                                    text = m.senderName,
+                                                    color = if (m.isFromAdmin) AccentGold else CyberCyan,
+                                                    fontWeight = FontWeight.Black,
+                                                    fontSize = 10.5.sp
+                                                )
+                                                Spacer(Modifier.height(2.dp))
+                                                Text(
+                                                    text = m.text,
+                                                    color = Color.White,
+                                                    fontSize = 13.sp,
+                                                    lineHeight = 18.sp
+                                                )
+                                                if (m.attachedTag.isNotBlank()) {
+                                                    Spacer(Modifier.height(4.dp))
+                                                    Text(
+                                                        text = "Ref: ${m.attachedTag}",
+                                                        color = CyberCyan.copy(alpha = 0.85f),
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Input Bar + Quick Order Share
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = chatDraft,
+                            onValueChange = { chatDraft = it },
+                            placeholder = { Text("Type live message...", color = Color.White.copy(alpha = 0.55f), fontSize = 13.sp) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = CyberCyan,
+                                unfocusedBorderColor = Color.White.copy(alpha = 0.35f)
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("live_chat_message_input")
+                        )
+                        val latestOrder = orders.firstOrNull()
+                        if (latestOrder != null) {
+                            IconButton(
+                                onClick = {
+                                    viewModel.sendLiveCallChatMessage(
+                                        text = "Checking Order #${latestOrder.orderId.take(8)} (${latestOrder.status.label})",
+                                        attachedTag = latestOrder.orderId
+                                    )
+                                },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(EmeraldSurface)
+                            ) {
+                                Icon(Icons.Default.SupportAgent, contentDescription = "Share Latest Order", tint = AccentGold)
+                            }
+                        }
+                        IconButton(
+                            onClick = {
+                                if (chatDraft.isNotBlank()) {
+                                    viewModel.sendLiveCallChatMessage(chatDraft)
+                                    chatDraft = ""
+                                }
+                            },
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(CyberCyan)
+                                .testTag("live_chat_send_button")
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send Chat", tint = DeepEmerald)
+                        }
+                    }
+
+                    // Chat Mode Bottom Dock (Switch to Audio / Video or End Chat)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CallControlButton(
+                            icon = Icons.Default.Mic,
+                            label = "To Audio",
+                            containerColor = SuccessGreen,
+                            contentColor = Color.White,
+                            onClick = {
+                                ensurePermissionsAndRun(requireCamera = false) {
+                                    viewModel.switchLiveCallMode(LiveCallMode.AUDIO)
+                                }
+                            },
+                            testTag = "dock_chat_to_audio_button"
+                        )
+                        CallControlButton(
+                            icon = Icons.Default.Videocam,
+                            label = "To Video",
+                            containerColor = AccentGold,
+                            contentColor = DeepEmerald,
+                            onClick = {
+                                ensurePermissionsAndRun(requireCamera = true) {
+                                    viewModel.switchLiveCallMode(LiveCallMode.VIDEO)
+                                }
+                            },
+                            testTag = "dock_switch_mode_button"
+                        )
+                        CallControlButton(
+                            icon = Icons.Default.CallEnd,
+                            label = "End Chat",
+                            containerColor = Color(0xFFDC2626),
+                            contentColor = Color.White,
+                            onClick = {
+                                showChatOverlay = false
+                                viewModel.endLiveCall()
+                            },
+                            testTag = "end_call_button"
+                        )
+                    }
+                }
             } else {
                 // =============================================================
-                // ACTIVE LIVE CALL STAGE (SWITCHABLE AUDIO VISUALIZER <-> VIDEO)
+                // ACTIVE LIVE CALL STAGE (SWITCHABLE AUDIO VISUALIZER <-> VIDEO <-> CHAT)
                 // =============================================================
                 Box(modifier = Modifier.fillMaxSize()) {
                     // Persistent WebRTC engine (keeps voice connected seamlessly across Audio <-> Video switches)
@@ -848,24 +1217,41 @@ fun LiveCallScreen(
                                     )
                                 }
                             }
-                            Surface(
-                                onClick = { showChatOverlay = !showChatOverlay },
-                                shape = RoundedCornerShape(999.dp),
-                                color = if (showChatOverlay) CyberCyan else EmeraldSurface.copy(alpha = 0.9f),
-                                border = BorderStroke(1.dp, CyberCyan.copy(alpha = 0.7f)),
-                                modifier = Modifier.testTag("video_mode_chat_pill")
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Surface(
+                                    onClick = { showChatOverlay = !showChatOverlay },
+                                    shape = RoundedCornerShape(999.dp),
+                                    color = if (showChatOverlay) CyberCyan else EmeraldSurface.copy(alpha = 0.9f),
+                                    border = BorderStroke(1.dp, CyberCyan.copy(alpha = 0.7f)),
+                                    modifier = Modifier.testTag("video_mode_chat_pill")
                                 ) {
-                                    Icon(Icons.Default.Chat, contentDescription = "Toggle Live Chat", tint = if (showChatOverlay) DeepEmerald else CyberCyan, modifier = Modifier.size(14.dp))
-                                    Spacer(Modifier.width(5.dp))
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.Chat, contentDescription = "Toggle Live Chat", tint = if (showChatOverlay) DeepEmerald else CyberCyan, modifier = Modifier.size(14.dp))
+                                        Spacer(Modifier.width(5.dp))
+                                        Text(
+                                            text = if (showChatOverlay) "Hide Overlay" else "Chat Overlay (${callState.chatMessages.size})",
+                                            color = if (showChatOverlay) DeepEmerald else Color.White,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Black
+                                        )
+                                    }
+                                }
+                                Surface(
+                                    onClick = { viewModel.switchLiveCallMode(LiveCallMode.CHAT) },
+                                    shape = RoundedCornerShape(999.dp),
+                                    color = EmeraldSurface.copy(alpha = 0.9f),
+                                    border = BorderStroke(1.dp, CyberCyan.copy(alpha = 0.7f)),
+                                    modifier = Modifier.testTag("switch_to_chat_button")
+                                ) {
                                     Text(
-                                        text = if (showChatOverlay) "Hide Live Chat" else "Interactive Chat (${callState.chatMessages.size})",
-                                        color = if (showChatOverlay) DeepEmerald else Color.White,
+                                        text = "Switch to Full Chat",
+                                        color = CyberCyan,
                                         fontSize = 11.sp,
-                                        fontWeight = FontWeight.Black
+                                        fontWeight = FontWeight.Black,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
                                     )
                                 }
                             }
@@ -1093,7 +1479,7 @@ fun LiveCallScreen(
                                 testTag = "speaker_toggle_button"
                             )
 
-                            // Flip Camera (or Live Chat when in Audio Mode)
+                            // Flip Camera (or Full Chat when in Audio Mode)
                             if (callState.mode == LiveCallMode.VIDEO) {
                                 CallControlButton(
                                     icon = Icons.Default.Cameraswitch,
@@ -1106,10 +1492,10 @@ fun LiveCallScreen(
                             } else {
                                 CallControlButton(
                                     icon = Icons.Default.Chat,
-                                    label = "Chat",
-                                    containerColor = if (showChatOverlay) CyberCyan else EmeraldSurface,
-                                    contentColor = if (showChatOverlay) DeepEmerald else Color.White,
-                                    onClick = { showChatOverlay = !showChatOverlay },
+                                    label = "Live Chat",
+                                    containerColor = CyberCyan,
+                                    contentColor = DeepEmerald,
+                                    onClick = { viewModel.switchLiveCallMode(LiveCallMode.CHAT) },
                                     testTag = "toggle_call_chat_button"
                                 )
                             }

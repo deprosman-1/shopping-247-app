@@ -11,6 +11,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,6 +31,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Handshake
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.Language
@@ -42,6 +46,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material.icons.filled.Star
@@ -55,6 +60,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -71,6 +78,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -85,7 +93,9 @@ import com.example.AppScreen
 import com.example.MainViewModel
 import com.example.data.model.Customer
 import com.example.data.model.OrderStatus
+import com.example.data.model.PartnershipInterestStatus
 import com.example.data.model.Product
+import com.example.data.model.ProductCategory
 import com.example.ui.theme.AccentGold
 import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.SuccessGreen
@@ -1127,5 +1137,295 @@ fun CustomerPreOrderPage(viewModel: MainViewModel) {
 
         CustomerPreOrdersList(viewModel = viewModel)
         PreOrderRequestCard(viewModel = viewModel)
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun CustomerPartnershipPage(viewModel: MainViewModel) {
+    val context = LocalContext.current
+    val currentCustomer by viewModel.currentCustomer.collectAsState()
+    val savedDeliveryInfo by viewModel.savedDeliveryInfo.collectAsState()
+    val interestRequests by viewModel.partnershipInterestRequests.collectAsState()
+
+    val myOffers = remember(interestRequests, currentCustomer) {
+        val cust = currentCustomer
+        if (cust == null) interestRequests
+        else {
+            val cleanPhone = cust.phoneNumber.filter { it.isDigit() }.takeLast(10)
+            interestRequests.filter { req ->
+                req.customerId == cust.id ||
+                    req.customerName.equals(cust.fullName, ignoreCase = true) ||
+                    (cleanPhone.length >= 7 && req.customerPhone.filter { it.isDigit() }.endsWith(cleanPhone))
+            }
+        }
+    }
+
+    var formRevealed by rememberSaveable { mutableStateOf(false) }
+    var fullName by rememberSaveable(currentCustomer?.id) {
+        mutableStateOf(currentCustomer?.fullName?.takeIf { it.isNotBlank() } ?: savedDeliveryInfo.fullName)
+    }
+    var phone by rememberSaveable(currentCustomer?.id) {
+        mutableStateOf(currentCustomer?.phoneNumber?.takeIf { it.isNotBlank() } ?: savedDeliveryInfo.phoneNumber)
+    }
+    var email by rememberSaveable(currentCustomer?.id) {
+        mutableStateOf(currentCustomer?.email.orEmpty())
+    }
+    var businessName by rememberSaveable { mutableStateOf("") }
+    var officeAddress by rememberSaveable(currentCustomer?.id) {
+        mutableStateOf(currentCustomer?.deliveryAddress?.takeIf { it.isNotBlank() } ?: savedDeliveryInfo.deliveryAddress)
+    }
+    var selectedCategories by remember { mutableStateOf(setOf(ProductCategory.CLOTHES.displayName)) }
+    var notes by rememberSaveable { mutableStateOf("") }
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("account_partnership_page")
+    ) {
+        Card(
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF052E16)),
+            border = BorderStroke(1.5.dp, AccentGold),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Handshake, contentDescription = null, tint = AccentGold, modifier = Modifier.size(26.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "PARTNER WITH ODIYA",
+                        color = AccentGold,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 15.sp
+                    )
+                }
+                Text(
+                    text = "Tap Am Interested to notify Admin immediately, fill your credentials, office address, and product categories of interest, then complete the dual-signed MOU once accepted.",
+                    color = Color.White.copy(alpha = 0.9f),
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp
+                )
+                Button(
+                    onClick = {
+                        viewModel.notifyPartnershipInterestClicked()
+                        formRevealed = true
+                        Toast.makeText(context, "Admin notified of your interest! Complete the form below and tap Send.", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = Color(0xFF052E16)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                        .testTag("customer_partnership_interested_button")
+                ) {
+                    Icon(Icons.Default.Handshake, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Am Interested", fontWeight = FontWeight.Black, fontSize = 14.sp)
+                }
+            }
+        }
+
+        if (formRevealed) {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                border = BorderStroke(1.2.dp, CyberCyan.copy(alpha = 0.55f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("customer_partnership_interest_form")
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Partnership Offer Details",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Black,
+                        color = CyberCyan
+                    )
+                    OutlinedTextField(
+                        value = fullName,
+                        onValueChange = { fullName = it },
+                        label = { Text("Full Name / Credentials *") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("partnership_interest_name_input")
+                    )
+                    OutlinedTextField(
+                        value = phone,
+                        onValueChange = { phone = it },
+                        label = { Text("Phone / WhatsApp Number *") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("partnership_interest_phone_input")
+                    )
+                    OutlinedTextField(
+                        value = email,
+                        onValueChange = { email = it },
+                        label = { Text("Email Address (Optional)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("partnership_interest_email_input")
+                    )
+                    OutlinedTextField(
+                        value = businessName,
+                        onValueChange = { businessName = it },
+                        label = { Text("Business / Brand Name (Optional)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("partnership_interest_business_input")
+                    )
+                    OutlinedTextField(
+                        value = officeAddress,
+                        onValueChange = { officeAddress = it },
+                        label = { Text("Office / Store Address *") },
+                        minLines = 2,
+                        modifier = Modifier.fillMaxWidth().testTag("partnership_interest_address_input")
+                    )
+                    Text(
+                        text = "Product Categories of Interest *",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentGold
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        ProductCategory.entries.forEach { cat ->
+                            val selected = cat.displayName in selectedCategories
+                            FilterChip(
+                                selected = selected,
+                                onClick = {
+                                    selectedCategories = if (selected && selectedCategories.size > 1) {
+                                        selectedCategories - cat.displayName
+                                    } else {
+                                        selectedCategories + cat.displayName
+                                    }
+                                },
+                                label = { Text(cat.displayName, fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = CyberCyan,
+                                    selectedLabelColor = Color.Black
+                                ),
+                                modifier = Modifier.testTag("partnership_interest_cat_${cat.name}")
+                            )
+                        }
+                    }
+                    OutlinedTextField(
+                        value = notes,
+                        onValueChange = { notes = it },
+                        label = { Text("Additional Offer Note (Optional)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Button(
+                        onClick = {
+                            if (fullName.isBlank() || phone.isBlank() || officeAddress.isBlank()) {
+                                Toast.makeText(context, "Enter Name, Phone, and Office Address before sending.", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            viewModel.submitPartnershipInterestRequest(
+                                customerName = fullName,
+                                customerPhone = phone,
+                                customerEmail = email,
+                                businessName = businessName,
+                                officeAddress = officeAddress,
+                                productCategories = selectedCategories.toList(),
+                                note = notes
+                            ) { ok, msg ->
+                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                if (ok) notes = ""
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = Color.White),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                            .testTag("partnership_interest_send_button")
+                    ) {
+                        Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Send Partnership Offer to Admin", fontWeight = FontWeight.Black)
+                    }
+                }
+            }
+        }
+
+        if (myOffers.isNotEmpty()) {
+            Text(
+                text = "MY PARTNERSHIP REQUESTS & ADMIN REPLIES (${myOffers.size})",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Black,
+                color = AccentGold
+            )
+            myOffers.forEach { offer ->
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(
+                        1.4.dp,
+                        when (offer.status) {
+                            PartnershipInterestStatus.ACCEPTED -> SuccessGreen
+                            PartnershipInterestStatus.REJECTED -> Color(0xFFEF4444)
+                            PartnershipInterestStatus.PENDING -> AccentGold
+                        }
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(offer.businessName.ifBlank { offer.customerName }, fontWeight = FontWeight.Black, fontSize = 14.sp)
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = when (offer.status) {
+                                    PartnershipInterestStatus.ACCEPTED -> SuccessGreen.copy(alpha = 0.16f)
+                                    PartnershipInterestStatus.REJECTED -> Color(0xFFEF4444).copy(alpha = 0.16f)
+                                    PartnershipInterestStatus.PENDING -> AccentGold.copy(alpha = 0.18f)
+                                }
+                            ) {
+                                Text(
+                                    text = offer.status.label,
+                                    color = when (offer.status) {
+                                        PartnershipInterestStatus.ACCEPTED -> SuccessGreen
+                                        PartnershipInterestStatus.REJECTED -> Color(0xFFEF4444)
+                                        PartnershipInterestStatus.PENDING -> AccentGold
+                                    },
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Black,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+                        Text("Office: ${offer.officeAddress}", fontSize = 11.5.sp)
+                        Text("Categories: ${offer.productCategories.joinToString()}", fontSize = 11.5.sp, color = CyberCyan)
+                        if (offer.adminReply.isNotBlank()) {
+                            Text(
+                                text = "Admin Reply: ${offer.adminReply}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (offer.status == PartnershipInterestStatus.REJECTED) Color(0xFFEF4444) else SuccessGreen
+                            )
+                        }
+                        if (offer.status == PartnershipInterestStatus.ACCEPTED) {
+                            Button(
+                                onClick = { viewModel.openAcceptedPartnershipForm(offer) },
+                                colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = Color.Black),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .testTag("complete_accepted_partnership_mou_button")
+                            ) {
+                                Icon(Icons.Default.Verified, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Complete Main Partnership Form & Sign MOU", fontWeight = FontWeight.Black, fontSize = 12.5.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

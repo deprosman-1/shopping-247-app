@@ -674,27 +674,38 @@ fun DeprosApp(
                             fontSize = 12.sp
                         )
                         androidx.compose.foundation.layout.Row(
-                            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp)
                         ) {
+                            androidx.compose.material3.Button(
+                                onClick = { viewModel.answerIncomingLiveCall(pendingRing, LiveCallMode.CHAT) },
+                                colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = com.example.ui.theme.CyberCyan, contentColor = Color(0xFF052E16)),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Chat", fontSize = 11.5.sp, fontWeight = FontWeight.Black)
+                            }
                             androidx.compose.material3.Button(
                                 onClick = { viewModel.answerIncomingLiveCall(pendingRing, LiveCallMode.AUDIO) },
                                 colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = SuccessGreen),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Text("Answer Audio", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                Text("Audio", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                             }
                             androidx.compose.material3.Button(
                                 onClick = { viewModel.answerIncomingLiveCall(pendingRing, LiveCallMode.VIDEO) },
                                 colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = Color(0xFF052E16)),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Text("Answer Video", fontSize = 11.5.sp, fontWeight = FontWeight.Black)
+                                Text("Video", fontSize = 11.5.sp, fontWeight = FontWeight.Black)
                             }
                             androidx.compose.material3.OutlinedButton(
                                 onClick = { viewModel.declineIncomingLiveCall(pendingRing) },
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp),
                                 colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFCA5A5))
                             ) {
-                                Text("Decline", fontSize = 11.5.sp)
+                                Text("Decline", fontSize = 11.sp)
                             }
                         }
                     }

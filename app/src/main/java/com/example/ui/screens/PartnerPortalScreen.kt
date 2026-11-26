@@ -80,6 +80,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -272,11 +273,24 @@ fun PartnerPortalScreen(
                     // =============================================================
                     // TAB 0: CATEGORIZED PARTNERSHIP & MOU APPLICATION FORM
                     // =============================================================
-                    var businessName by rememberSaveable { mutableStateOf("") }
-                    var ownerName by rememberSaveable { mutableStateOf("") }
-                    var ownerPhone by rememberSaveable { mutableStateOf("") }
-                    var businessAddress by rememberSaveable { mutableStateOf("") }
-                    var primaryCategory by rememberSaveable { mutableStateOf(ProductCategory.CLOTHES.displayName) }
+                    val pendingDraft by viewModel.pendingPartnershipDraft.collectAsState()
+                    var businessName by rememberSaveable { mutableStateOf(pendingDraft?.businessName?.ifBlank { pendingDraft?.customerName }.orEmpty()) }
+                    var ownerName by rememberSaveable { mutableStateOf(pendingDraft?.customerName.orEmpty()) }
+                    var ownerPhone by rememberSaveable { mutableStateOf(pendingDraft?.customerPhone.orEmpty()) }
+                    var businessAddress by rememberSaveable { mutableStateOf(pendingDraft?.officeAddress.orEmpty()) }
+                    var primaryCategory by rememberSaveable { mutableStateOf(pendingDraft?.productCategories?.firstOrNull() ?: ProductCategory.CLOTHES.displayName) }
+                    var nextOfKinName by rememberSaveable { mutableStateOf("") }
+                    var nextOfKinGender by rememberSaveable { mutableStateOf("Male") }
+                    var nextOfKinPhone by rememberSaveable { mutableStateOf("") }
+
+                    LaunchedEffect(pendingDraft?.id) {
+                        val draft = pendingDraft ?: return@LaunchedEffect
+                        if (businessName.isBlank()) businessName = draft.businessName.ifBlank { draft.customerName }
+                        if (ownerName.isBlank()) ownerName = draft.customerName
+                        if (ownerPhone.isBlank()) ownerPhone = draft.customerPhone
+                        if (businessAddress.isBlank()) businessAddress = draft.officeAddress
+                        draft.productCategories.firstOrNull()?.let { primaryCategory = it }
+                    }
 
                     // Schedule / Initial Product Spec inside MOU
                     var sampleProductName by rememberSaveable { mutableStateOf("") }
@@ -500,6 +514,34 @@ fun PartnerPortalScreen(
                                     label = { Text("Business Warehouse / Office Address") },
                                     minLines = 2,
                                     modifier = Modifier.fillMaxWidth().testTag("partner_address_input")
+                                )
+
+                                Text("Next of Kin Details *", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = AccentGold)
+                                OutlinedTextField(
+                                    value = nextOfKinName,
+                                    onValueChange = { nextOfKinName = it },
+                                    label = { Text("Next of Kin Full Name *") },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth().testTag("partner_nok_name_input")
+                                )
+                                Text("Next of Kin Gender *", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    listOf("Male", "Female", "Other").forEach { genderOpt ->
+                                        FilterChip(
+                                            selected = nextOfKinGender == genderOpt,
+                                            onClick = { nextOfKinGender = genderOpt },
+                                            label = { Text(genderOpt, fontSize = 11.5.sp) },
+                                            modifier = Modifier.testTag("partner_nok_gender_chip_$genderOpt")
+                                        )
+                                    }
+                                }
+                                OutlinedTextField(
+                                    value = nextOfKinPhone,
+                                    onValueChange = { nextOfKinPhone = it },
+                                    label = { Text("Next of Kin Phone Number(s) *") },
+                                    placeholder = { Text("e.g. +234801..., +234802...") },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth().testTag("partner_nok_phone_input")
                                 )
 
                                 Text("Select Sold Product Category *", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = CyberCyan)
@@ -889,8 +931,13 @@ fun PartnerPortalScreen(
                                     paystackBankCode = paystackBankCode,
                                     paystackAccountNumber = paystackAccountNum.ifBlank { opayNumber.ifBlank { monieNumber } },
                                     paystackAccountName = paystackAccountName.ifBlank { opayName.ifBlank { monieName.ifBlank { businessName } } },
-                                    autoDeductHostingFromPaystackSplit = autoDeductHostingSplit
+                                    autoDeductHostingFromPaystackSplit = autoDeductHostingSplit,
+                                    nextOfKinName = nextOfKinName,
+                                    nextOfKinGender = nextOfKinGender,
+                                    nextOfKinPhone = nextOfKinPhone,
+                                    customerId = pendingDraft?.customerId ?: viewModel.currentCustomer.value?.id.orEmpty()
                                 ) { created ->
+                                    viewModel.clearPendingPartnershipDraft()
                                     selectedPartnerId = created.id
                                     uploadCategory = primaryCategory
                                     uploadProductName = sampleProductName

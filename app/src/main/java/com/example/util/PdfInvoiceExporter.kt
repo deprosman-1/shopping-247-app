@@ -359,4 +359,41 @@ object PdfInvoiceExporter {
             Toast.makeText(context, "No app available to share PDF", Toast.LENGTH_SHORT).show()
         }
     }
+
+    fun forwardPdfReceiptToOdiya(
+        context: Context,
+        order: Order,
+        storeProfile: StoreProfileConfig
+    ): Boolean {
+        val pdfUri = generateAndGetUri(context, order, storeProfile) ?: return false
+        val naira = NumberFormat.getCurrencyInstance(Locale("en", "NG")).apply { maximumFractionDigits = 0 }
+        val storeTitle = storeProfile.storeName.ifBlank { "ODIYA" }
+        val targetWa = storeProfile.whatsappNumber.ifBlank { storeProfile.phoneNumber }
+        val body = """
+            $storeTitle PAYMENT RECEIPT (PDF FORMAT)
+            Order ID: ${order.orderId}
+            Portal: ${order.paymentMethod.title}
+            ODIYA Account: ${order.paymentAccount}
+            Amount Paid: ${naira.format(order.totalAmount)}
+            Customer: ${order.customerName} (${order.customerPhone})
+            Ref: ${order.paymentReference}
+            ${if (targetWa.isNotBlank()) "Recipient WhatsApp: $targetWa" else ""}
+        """.trimIndent()
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/pdf"
+            putExtra(Intent.EXTRA_STREAM, pdfUri)
+            if (storeProfile.supportEmail.isNotBlank()) {
+                putExtra(Intent.EXTRA_EMAIL, arrayOf(storeProfile.supportEmail))
+            }
+            putExtra(Intent.EXTRA_SUBJECT, "$storeTitle PDF Payment Receipt - ${order.orderId}")
+            putExtra(Intent.EXTRA_TEXT, body)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return try {
+            context.startActivity(Intent.createChooser(intent, "Forward PDF Receipt (.pdf) to $storeTitle"))
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
 }

@@ -142,12 +142,20 @@ import com.example.util.PdfInvoiceExporter
 import com.example.util.ProductImageHelper
 import com.example.util.WhatsAppHelper
 import com.example.util.WordInvoiceExporter
+import android.content.Intent
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Switch
 import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.DialogProperties
 import com.example.ui.theme.MoniepointBlue
 import com.example.ui.theme.OPayGreen
 import com.example.ui.theme.PalmPayPurple
@@ -1997,7 +2005,7 @@ private fun PaymentConfirmedStatusStep(
 
             if (order != null) {
                 Text(
-                    text = "Export Generated Receipt (ODIYA Recipient)",
+                    text = "Forward Payment Receipt Directly to ODIYA (Word or PDF)",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Black,
                     color = MaterialTheme.colorScheme.primary,
@@ -2008,7 +2016,10 @@ private fun PaymentConfirmedStatusStep(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Button(
-                        onClick = { WordInvoiceExporter.shareWordInvoice(context, order, storeProfile) },
+                        onClick = {
+                            viewModel.recordForwardedReceiptToOdiya(order, "WORD")
+                            WordInvoiceExporter.forwardWordReceiptToOdiya(context, order, storeProfile)
+                        },
                         colors = ButtonDefaults.buttonColors(containerColor = MoniepointBlue, contentColor = Color.White),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
@@ -2016,9 +2027,9 @@ private fun PaymentConfirmedStatusStep(
                             .height(48.dp)
                             .testTag("checkout_word_share_button")
                     ) {
-                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Word Format", fontSize = 12.sp, fontWeight = FontWeight.Black)
+                        Text("Forward Word (.doc)", fontSize = 11.5.sp, fontWeight = FontWeight.Black)
                     }
                     OutlinedButton(
                         onClick = { saveWordLauncher.launch("${order.orderId}_247_Receipt.doc") },
@@ -2030,7 +2041,7 @@ private fun PaymentConfirmedStatusStep(
                     ) {
                         Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Save Word (.doc)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Save Word (.doc)", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
@@ -2038,17 +2049,21 @@ private fun PaymentConfirmedStatusStep(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    OutlinedButton(
-                        onClick = { PdfInvoiceExporter.sharePdfInvoice(context, order, storeProfile) },
+                    Button(
+                        onClick = {
+                            viewModel.recordForwardedReceiptToOdiya(order, "PDF")
+                            PdfInvoiceExporter.forwardPdfReceiptToOdiya(context, order, storeProfile)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB91C1C), contentColor = Color.White),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .weight(1f)
                             .height(48.dp)
                             .testTag("checkout_share_pdf_button")
                     ) {
-                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("PDF Format", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Forward PDF (.pdf)", fontSize = 11.5.sp, fontWeight = FontWeight.Black)
                     }
 
                     OutlinedButton(
@@ -2061,7 +2076,7 @@ private fun PaymentConfirmedStatusStep(
                     ) {
                         Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Save PDF", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Save PDF (.pdf)", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -2109,9 +2124,9 @@ private fun PaymentConfirmedStatusStep(
                     .height(50.dp)
                     .testTag("payment_confirmation_continue_shopping_button")
             ) {
-                Icon(Icons.Default.ShoppingBag, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                Icon(Icons.Default.Home, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Continue Shopping", fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+                Text("Return to App (Continue Shopping)", fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
             }
         }
     }
@@ -3251,11 +3266,14 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
             subtitle = if (partnerFolder?.opayAccountNumber?.isNotBlank() == true)
                 "Partner Folder OPay Account (${partnerFolder.businessName})"
             else
-                "Tap to open Direct OPay Portal with embedded ODIYA account & total",
+                "Click to open Live OPay Merchant Portal with embedded ODIYA account & total",
             brandColor = OPayGreen,
             icon = Icons.Default.PhoneAndroid,
             isSelected = selectedPaymentMethod == PaymentMethod.OPAY,
-            onSelect = { onSelectPaymentMethod(PaymentMethod.OPAY) }
+            onSelect = {
+                onSelectPaymentMethod(PaymentMethod.OPAY)
+                onOpenDirectPortal(PaymentMethod.OPAY)
+            }
         ) {
             BankTransferDetailsBox(
                 bankName = "OPay (Paycom)",
@@ -3276,7 +3294,7 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                 Icon(Icons.Default.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Pay Direct via OPay Portal (${nairaFormat.format(effectivePayableTotal)})",
+                    text = "Open Live OPay Portal (${nairaFormat.format(effectivePayableTotal)})",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Black
                 )
@@ -3290,11 +3308,14 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
             subtitle = if (partnerFolder?.moniepointAccountNumber?.isNotBlank() == true)
                 "Partner Folder Moniepoint Account (${partnerFolder.businessName})"
             else
-                "Tap to open Direct Moniepoint Portal with embedded ODIYA account & total",
+                "Click to open Live Moniepoint Merchant Portal with embedded ODIYA account & total",
             brandColor = MoniepointBlue,
             icon = Icons.Default.AccountBalance,
             isSelected = selectedPaymentMethod == PaymentMethod.MONIEPOINT,
-            onSelect = { onSelectPaymentMethod(PaymentMethod.MONIEPOINT) }
+            onSelect = {
+                onSelectPaymentMethod(PaymentMethod.MONIEPOINT)
+                onOpenDirectPortal(PaymentMethod.MONIEPOINT)
+            }
         ) {
             BankTransferDetailsBox(
                 bankName = "Moniepoint Microfinance Bank",
@@ -3315,7 +3336,7 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                 Icon(Icons.Default.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Pay Direct via Moniepoint Portal (${nairaFormat.format(effectivePayableTotal)})",
+                    text = "Open Live Moniepoint Portal (${nairaFormat.format(effectivePayableTotal)})",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Black
                 )
@@ -3326,11 +3347,14 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
 
         PaymentOptionCard(
             title = "PalmPay Digital Wallet",
-            subtitle = "Tap to open Direct PalmPay Portal with embedded ODIYA account & total",
+            subtitle = "Click to open Live PalmPay Merchant Portal with embedded ODIYA account & total",
             brandColor = PalmPayPurple,
             icon = Icons.Default.AccountBalanceWallet,
             isSelected = selectedPaymentMethod == PaymentMethod.PALMPAY,
-            onSelect = { onSelectPaymentMethod(PaymentMethod.PALMPAY) }
+            onSelect = {
+                onSelectPaymentMethod(PaymentMethod.PALMPAY)
+                onOpenDirectPortal(PaymentMethod.PALMPAY)
+            }
         ) {
             BankTransferDetailsBox(
                 bankName = "PalmPay Digital Bank",
@@ -3351,7 +3375,7 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                 Icon(Icons.Default.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Pay Direct via PalmPay Portal (${nairaFormat.format(effectivePayableTotal)})",
+                    text = "Open Live PalmPay Portal (${nairaFormat.format(effectivePayableTotal)})",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Black
                 )
@@ -3746,6 +3770,7 @@ private fun DirectPortalCheckoutDialog(
     onDismiss: () -> Unit,
     onPayNow: (simulateCredited: Boolean, simulateNetworkDelay: Boolean) -> Unit
 ) {
+    val context = LocalContext.current
     val portalColor = when (paymentMethod) {
         PaymentMethod.PAYSTACK -> PaystackTeal
         PaymentMethod.OPAY -> OPayGreen
@@ -3753,24 +3778,38 @@ private fun DirectPortalCheckoutDialog(
         PaymentMethod.PALMPAY -> PalmPayPurple
         else -> SuccessGreen
     }
+    val merchantPortalUrl = when (paymentMethod) {
+        PaymentMethod.OPAY -> "https://www.opayweb.com/"
+        PaymentMethod.MONIEPOINT -> "https://moniepoint.com/"
+        PaymentMethod.PALMPAY -> "https://www.palmpay.com/"
+        PaymentMethod.PAYSTACK -> "https://paystack.com/"
+        else -> "https://www.opayweb.com/"
+    }
     var targetLogoSelected by remember { mutableStateOf(true) }
     var simulateNetworkDelay by remember { mutableStateOf(false) }
     var simulateCreditAlert by remember { mutableStateOf(true) }
+    var showLivePortalWebView by remember { mutableStateOf(true) }
+    var webPageLoading by remember { mutableStateOf(true) }
+    var webViewUnavailable by remember { mutableStateOf(false) }
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Card(
             shape = RoundedCornerShape(22.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             border = BorderStroke(2.dp, portalColor),
             modifier = Modifier
-                .fillMaxWidth()
+                .fillMaxWidth(0.96f)
+                .fillMaxHeight(0.92f)
                 .testTag("direct_portal_dialog")
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
-                    .padding(18.dp),
+                    .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Row(
@@ -3780,19 +3819,114 @@ private fun DirectPortalCheckoutDialog(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "${paymentMethod.title.uppercase()} DIRECT PORTAL",
+                            text = "${paymentMethod.title.uppercase()} LIVE MERCHANT PORTAL",
                             fontWeight = FontWeight.Black,
                             fontSize = 14.sp,
                             color = portalColor
                         )
                         Text(
-                            text = "Verify merchant details below & tap Payment Button",
+                            text = merchantPortalUrl,
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                    TextButton(onClick = onDismiss) {
+                        Text("Return to App", fontWeight = FontWeight.Black, fontSize = 11.sp)
+                    }
                     IconButton(onClick = onDismiss) {
                         Icon(Icons.Default.Close, contentDescription = "Close Portal")
+                    }
+                }
+
+                // Live Merchant Portal WebView Section
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    border = BorderStroke(1.dp, portalColor.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Icon(Icons.Default.Language, contentDescription = null, tint = portalColor, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    text = "Live ${paymentMethod.title} Merchant Page",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                OutlinedButton(
+                                    onClick = { showLivePortalWebView = !showLivePortalWebView },
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(34.dp)
+                                ) {
+                                    Text(if (showLivePortalWebView) "Hide Page" else "Show Page", fontSize = 10.5.sp)
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        runCatching {
+                                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(merchantPortalUrl)))
+                                        }
+                                    },
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    modifier = Modifier
+                                        .height(34.dp)
+                                        .testTag("direct_portal_external_browser_button")
+                                ) {
+                                    Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(13.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Browser", fontSize = 10.5.sp)
+                                }
+                            }
+                        }
+
+                        if (showLivePortalWebView) {
+                            if (webViewUnavailable) {
+                                Text(
+                                    text = "Live Merchant Portal ready at $merchantPortalUrl — use Browser button above or complete instant embedded transfer below.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            } else {
+                                if (webPageLoading) {
+                                    LinearProgressIndicator(
+                                        color = portalColor,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                                AndroidView(
+                                    factory = { ctx ->
+                                        try {
+                                            WebView(ctx).apply {
+                                                settings.javaScriptEnabled = true
+                                                settings.domStorageEnabled = true
+                                                webViewClient = object : WebViewClient() {
+                                                    override fun onPageFinished(view: WebView?, url: String?) {
+                                                        webPageLoading = false
+                                                    }
+                                                }
+                                                loadUrl(merchantPortalUrl)
+                                            }
+                                        } catch (_: Throwable) {
+                                            webViewUnavailable = true
+                                            webPageLoading = false
+                                            android.view.View(ctx)
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(210.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .testTag("direct_portal_webview")
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -3823,7 +3957,7 @@ private fun DirectPortalCheckoutDialog(
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
                                 Text(storeName, fontWeight = FontWeight.Black, fontSize = 13.sp)
-                                Text("Target Recipient Logo", fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Embedded ODIYA Recipient Logo", fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                         Surface(
@@ -3841,7 +3975,7 @@ private fun DirectPortalCheckoutDialog(
                     }
                 }
 
-                // Pre-Embedded ODIYA Account Number & Exact Payable Amount
+                // Embedded ODIYA Account Number & Exact Payable Amount in Figures
                 Surface(
                     shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
@@ -3849,22 +3983,57 @@ private fun DirectPortalCheckoutDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("RECEIVER ACCOUNT NUMBER (PRE-EMBEDDED)", fontSize = 10.sp, fontWeight = FontWeight.Black, color = portalColor)
-                        Text(
-                            text = accountNumber,
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Black,
-                            fontFamily = FontFamily.Monospace
-                        )
-                        Text("Account Name: $accountName", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("EMBEDDED ODIYA ACCOUNT DETAILS", fontSize = 10.sp, fontWeight = FontWeight.Black, color = portalColor)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = accountNumber,
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Text("Account Name: $accountName", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                            IconButton(
+                                onClick = {
+                                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    cm.setPrimaryClip(ClipData.newPlainText("ODIYA Account", accountNumber))
+                                    Toast.makeText(context, "Account copied: $accountNumber", Toast.LENGTH_SHORT).show()
+                                }
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy Account", tint = portalColor)
+                            }
+                        }
                         HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                        Text("EXACT PAYABLE AMOUNT (LOCKED IN FIGURES)", fontSize = 10.sp, fontWeight = FontWeight.Black, color = portalColor)
-                        Text(
-                            text = nairaFormat.format(payableAmount),
-                            fontSize = 26.sp,
-                            fontWeight = FontWeight.Black,
-                            color = portalColor
-                        )
+                        Text("AMOUNT TO PAY (IN FIGURES)", fontSize = 10.sp, fontWeight = FontWeight.Black, color = portalColor)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = nairaFormat.format(payableAmount),
+                                fontSize = 26.sp,
+                                fontWeight = FontWeight.Black,
+                                color = portalColor
+                            )
+                            OutlinedButton(
+                                onClick = {
+                                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    val amtPlain = String.format(Locale.US, "%.2f", payableAmount)
+                                    cm.setPrimaryClip(ClipData.newPlainText("Payable Amount", amtPlain))
+                                    Toast.makeText(context, "Amount copied: $amtPlain", Toast.LENGTH_SHORT).show()
+                                }
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Copy Amount", fontSize = 11.sp)
+                            }
+                        }
                     }
                 }
 
@@ -3916,12 +4085,12 @@ private fun DirectPortalCheckoutDialog(
                     if (isProcessing) {
                         CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("DEDUCTING EXACT AMOUNT...", fontWeight = FontWeight.Black)
+                        Text("COMPLETING PAYMENT...", fontWeight = FontWeight.Black)
                     } else {
                         Text(
-                            text = "PAY NOW • DEDUCT ${nairaFormat.format(payableAmount)}",
+                            text = "PAY ${nairaFormat.format(payableAmount)} & GENERATE WORD/PDF RECEIPT",
                             fontWeight = FontWeight.Black,
-                            fontSize = 14.sp
+                            fontSize = 12.5.sp
                         )
                     }
                 }

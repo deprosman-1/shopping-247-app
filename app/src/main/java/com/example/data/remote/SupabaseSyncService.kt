@@ -2387,7 +2387,11 @@ class SupabaseSyncService(
                                 paystackAccountNumber = o.optString("paystackAccountNumber", ""),
                                 paystackAccountName = o.optString("paystackAccountName", ""),
                                 pendingHostingFeeBalance = o.optDouble("pendingHostingFeeBalance", 0.0),
-                                autoDeductHostingFromPaystackSplit = o.optBoolean("autoDeductHostingFromPaystackSplit", true)
+                                autoDeductHostingFromPaystackSplit = o.optBoolean("autoDeductHostingFromPaystackSplit", true),
+                                nextOfKinName = o.optString("nextOfKinName", ""),
+                                nextOfKinGender = o.optString("nextOfKinGender", ""),
+                                nextOfKinPhone = o.optString("nextOfKinPhone", ""),
+                                customerId = o.optString("customerId", "")
                             )
                         )
                     }
@@ -2586,6 +2590,10 @@ class SupabaseSyncService(
                                 put("paystackAccountName", o.paystackAccountName)
                                 put("pendingHostingFeeBalance", o.pendingHostingFeeBalance)
                                 put("autoDeductHostingFromPaystackSplit", o.autoDeductHostingFromPaystackSplit)
+                                put("nextOfKinName", o.nextOfKinName)
+                                put("nextOfKinGender", o.nextOfKinGender)
+                                put("nextOfKinPhone", o.nextOfKinPhone)
+                                put("customerId", o.customerId)
                             })
                         }
                     })
