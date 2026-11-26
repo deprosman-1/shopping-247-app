@@ -404,6 +404,24 @@ object ShopNotificationHelper {
         )
     }
 
+    fun notifyActiveMerchantPaymentDetails(
+        context: Context,
+        merchantTitle: String,
+        accountNumber: String,
+        accountName: String,
+        formattedAmount: String
+    ) {
+        if (!hasNotificationPermission(context)) return
+        ensureChannels(context)
+        postNotification(
+            context = context,
+            channelId = CHANNEL_ORDERS,
+            notificationId = 24899,
+            title = "ODIYA Account Ready • $merchantTitle ($formattedAmount)",
+            body = "Account: $accountNumber ($accountName) • Payable Amount: $formattedAmount. After completing transfer in $merchantTitle, tap here to return to ODIYA Checkout & forward your Word/PDF receipt."
+        )
+    }
+
     private fun postNotification(
         context: Context,
         channelId: String,

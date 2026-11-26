@@ -33,6 +33,12 @@
         <package android:name="com.brave.browser" />
         <package android:name="com.whatsapp" />
         <package android:name="com.whatsapp.w4b" />
+        <package android:name="team.opay.pay" />
+        <package android:name="team.opay.pay.merchant" />
+        <package android:name="com.moniepoint.personal" />
+        <package android:name="com.moniepoint.business" />
+        <package android:name="com.transsnet.palmpay" />
+        <package android:name="com.palmpay.business" />
     </queries>
 
     <application
