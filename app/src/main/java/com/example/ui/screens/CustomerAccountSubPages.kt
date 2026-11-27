@@ -906,7 +906,7 @@ fun CustomerVouchersPage(viewModel: MainViewModel) {
                             onClick = {
                                 val share = Intent(Intent.ACTION_SEND).apply {
                                     type = "text/plain"
-                                    putExtra(Intent.EXTRA_TEXT, "Shop on ODIYA with my referral code ${loyaltyAccount.referralCode} for 10 bonus points (₦500 value)!")
+                                    putExtra(Intent.EXTRA_TEXT, "Shop on ODIYA with my referral code ${loyaltyAccount.referralCode} for +100 bonus Loyalty Points (₦5,000 Checkout Credit)!")
                                 }
                                 context.startActivity(Intent.createChooser(share, "Share Referral Code"))
                             }

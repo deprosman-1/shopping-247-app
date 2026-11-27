@@ -69,6 +69,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -539,9 +540,10 @@ private fun AdminPartnerAgreementsSection(
             Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(Icons.Default.Handshake, contentDescription = null, tint = AccentGold, modifier = Modifier.size(40.dp))
                 Spacer(modifier = Modifier.height(8.dp))
-                Text("No Business Partnership MOUs Yet", fontWeight = FontWeight.Bold)
+                Text("No Business Partnership MOUs Submitted Yet", fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    "Businesses can submit & sign categorized partnership applications via the Business Partner Portal.",
+                    "Admin Counter-Signature Pad activates automatically once a Partner signs & submits their MOU form from Account -> Partnership.",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -550,7 +552,22 @@ private fun AdminPartnerAgreementsSection(
         return
     }
 
-    var expandedPartnerId by rememberSaveable { mutableStateOf(partners.firstOrNull()?.id ?: "") }
+    var expandedPartnerId by rememberSaveable {
+        mutableStateOf(
+            partners.firstOrNull { it.status == PartnerAgreementStatus.PENDING_FINALIZATION }?.id
+                ?: partners.firstOrNull()?.id.orEmpty()
+        )
+    }
+
+    LaunchedEffect(partners) {
+        val currentStillValid = partners.any { it.id == expandedPartnerId }
+        val firstPending = partners.firstOrNull { it.status == PartnerAgreementStatus.PENDING_FINALIZATION }
+        if (!currentStillValid || (expandedPartnerId.isBlank() && partners.isNotEmpty())) {
+            expandedPartnerId = firstPending?.id ?: partners.firstOrNull()?.id.orEmpty()
+        } else if (firstPending != null && partners.none { it.id == expandedPartnerId && it.status == PartnerAgreementStatus.PENDING_FINALIZATION }) {
+            expandedPartnerId = firstPending.id
+        }
+    }
 
     partners.forEach { partner ->
         val isPending = partner.status == PartnerAgreementStatus.PENDING_FINALIZATION
@@ -598,10 +615,13 @@ private fun AdminPartnerAgreementsSection(
                             fontSize = 11.5.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        val catsSummary = partner.selectedCategories
+                            .ifEmpty { listOf(partner.primaryCategory) }
+                            .joinToString(", ")
                         Text(
-                            "Cat: ${partner.primaryCategory} • Fee: ${partner.stipulatedCommissionPercent}% • Monthly: ${nairaFormat.format(partner.monthlyHostingPayment)}",
+                            "Cat: $catsSummary • Fee: ${partner.stipulatedCommissionPercent}% • Monthly: ${nairaFormat.format(partner.monthlyHostingPayment)}",
                             fontSize = 11.sp,
-                            color = CyberCyan,
+                            color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -641,9 +661,47 @@ private fun AdminPartnerAgreementsSection(
                         Text(
                             text = "Next of Kin: ${partner.nextOfKinName.ifBlank { "N/A" }} • Gender: ${partner.nextOfKinGender.ifBlank { "N/A" }} • Phone(s): ${partner.nextOfKinPhone.ifBlank { "N/A" }}",
                             fontSize = 11.5.sp,
-                            color = CyberCyan,
+                            color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.SemiBold
                         )
+                    }
+                    if (partner.sampleProductName.isNotBlank() || partner.sampleProductImageUrl.isNotBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.45f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                if (partner.sampleProductImageUrl.isNotBlank()) {
+                                    AsyncImage(
+                                        model = partner.sampleProductImageUrl,
+                                        contentDescription = partner.sampleProductName.ifBlank { "MOU Product Photo" },
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .size(54.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                    )
+                                }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Product of Interest (MOU Form)",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = AccentGold
+                                    )
+                                    Text(
+                                        text = partner.sampleProductName.ifBlank { "Sample product image attached" },
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     // Editable Commercial Terms
@@ -735,7 +793,45 @@ private fun AdminPartnerAgreementsSection(
                         roleLabel = "PARTNER BUSINESS OWNER SIGNATURE"
                     )
 
-                    if (isPending) {
+                    val partnerHasSigned = partner.partnerSignatureStrokes.isNotBlank()
+                    if (!partnerHasSigned) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                            border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("admin_mou_awaiting_partner_sig_${partner.id}")
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    text = "Awaiting Partner Signature & MOU Submission",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = AccentGold
+                                )
+                                Text(
+                                    text = "ODIYA Admin Counter-Signature Pad will activate automatically once the Partner signs and submits the MOU form.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    } else if (isPending) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = SuccessGreen.copy(alpha = 0.14f),
+                            border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.45f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "Partner Signed & Submitted — Admin Counter-Signature Pad Active Below",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = SuccessGreen,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
                         OutlinedTextField(
                             value = adminSignatoryName,
                             onValueChange = { adminSignatoryName = it },
@@ -783,7 +879,7 @@ private fun AdminPartnerAgreementsSection(
                         SignaturePreviewBox(
                             strokesData = partner.adminCounterSignatureStrokes,
                             signerName = partner.adminCounterSignatureName,
-                            roleLabel = "ODIYA ADMIN COUNTER-SIGNATURE (FINALIZED)"
+                            roleLabel = if (isTerminated) "ODIYA ADMIN COUNTER-SIGNATURE (TERMINATED)" else "ODIYA ADMIN COUNTER-SIGNATURE (FINALIZED)"
                         )
                         OutlinedButton(
                             onClick = { showCounterSignPad = !showCounterSignPad },
@@ -795,7 +891,7 @@ private fun AdminPartnerAgreementsSection(
                             Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp), tint = AccentGold)
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = if (showCounterSignPad) "Hide Counter-Signature Pad" else "Activate Admin Counter-Signature Pad",
+                                text = if (showCounterSignPad) "Hide Counter-Signature Pad" else "Re-Sign / Update Admin Counter-Signature",
                                 fontWeight = FontWeight.Bold,
                                 color = AccentGold
                             )

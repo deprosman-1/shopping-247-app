@@ -231,6 +231,122 @@ fun ShopEmblemWatermark(
 }
 
 @Composable
+fun OfficialInstalledHorizontalBar(
+    onOpenQrShare: () -> Unit,
+    modifier: Modifier = Modifier,
+    storeName: String = "ODIYA",
+    tagline: String = "Shopping with ease and comfort",
+    storePhone: String = "",
+    secondaryPhone: String = "",
+    storeAddress: String = ""
+) {
+    val phonesCombined = listOf(storePhone, secondaryPhone).filter { it.isNotBlank() }.joinToString(" / ")
+    val detailsLine = listOfNotNull(
+        tagline.takeIf { it.isNotBlank() },
+        phonesCombined.takeIf { it.isNotBlank() }?.let { "Tel: $it" },
+        storeAddress.takeIf { it.isNotBlank() }
+    ).joinToString(" • ")
+
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = Color(0xFF064E3B),
+        border = androidx.compose.foundation.BorderStroke(
+            width = 1.dp,
+            brush = Brush.horizontalGradient(
+                colors = listOf(
+                    AccentGold.copy(alpha = 0.75f),
+                    CyberCyan.copy(alpha = 0.6f),
+                    AccentGold.copy(alpha = 0.75f)
+                )
+            )
+        ),
+        shadowElevation = 2.dp,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 2.dp)
+            .testTag("official_installed_horizontal_bar")
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                AsyncImage(
+                    model = R.drawable.shopping_logo_icon_1794752250458,
+                    contentDescription = "Official Installed ${storeName.uppercase()}",
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Verified,
+                            contentDescription = null,
+                            tint = AccentGold,
+                            modifier = Modifier.size(11.dp)
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = "OFFICIAL INSTALLED ${storeName.uppercase()}",
+                            color = AccentGold,
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 0.4.sp,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
+                    Text(
+                        text = detailsLine.ifBlank { "100% Quality • Affordable • Fast Delivery" },
+                        color = Color.White.copy(alpha = 0.9f),
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(6.dp))
+            Surface(
+                onClick = onOpenQrShare,
+                shape = RoundedCornerShape(7.dp),
+                color = AccentGold,
+                modifier = Modifier
+                    .height(28.dp)
+                    .testTag("emblem_qr_share_button")
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 7.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.QrCode2,
+                        contentDescription = "Share App & QR Code",
+                        tint = Color.Black,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(
+                        text = "QR / Share",
+                        color = Color.Black,
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun TrustPill(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
     Surface(
         shape = RoundedCornerShape(8.dp),

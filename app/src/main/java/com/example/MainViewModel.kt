@@ -88,7 +88,8 @@ enum class AppScreen {
     ADMIN_CONTROL_ROOM,
     PARTNER_PORTAL,
     HELP_SUPPORT,
-    LIVE_CALL
+    LIVE_CALL,
+    CATEGORIES
 }
 
 enum class CustomerAccountDestination {
@@ -185,6 +186,91 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun playSignInAudio(customerName: String) {
         voiceManager.speakCustomerSignIn(customerName)
+    }
+
+    // Eye Care Protection & App Brightness Dimmer State (Persisted per device)
+    private val _eyeCareEnabled = MutableStateFlow(adminPrefs.getBoolean("eye_care_enabled", false))
+    val eyeCareEnabled: StateFlow<Boolean> = _eyeCareEnabled.asStateFlow()
+
+    private val _eyeCareBrightness = MutableStateFlow(
+        adminPrefs.getFloat("eye_care_brightness", 0.90f).coerceIn(0.25f, 1.0f)
+    )
+    val eyeCareBrightness: StateFlow<Float> = _eyeCareBrightness.asStateFlow()
+
+    fun toggleEyeCare(enabled: Boolean = !_eyeCareEnabled.value) {
+        _eyeCareEnabled.value = enabled
+        adminPrefs.edit().putBoolean("eye_care_enabled", enabled).apply()
+        if (enabled && _eyeCareBrightness.value >= 0.98f) {
+            setEyeCareBrightness(0.75f)
+        }
+    }
+
+    fun setEyeCareBrightness(brightness: Float) {
+        val clamped = brightness.coerceIn(0.25f, 1.0f)
+        _eyeCareBrightness.value = clamped
+        adminPrefs.edit().putFloat("eye_care_brightness", clamped).apply()
+    }
+
+    // Auto USD -> NGN Live Exchange Rate (Persisted + Live HTTPS refresh via ExchangeRateService)
+    private val _usdToNgnRate = MutableStateFlow(
+        adminPrefs.getFloat("usd_to_ngn_rate", 1550.0f).toDouble().coerceAtLeast(100.0)
+    )
+    val usdToNgnRate: StateFlow<Double> = _usdToNgnRate.asStateFlow()
+
+    private val _usdRateLastUpdated = MutableStateFlow(adminPrefs.getLong("usd_rate_updated_at", 0L))
+    val usdRateLastUpdated: StateFlow<Long> = _usdRateLastUpdated.asStateFlow()
+
+    private val _usdRateSource = MutableStateFlow(
+        adminPrefs.getString("usd_rate_source", "Cached Market Rate") ?: "Cached Market Rate"
+    )
+    val usdRateSource: StateFlow<String> = _usdRateSource.asStateFlow()
+
+    private val _isFetchingUsdRate = MutableStateFlow(false)
+    val isFetchingUsdRate: StateFlow<Boolean> = _isFetchingUsdRate.asStateFlow()
+
+    fun refreshUsdToNgnRate(onResult: ((Boolean, String) -> Unit)? = null) {
+        if (_isFetchingUsdRate.value) return
+        _isFetchingUsdRate.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            val snapshot = com.example.util.ExchangeRateService.fetchLiveUsdToNgnRate()
+            withContext(Dispatchers.Main) {
+                _isFetchingUsdRate.value = false
+                if (snapshot != null) {
+                    val roundedRate = kotlin.math.round(snapshot.rateNgnPerUsd * 100.0) / 100.0
+                    _usdToNgnRate.value = roundedRate
+                    _usdRateLastUpdated.value = snapshot.fetchedAtMillis
+                    _usdRateSource.value = snapshot.source
+                    adminPrefs.edit()
+                        .putFloat("usd_to_ngn_rate", roundedRate.toFloat())
+                        .putLong("usd_rate_updated_at", snapshot.fetchedAtMillis)
+                        .putString("usd_rate_source", snapshot.source)
+                        .apply()
+                    onResult?.invoke(true, "Live USD/NGN updated: $1 = ₦${String.format(Locale.US, "%,.2f", roundedRate)}")
+                } else {
+                    onResult?.invoke(false, "Offline or FX unreachable — retaining cached $1 = ₦${String.format(Locale.US, "%,.2f", _usdToNgnRate.value)}")
+                }
+            }
+        }
+    }
+
+    fun refreshUsdToNgnRateIfStale(maxAgeMillis: Long = 5 * 60 * 1000L) {
+        val age = System.currentTimeMillis() - _usdRateLastUpdated.value
+        if (_usdRateLastUpdated.value == 0L || age >= maxAgeMillis) {
+            refreshUsdToNgnRate()
+        }
+    }
+
+    fun setManualUsdToNgnRate(rate: Double) {
+        if (rate < 100.0 || rate > 100_000.0) return
+        val now = System.currentTimeMillis()
+        _usdToNgnRate.value = rate
+        _usdRateLastUpdated.value = now
+        _usdRateSource.value = "Admin Custom Rate"
+        adminPrefs.edit()
+            .putFloat("usd_to_ngn_rate", rate.toFloat())
+            .putLong("usd_rate_updated_at", now)
+            .putString("usd_rate_source", "Admin Custom Rate")
+            .apply()
     }
 
     // Current Screen Navigation
@@ -1810,21 +1896,56 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _productReviews = MutableStateFlow(loadProductReviews())
     val productReviews: StateFlow<List<ProductReview>> = _productReviews.asStateFlow()
 
+    private fun summaryLineMatchesTitle(itemsSummary: String, productTitle: String): Boolean {
+        val cleanTitle = productTitle.trim()
+        if (cleanTitle.isBlank()) return false
+        return itemsSummary
+            .split(";", "\n", "|")
+            .any { rawChunk ->
+                val cleanedChunk = rawChunk
+                    .replace(Regex("\\s*\\[Sold:[^\\]]+]"), "")
+                    .trim()
+                if (cleanedChunk.isBlank()) return@any false
+                val withoutQty = cleanedChunk.replace(Regex("^\\d+\\s*[xX]\\s+"), "").trim()
+                withoutQty.equals(cleanTitle, ignoreCase = true) ||
+                    withoutQty.startsWith("$cleanTitle (", ignoreCase = true) ||
+                    withoutQty.startsWith("$cleanTitle -", ignoreCase = true)
+            }
+    }
+
+    private fun orderMatchesLoggedCustomerIfPresent(ord: Order): Boolean {
+        val cust = _currentCustomer.value ?: return true
+        val custIdMatch = cust.id.isNotBlank() && ord.customerId == cust.id
+        val custPhone = normalizePhoneTail(cust.phoneNumber)
+        val ordPhone = normalizePhoneTail(ord.customerPhone)
+        val phoneMatch = custPhone.length >= 7 && ordPhone.length >= 7 && custPhone == ordPhone
+        val nameMatch = cust.fullName.isNotBlank() && ord.customerName.equals(cust.fullName, ignoreCase = true)
+        val orderHasNoIdentity = ord.customerId.isBlank() && ord.customerPhone.isBlank() && ord.customerName.isBlank()
+        return custIdMatch || phoneMatch || nameMatch || orderHasNoIdentity
+    }
+
     fun hasVerifiedDeliveredPurchase(productTitle: String): Boolean {
         val cleanTitle = productTitle.trim()
         if (cleanTitle.isBlank()) return false
         return allOrders.value.any { ord ->
             ord.status == OrderStatus.DELIVERED &&
-                ord.itemsSummary.contains(cleanTitle, ignoreCase = true)
+                orderMatchesLoggedCustomerIfPresent(ord) &&
+                summaryLineMatchesTitle(ord.itemsSummary, cleanTitle)
         }
     }
 
+    fun hasVerifiedDeliveredPurchaseForProduct(product: Product): Boolean {
+        return hasVerifiedDeliveredPurchase(product.title)
+    }
+
     fun getDeliveredOrderedProducts(): List<Product> {
-        val deliveredOrders = allOrders.value.filter { it.status == OrderStatus.DELIVERED }
+        val deliveredOrders = allOrders.value.filter {
+            it.status == OrderStatus.DELIVERED && orderMatchesLoggedCustomerIfPresent(it)
+        }
         if (deliveredOrders.isEmpty()) return emptyList()
         return allProducts.value.filter { prod ->
             prod.title.isNotBlank() && deliveredOrders.any { ord ->
-                ord.itemsSummary.contains(prod.title, ignoreCase = true)
+                summaryLineMatchesTitle(ord.itemsSummary, prod.title)
             }
         }
     }
@@ -1841,7 +1962,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         val prod = allProducts.value.find { it.id == productId }
-        if (prod == null || !hasVerifiedDeliveredPurchase(prod.title)) {
+        if (prod == null || !hasVerifiedDeliveredPurchaseForProduct(prod)) {
             onResult?.invoke(false, "Ratings & reviews are active ONLY on delivered ordered products.")
             return
         }
@@ -2280,6 +2401,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             flushOfflineQueue()
             reportCustomerOnlineHeartbeat(isOnlineNow = true)
+            refreshUsdToNgnRateIfStale()
         }
     }
     val isOnline: StateFlow<Boolean> = offlineConnectivityManager.isOnline
@@ -2299,6 +2421,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             com.example.util.WebPortalExporter.saveCustomPortalUrl(application, _storeProfile.value.apkDownloadUrl)
         }
         CatalogBackgroundSyncJobService.schedulePeriodicSync(application)
+        if (isOnline.value) {
+            refreshUsdToNgnRate()
+        }
 
         // Monitor restocked items for any customer Back-in-Stock Watch alerts
         viewModelScope.launch {
@@ -4516,7 +4641,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     nextOfKinName = obj.optString("nextOfKinName", ""),
                     nextOfKinGender = obj.optString("nextOfKinGender", ""),
                     nextOfKinPhone = obj.optString("nextOfKinPhone", ""),
-                    customerId = obj.optString("customerId", "")
+                    customerId = obj.optString("customerId", ""),
+                    selectedCategories = run {
+                        val catArr = obj.optJSONArray("selectedCategories")
+                        if (catArr != null && catArr.length() > 0) {
+                            (0 until catArr.length()).mapNotNull { idx ->
+                                catArr.optString(idx).trim().takeIf { s -> s.isNotBlank() }
+                            }
+                        } else {
+                            obj.optString("primaryCategory", "Clothes")
+                                .split(",")
+                                .map { s -> s.trim() }
+                                .filter { s -> s.isNotBlank() }
+                        }
+                    },
+                    sampleProductName = obj.optString("sampleProductName", ""),
+                    sampleProductImageUrl = obj.optString("sampleProductImageUrl", "")
                 )
             }
         } catch (_: Exception) {
@@ -4572,6 +4712,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 put("nextOfKinGender", p.nextOfKinGender)
                 put("nextOfKinPhone", p.nextOfKinPhone)
                 put("customerId", p.customerId)
+                put("selectedCategories", JSONArray().apply {
+                    p.selectedCategories.ifEmpty { listOf(p.primaryCategory) }.forEach { put(it) }
+                })
+                put("sampleProductName", p.sampleProductName)
+                put("sampleProductImageUrl", p.sampleProductImageUrl)
             })
         }
         adminPrefs.edit().putString("partner_organizations_json", arr.toString()).apply()
@@ -5357,6 +5502,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         nextOfKinGender: String = "",
         nextOfKinPhone: String = "",
         customerId: String = _currentCustomer.value?.id.orEmpty(),
+        selectedCategories: List<String> = emptyList(),
+        sampleProductName: String = "",
+        sampleProductImageUrl: String = "",
         onComplete: (PartnerOrganization) -> Unit
     ) {
         val cleanPaystackBank = paystackBankCode.trim().ifBlank {
@@ -5372,12 +5520,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val cleanPaystackNm = paystackAccountName.trim().ifBlank {
             opayAccountName.trim().ifBlank { moniepointAccountName.trim().ifBlank { businessName.trim() } }
         }
+        val cleanCategories = selectedCategories
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .ifEmpty {
+                primaryCategory.split(",").map { it.trim() }.filter { it.isNotBlank() }.ifEmpty { listOf("Clothes") }
+            }
+        val resolvedPrimaryCat = primaryCategory.trim().ifBlank { cleanCategories.joinToString(", ") }
         val newPartner = PartnerOrganization(
             businessName = businessName.trim(),
             ownerName = ownerName.trim(),
             ownerPhone = ownerPhone.trim(),
             businessAddress = businessAddress.trim(),
-            primaryCategory = primaryCategory.trim(),
+            primaryCategory = resolvedPrimaryCat,
             opayAccountNumber = opayAccountNumber.trim(),
             opayAccountName = opayAccountName.trim().ifBlank { businessName.trim() },
             moniepointAccountNumber = moniepointAccountNumber.trim(),
@@ -5401,14 +5557,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             nextOfKinName = nextOfKinName.trim(),
             nextOfKinGender = nextOfKinGender.trim(),
             nextOfKinPhone = nextOfKinPhone.trim(),
-            customerId = customerId.trim()
+            customerId = customerId.trim(),
+            selectedCategories = cleanCategories,
+            sampleProductName = sampleProductName.trim(),
+            sampleProductImageUrl = sampleProductImageUrl.trim()
         )
         val updated = listOf(newPartner) + _partnerOrganizations.value
         _partnerOrganizations.value = updated
         persistPartnerOrganizations(updated)
         _pendingPartnershipDraft.value = null
         pushPartnerLedgerAsync(preferLocal = true)
-        voiceManager.speakText("New Business Partnership & MOU application received from ${newPartner.businessName} for ${newPartner.primaryCategory}.")
+        voiceManager.speakText("New Business Partnership & MOU application received from ${newPartner.businessName} for ${cleanCategories.joinToString(", ")}.")
         onComplete(newPartner)
     }
 

@@ -145,12 +145,9 @@ fun ProductDetailScreen(
     val isWideDualAxisMode by viewModel.isWideDualAxisMode.collectAsState()
     val lockedPartnerIds by viewModel.lockedPartnerIds.collectAsState()
     val allOrders by viewModel.allOrders.collectAsState()
-    val isDeliveredOrderedProduct = remember(product?.title, allOrders) {
-        val title = product?.title?.trim().orEmpty()
-        title.isNotBlank() && allOrders.any { ord ->
-            ord.status == com.example.data.model.OrderStatus.DELIVERED &&
-                ord.itemsSummary.contains(title, ignoreCase = true)
-        }
+    val currentCustomer by viewModel.currentCustomer.collectAsState()
+    val isDeliveredOrderedProduct = remember(product?.id, product?.title, allOrders, currentCustomer?.id) {
+        product != null && viewModel.hasVerifiedDeliveredPurchaseForProduct(product)
     }
 
     var quantity by remember { mutableIntStateOf(1) }

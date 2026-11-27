@@ -2495,7 +2495,22 @@ class SupabaseSyncService(
                                 nextOfKinName = o.optString("nextOfKinName", ""),
                                 nextOfKinGender = o.optString("nextOfKinGender", ""),
                                 nextOfKinPhone = o.optString("nextOfKinPhone", ""),
-                                customerId = o.optString("customerId", "")
+                                customerId = o.optString("customerId", ""),
+                                selectedCategories = run {
+                                    val cArr = o.optJSONArray("selectedCategories")
+                                    if (cArr != null && cArr.length() > 0) {
+                                        (0 until cArr.length()).mapNotNull { idx ->
+                                            cArr.optString(idx).trim().takeIf { s -> s.isNotBlank() }
+                                        }
+                                    } else {
+                                        o.optString("primaryCategory", "Clothes")
+                                            .split(",")
+                                            .map { s -> s.trim() }
+                                            .filter { s -> s.isNotBlank() }
+                                    }
+                                },
+                                sampleProductName = o.optString("sampleProductName", ""),
+                                sampleProductImageUrl = o.optString("sampleProductImageUrl", "")
                             )
                         )
                     }
@@ -2698,6 +2713,11 @@ class SupabaseSyncService(
                                 put("nextOfKinGender", o.nextOfKinGender)
                                 put("nextOfKinPhone", o.nextOfKinPhone)
                                 put("customerId", o.customerId)
+                                put("selectedCategories", JSONArray().apply {
+                                    o.selectedCategories.ifEmpty { listOf(o.primaryCategory) }.forEach { put(it) }
+                                })
+                                put("sampleProductName", o.sampleProductName)
+                                put("sampleProductImageUrl", o.sampleProductImageUrl)
                             })
                         }
                     })

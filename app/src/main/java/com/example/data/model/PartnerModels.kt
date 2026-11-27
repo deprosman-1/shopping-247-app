@@ -87,7 +87,10 @@ data class PartnerOrganization(
     val nextOfKinName: String = "",
     val nextOfKinGender: String = "",
     val nextOfKinPhone: String = "",
-    val customerId: String = ""
+    val customerId: String = "",
+    val selectedCategories: List<String> = emptyList(),
+    val sampleProductName: String = "",
+    val sampleProductImageUrl: String = ""
 )
 
 enum class PartnershipInterestStatus(val label: String) {

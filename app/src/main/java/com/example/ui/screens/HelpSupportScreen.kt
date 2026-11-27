@@ -93,7 +93,15 @@ fun HelpSupportScreen(
     var ticketSubject by remember { mutableStateOf("") }
     var ticketMessage by remember { mutableStateOf("") }
 
-    val faqs = remember {
+    val loyaltyOfferCfg by viewModel.adminLoyaltyOfferConfig.collectAsState()
+
+    val faqs = remember(loyaltyOfferCfg) {
+        val statusLabel = if (loyaltyOfferCfg.isActive) "CURRENTLY ACTIVE" else "activated periodically by Admin"
+        val scopeLabel = if (loyaltyOfferCfg.designatedCategory.equals("All", ignoreCase = true)) {
+            "all store categories"
+        } else {
+            "${loyaltyOfferCfg.designatedCategory} items"
+        }
         listOf(
             FaqEntry(
                 "How do I pay and confirm my order?",
@@ -101,15 +109,15 @@ fun HelpSupportScreen(
             ),
             FaqEntry(
                 "How do I track or cancel my order?",
-                "Open Receipts & Tracking in the bottom bar to view real-time status (Awaiting Confirmation -> Confirmed -> Out for Delivery -> Delivered). Pre-dispatch orders can be cancelled immediately with one tap, automatically restoring reserved stock."
+                "Open Account -> Order Tracking to view real-time status (Awaiting Confirmation -> Confirmed -> Out for Delivery -> Delivered). Pre-dispatch orders can be cancelled immediately with one tap, automatically restoring reserved stock."
             ),
             FaqEntry(
                 "What is the Return & Refund policy?",
-                "Delivered items with wrong sizing, defects, or transport damage are eligible for Return or Refund within 7 days. Open Receipts -> Request Return/Refund, select your reason, and attach photo proof via the Android Photo Picker."
+                "Delivered items with wrong sizing, defects, or transport damage are eligible for Return or Refund within 7 days. Open Orders -> Request Return/Refund, select your reason, and attach photo proof via the Android Photo Picker."
             ),
             FaqEntry(
                 "How do Loyalty Points & Referral Credits work?",
-                "You earn 1 Loyalty Point for every ₦1,000 spent (1 point = ₦50 discount credit at Checkout). Share your personal ODY-XXXX referral code on your Account page — friends applying a referral code receive +100 bonus points (₦5,000 value)."
+                "1) Purchase Points: You earn 1 Loyalty Point for every ₦1,000 spent on completed orders (minimum 1 point per order; 1 point = ₦50 discount credit redeemable at Checkout).\n2) Referral Credits: Share your personal ODY-XXXX code from your Account page — applying a friend's referral code grants a one-time +100 Loyalty Points welcome bonus (₦5,000 Checkout Credit; self-referrals excluded).\n3) Regular Customer 5th-Patronage Loyalty Reward ($statusLabel): Complete ${loyaltyOfferCfg.minPatronages} qualifying checkouts of ≥ ₦${loyaltyOfferCfg.minRecurrentCheckoutAmount.toInt()} each across $scopeLabel within ${loyaltyOfferCfg.windowDays} days to accrue ₦${loyaltyOfferCfg.rewardPerPatronage.toInt()} per patronage toward a ₦${loyaltyOfferCfg.claimableTotalReward.toInt()} Click & Claim discount on your ${loyaltyOfferCfg.minPatronages}th checkout."
             ),
             FaqEntry(
                 "Can I shop when my internet is offline?",

@@ -234,6 +234,12 @@ fun AdminControlRoomScreen(
     var selectedTab by remember(initialAdminTab) { mutableIntStateOf(initialAdminTab) }
     // 0 = Products Form, 1 = Customer Identity, 2 = Payment Receipts, 4 = Supabase Cloud
 
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == 0 || selectedTab == 3) {
+            viewModel.refreshUsdToNgnRateIfStale()
+        }
+    }
+
     val isAdminUnlocked by viewModel.isAdminUnlocked.collectAsState()
 
     val products by viewModel.allProducts.collectAsState()
@@ -621,7 +627,7 @@ fun AdminControlRoomScreen(
                         }
                     )
                     2 -> PaymentReceiptsTab(viewModel, orders)
-                    3 -> SalesAnalyticsTab(products, orders)
+                    3 -> SalesAnalyticsTab(viewModel, products, orders)
                     4 -> SupabaseCloudTab(viewModel, cloudStatusMsg)
                     5 -> DeliveryOptionsTab(viewModel)
                     6 -> PromoActivationTab(viewModel)
@@ -2448,6 +2454,9 @@ private fun ProductManagementTab(
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     val adminBargainConfig by viewModel.adminBargainConfig.collectAsState()
+    val usdToNgnRate by viewModel.usdToNgnRate.collectAsState()
+    val usdRateSource by viewModel.usdRateSource.collectAsState()
+    val isFetchingUsdRate by viewModel.isFetchingUsdRate.collectAsState()
 
     val nairaFormat = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "NG")).apply {
@@ -2469,6 +2478,7 @@ private fun ProductManagementTab(
     var selectedColors by remember { mutableStateOf<List<ProductColor>>(listOf(ProductColor("Black", "#000000"), ProductColor("Cyber Cyan", "#06B6D4"), ProductColor("Crimson Red", "#DC2626"))) }
     var basePrice by remember { mutableStateOf("") }
     var costPrice by remember { mutableStateOf("") }
+    var costUsdInput by remember { mutableStateOf("") }
     var quantity by remember { mutableStateOf("25") }
     var discountPercent by remember { mutableStateOf("0") }
     var imageUrl by remember { mutableStateOf("") }
@@ -2510,6 +2520,7 @@ private fun ProductManagementTab(
         selectedColors = listOf(ProductColor("Black", "#000000"), ProductColor("Cyber Cyan", "#06B6D4"), ProductColor("Crimson Red", "#DC2626"))
         basePrice = ""
         costPrice = ""
+        costUsdInput = ""
         quantity = "25"
         discountPercent = "0"
         imageUrl = ""
@@ -3011,6 +3022,80 @@ private fun ProductManagementTab(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
+                    // Auto Live USD -> NGN Converter Bar for Imported Wholesale Cost
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Live FX: $1 = ${nairaFormat.format(usdToNgnRate)}",
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 11.5.sp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = "Source: $usdRateSource",
+                                        fontSize = 9.5.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        viewModel.refreshUsdToNgnRate { _, msg ->
+                                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                            val usdVal = costUsdInput.toDoubleOrNull()
+                                            if (usdVal != null && usdVal > 0.0) {
+                                                costPrice = kotlin.math.round(usdVal * viewModel.usdToNgnRate.value).toLong().toString()
+                                            }
+                                        }
+                                    },
+                                    enabled = !isFetchingUsdRate,
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    modifier = Modifier
+                                        .height(34.dp)
+                                        .testTag("admin_refresh_fx_button")
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(if (isFetchingUsdRate) "Syncing..." else "Refresh FX", fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            OutlinedTextField(
+                                value = costUsdInput,
+                                onValueChange = { raw ->
+                                    val filtered = raw.filter { c -> c.isDigit() || c == '.' }
+                                    costUsdInput = filtered
+                                    val usdVal = filtered.toDoubleOrNull()
+                                    if (usdVal != null && usdVal > 0.0 && usdToNgnRate > 0.0) {
+                                        costPrice = kotlin.math.round(usdVal * usdToNgnRate).toLong().toString()
+                                    }
+                                },
+                                label = { Text("Import Wholesale Cost in USD ($) -> Auto ₦") },
+                                placeholder = { Text("e.g. 12.50 -> converts to NGN Cost Price") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                singleLine = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("admin_cost_usd_input")
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                         OutlinedTextField(
                             value = quantity,
@@ -3034,24 +3119,54 @@ private fun ProductManagementTab(
                         )
                     }
 
-                    // REAL-TIME PRICE FIXING & PROFIT FEASIBILITY SIMULATION BOX (ADMIN EXCLUSIVE)
+                    // REAL-TIME PRICE FIXING & PROFIT FEASIBILITY SIMULATION BOX (NGN + USD)
+                    var targetMarginPct by remember { mutableIntStateOf(25) }
+                    var simExtraDiscountInput by remember { mutableStateOf("0") }
+                    var simBargainPctInput by remember(adminBargainConfig.maxBargainDiscountPercent) {
+                        mutableStateOf(adminBargainConfig.maxBargainDiscountPercent.toInt().toString())
+                    }
+
                     val formPriceVal = basePrice.toDoubleOrNull() ?: 0.0
                     val formCostVal = costPrice.toDoubleOrNull() ?: (formPriceVal * 0.70)
                     val activeCategoryPromo = viewModel.getEffectiveDiscountPercent(category)
-                    val effectivePromoPercent = if (discountPercent.toIntOrNull() != null && (discountPercent.toIntOrNull() ?: 0) > 0) discountPercent.toInt() else activeCategoryPromo
-                    val adminBargainLimit = adminBargainConfig.maxBargainDiscountPercent
+                    val productPromoInput = discountPercent.toIntOrNull()?.coerceIn(0, 90) ?: 0
+                    val effectivePromoPercent = if (productPromoInput > 0) productPromoInput else activeCategoryPromo
+                    val extraDiscountPct = simExtraDiscountInput.toIntOrNull()?.coerceIn(0, 90) ?: 0
+                    val simulatedBargainPct = simBargainPctInput.toIntOrNull()?.coerceIn(0, 90)
+                        ?: adminBargainConfig.maxBargainDiscountPercent.toInt().coerceIn(0, 90)
+                    val combinedWorstDropPct = (effectivePromoPercent + extraDiscountPct + simulatedBargainPct).coerceIn(0, 95)
 
-                    if (formPriceVal > 0.0) {
+                    val safeFx = usdToNgnRate.coerceAtLeast(1.0)
+                    val fmtUsd = { ngn: Double -> "$" + String.format(Locale.US, "%,.2f", ngn / safeFx) }
+                    val retentionFactor = (1.0 - (combinedWorstDropPct / 100.0)).coerceAtLeast(0.10)
+                    val targetMarginRatio = (targetMarginPct / 100.0).coerceIn(0.05, 0.75)
+                    val recommendedSafePrice = if (formCostVal > 0.0) {
+                        val minFromTargetMargin = formCostVal / ((1.0 - targetMarginRatio) * retentionFactor)
+                        kotlin.math.ceil(minFromTargetMargin / 100.0) * 100.0
+                    } else 0.0
+                    val breakEvenSafePrice = if (formCostVal > 0.0) {
+                        kotlin.math.ceil((formCostVal / retentionFactor) / 100.0) * 100.0
+                    } else 0.0
+
+                    if (formPriceVal > 0.0 || formCostVal > 0.0) {
                         val stdProfit = formPriceVal - formCostVal
-                        val stdMargin = (stdProfit / formPriceVal) * 100.0
+                        val stdMargin = if (formPriceVal > 0.0) (stdProfit / formPriceVal) * 100.0 else 0.0
+
+                        val discountOnlyPrice = formPriceVal * (1.0 - (extraDiscountPct / 100.0))
+                        val discountOnlyProfit = discountOnlyPrice - formCostVal
+                        val discountOnlyMargin = if (discountOnlyPrice > 0.0) (discountOnlyProfit / discountOnlyPrice) * 100.0 else 0.0
 
                         val promoPrice = formPriceVal * (1.0 - (effectivePromoPercent / 100.0))
                         val promoProfit = promoPrice - formCostVal
-                        val promoMargin = if (promoPrice > 0) (promoProfit / promoPrice) * 100.0 else 0.0
+                        val promoMargin = if (promoPrice > 0.0) (promoProfit / promoPrice) * 100.0 else 0.0
 
-                        val bargainPrice = formPriceVal * (1.0 - (adminBargainLimit / 100.0))
+                        val bargainPrice = formPriceVal * (1.0 - (simulatedBargainPct / 100.0))
                         val bargainProfit = bargainPrice - formCostVal
-                        val bargainMargin = if (bargainPrice > 0) (bargainProfit / bargainPrice) * 100.0 else 0.0
+                        val bargainMargin = if (bargainPrice > 0.0) (bargainProfit / bargainPrice) * 100.0 else 0.0
+
+                        val worstCasePrice = formPriceVal * (1.0 - (combinedWorstDropPct / 100.0))
+                        val worstCaseProfit = worstCasePrice - formCostVal
+                        val worstCaseMargin = if (worstCasePrice > 0.0) (worstCaseProfit / worstCasePrice) * 100.0 else 0.0
 
                         val formQty = quantity.toIntOrNull() ?: 25
                         val batchTotalProfit = stdProfit * formQty
@@ -3061,10 +3176,13 @@ private fun ProductManagementTab(
                         Surface(
                             shape = RoundedCornerShape(14.dp),
                             color = MaterialTheme.colorScheme.surface,
-                            border = BorderStroke(1.5.dp, CyberCyan),
+                            border = BorderStroke(
+                                1.5.dp,
+                                if (formPriceVal > 0.0 && worstCaseProfit < 0.0) Color(0xFFDC2626) else CyberCyan
+                            ),
                             modifier = Modifier.fillMaxWidth().testTag("admin_price_fixing_profit_box")
                         ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -3077,55 +3195,159 @@ private fun ProductManagementTab(
                                             text = "PRICE FIXING PROFIT ANALYSIS",
                                             fontWeight = FontWeight.Black,
                                             fontSize = 11.sp,
-                                            color = CyberCyan
+                                            color = MaterialTheme.colorScheme.primary
                                         )
                                     }
                                     Surface(
                                         shape = RoundedCornerShape(4.dp),
-                                        color = AccentGold.copy(alpha = 0.15f)
+                                        color = AccentGold.copy(alpha = 0.2f)
                                     ) {
-                                        Text("ADMIN FEASIBILITY", color = AccentGold, fontSize = 8.5.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                                        Text(
+                                            text = "$1 = ${nairaFormat.format(safeFx)}",
+                                            color = Color(0xFF92400E),
+                                            fontSize = 8.5.sp,
+                                            fontWeight = FontWeight.Black,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                        )
                                     }
                                 }
 
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = "Selling Price: ${nairaFormat.format(formPriceVal)} | Cost Price: ${nairaFormat.format(formCostVal)}",
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = "• Standard Profit: +${nairaFormat.format(stdProfit)} (${String.format(Locale.US, "%.1f", stdMargin)}% margin)",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = SuccessGreen
-                                )
-                                Text(
-                                    text = "• Under Promo ($effectivePromoPercent% off): Selling: ${nairaFormat.format(promoPrice)} -> Resultant Profit: +${nairaFormat.format(promoProfit)} (${String.format(Locale.US, "%.1f", promoMargin)}%)",
-                                    fontSize = 10.5.sp,
-                                    color = if (promoProfit >= 0) MaterialTheme.colorScheme.onSurfaceVariant else Color(0xFFDC2626)
-                                )
-                                Text(
-                                    text = "• Under Price Bargain ($adminBargainLimit% cap): Selling: ${nairaFormat.format(bargainPrice)} -> Resultant Profit: +${nairaFormat.format(bargainProfit)} (${String.format(Locale.US, "%.1f", bargainMargin)}%)",
-                                    fontSize = 10.5.sp,
-                                    color = if (bargainProfit >= 0) MaterialTheme.colorScheme.onSurfaceVariant else Color(0xFFDC2626)
-                                )
-                                Text(
-                                    text = "• Expected Batch Profit ($formQty units): +${nairaFormat.format(batchTotalProfit)} | 10% Reserve: ${nairaFormat.format(tenPercentBatch)}",
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = AccentGold
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = "Analysis: Fixing retail price at ${nairaFormat.format(formPriceVal)} against wholesale cost of ${nairaFormat.format(formCostVal)} provides strong resilience. Even under simultaneous promo ($effectivePromoPercent%) or maximum allowed bargain ($adminBargainLimit%), minimum net profit remains protected at +${nairaFormat.format(minOf(promoProfit, bargainProfit))} per unit.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontSize = 9.5.sp,
-                                    lineHeight = 13.5.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                // Interactive What-If Discount, Promo & Bargain Simulator Controls
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    OutlinedTextField(
+                                        value = simExtraDiscountInput,
+                                        onValueChange = { simExtraDiscountInput = it.filter { c -> c.isDigit() }.take(2) },
+                                        label = { Text("Sim Discount %", fontSize = 10.sp) },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        singleLine = true,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("admin_sim_discount_input")
+                                    )
+                                    OutlinedTextField(
+                                        value = simBargainPctInput,
+                                        onValueChange = { simBargainPctInput = it.filter { c -> c.isDigit() }.take(2) },
+                                        label = { Text("Sim Bargain %", fontSize = 10.sp) },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        singleLine = true,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("admin_sim_bargain_input")
+                                    )
+                                }
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Target Margin:", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    listOf(15, 25, 35).forEach { pct ->
+                                        FilterChip(
+                                            selected = targetMarginPct == pct,
+                                            onClick = { targetMarginPct = pct },
+                                            label = { Text("$pct%", fontSize = 10.sp, fontWeight = FontWeight.Bold) },
+                                            modifier = Modifier.height(28.dp)
+                                        )
+                                    }
+                                }
+
+                                if (recommendedSafePrice > 0.0) {
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = SuccessGreen.copy(alpha = 0.12f),
+                                        border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.45f)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = "Recommended Price ($targetMarginPct% safe margin): ${nairaFormat.format(recommendedSafePrice)} (${fmtUsd(recommendedSafePrice)})",
+                                                    fontSize = 10.5.sp,
+                                                    fontWeight = FontWeight.Black,
+                                                    color = SuccessGreen
+                                                )
+                                                Text(
+                                                    text = "Break-Even under -$combinedWorstDropPct% combined offers: ${nairaFormat.format(breakEvenSafePrice)} (${fmtUsd(breakEvenSafePrice)})",
+                                                    fontSize = 9.5.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            OutlinedButton(
+                                                onClick = { basePrice = recommendedSafePrice.toLong().toString() },
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                modifier = Modifier
+                                                    .height(30.dp)
+                                                    .testTag("admin_apply_recommended_price_button")
+                                            ) {
+                                                Text("Apply", fontSize = 10.sp, fontWeight = FontWeight.Black)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (formPriceVal > 0.0) {
+                                    Text(
+                                        text = "Selling: ${nairaFormat.format(formPriceVal)} (${fmtUsd(formPriceVal)}) | Cost: ${nairaFormat.format(formCostVal)} (${fmtUsd(formCostVal)})",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.testTag("profit_analysis_usd_summary")
+                                    )
+                                    Text(
+                                        text = "• Full Retail Profit: ${if (stdProfit >= 0) "+" else ""}${nairaFormat.format(stdProfit)} / ${fmtUsd(stdProfit)} (${String.format(Locale.US, "%.1f", stdMargin)}% margin)",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (stdProfit >= 0) SuccessGreen else Color(0xFFDC2626)
+                                    )
+                                    if (extraDiscountPct > 0) {
+                                        Text(
+                                            text = "• After Discount ($extraDiscountPct% off): ${nairaFormat.format(discountOnlyPrice)} (${fmtUsd(discountOnlyPrice)}) -> Profit: ${if (discountOnlyProfit >= 0) "+" else ""}${nairaFormat.format(discountOnlyProfit)} (${fmtUsd(discountOnlyProfit)}, ${String.format(Locale.US, "%.1f", discountOnlyMargin)}%)",
+                                            fontSize = 10.5.sp,
+                                            color = if (discountOnlyProfit >= 0) MaterialTheme.colorScheme.onSurface else Color(0xFFDC2626)
+                                        )
+                                    }
+                                    Text(
+                                        text = "• Under Promo ($effectivePromoPercent% off): ${nairaFormat.format(promoPrice)} (${fmtUsd(promoPrice)}) -> Profit: ${if (promoProfit >= 0) "+" else ""}${nairaFormat.format(promoProfit)} (${fmtUsd(promoProfit)}, ${String.format(Locale.US, "%.1f", promoMargin)}%)",
+                                        fontSize = 10.5.sp,
+                                        color = if (promoProfit >= 0) MaterialTheme.colorScheme.onSurfaceVariant else Color(0xFFDC2626)
+                                    )
+                                    Text(
+                                        text = "• Under Price Bargain ($simulatedBargainPct% offer): ${nairaFormat.format(bargainPrice)} (${fmtUsd(bargainPrice)}) -> Profit: ${if (bargainProfit >= 0) "+" else ""}${nairaFormat.format(bargainProfit)} (${fmtUsd(bargainProfit)}, ${String.format(Locale.US, "%.1f", bargainMargin)}%)",
+                                        fontSize = 10.5.sp,
+                                        color = if (bargainProfit >= 0) MaterialTheme.colorScheme.onSurfaceVariant else Color(0xFFDC2626)
+                                    )
+                                    Text(
+                                        text = "• Worst-Case (Discount+Promo+Bargain -$combinedWorstDropPct%): ${nairaFormat.format(worstCasePrice)} -> Net: ${if (worstCaseProfit >= 0) "+" else ""}${nairaFormat.format(worstCaseProfit)} (${fmtUsd(worstCaseProfit)}, ${String.format(Locale.US, "%.1f", worstCaseMargin)}%)",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = if (worstCaseProfit >= 0) MaterialTheme.colorScheme.primary else Color(0xFFDC2626)
+                                    )
+                                    Text(
+                                        text = "• Expected Batch Profit ($formQty units): +${nairaFormat.format(batchTotalProfit)} (${fmtUsd(batchTotalProfit)}) | 10% Reserve: ${nairaFormat.format(tenPercentBatch)}",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF92400E)
+                                    )
+                                    Text(
+                                        text = if (worstCaseProfit < 0.0) {
+                                            "⚠️ Loss Alert: Set price at least ${nairaFormat.format(breakEvenSafePrice)} (${fmtUsd(breakEvenSafePrice)}) to break even or ${nairaFormat.format(recommendedSafePrice)} (${fmtUsd(recommendedSafePrice)}) for $targetMarginPct% protected margin."
+                                        } else {
+                                            "Analysis: Retail price ${nairaFormat.format(formPriceVal)} (${fmtUsd(formPriceVal)}) keeps minimum protected unit profit at +${nairaFormat.format(worstCaseProfit)} (${fmtUsd(worstCaseProfit)}) even under combined offers."
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontSize = 9.5.sp,
+                                        lineHeight = 13.5.sp,
+                                        color = if (worstCaseProfit < 0.0) Color(0xFFDC2626) else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         }
                     }
@@ -7900,17 +8122,36 @@ private fun SupabaseCloudTab(
 }
 
 @Composable
-private fun SalesAnalyticsTab(products: List<Product>, orders: List<Order>) {
+private fun SalesAnalyticsTab(
+    viewModel: MainViewModel,
+    products: List<Product>,
+    orders: List<Order>
+) {
+    val context = LocalContext.current
+    val usdToNgnRate by viewModel.usdToNgnRate.collectAsState()
+    val usdRateSource by viewModel.usdRateSource.collectAsState()
+    val isFetchingUsdRate by viewModel.isFetchingUsdRate.collectAsState()
+    val adminPromo by viewModel.adminPromo.collectAsState()
+    val adminBargainConfig by viewModel.adminBargainConfig.collectAsState()
+
     val nairaFormat = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "NG")).apply {
             maximumFractionDigits = 0
         }
     }
+    val safeFx = usdToNgnRate.coerceAtLeast(1.0)
+    val fmtUsd = remember(safeFx) {
+        { ngn: Double -> "$" + String.format(Locale.US, "%,.2f", ngn / safeFx) }
+    }
+
     val totalRevenue = orders.sumOf { it.totalAmount }
     val totalProfit = orders.sumOf { it.profit }
     val totalOrders = orders.size
     val totalStock = products.sumOf { it.stockQuantity }
+    val totalInventoryValue = products.sumOf { it.basePrice * it.stockQuantity }
+    val totalInventoryCost = products.sumOf { (if (it.costPrice > 0.0) it.costPrice else it.basePrice * 0.70) * it.stockQuantity }
     val averageOrderValue = if (totalOrders > 0) totalRevenue / totalOrders else 0.0
+    var customFxInput by remember(usdToNgnRate) { mutableStateOf(usdToNgnRate.toInt().toString()) }
 
     Column(
         modifier = Modifier
@@ -7920,6 +8161,183 @@ private fun SalesAnalyticsTab(products: List<Product>, orders: List<Order>) {
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text("Financial Performance", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+
+        // Live USD -> NGN Exchange Rate & Discount/Promo/Bargain Profit Impact Card
+        Card(
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("analytics_usd_fx_card")
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "USD -> NGN Auto Exchange & Margin Analysis",
+                            fontWeight = FontWeight.Black,
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "Rate: $1 = ${nairaFormat.format(safeFx)} ($usdRateSource)",
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = SuccessGreen
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.refreshUsdToNgnRate { _, msg ->
+                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        enabled = !isFetchingUsdRate,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier
+                            .height(34.dp)
+                            .testTag("analytics_refresh_fx_button")
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(if (isFetchingUsdRate) "Syncing..." else "Refresh FX", fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = customFxInput,
+                        onValueChange = { customFxInput = it.filter { c -> c.isDigit() || c == '.' } },
+                        label = { Text("Override Rate (₦ per $1)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Button(
+                        onClick = {
+                            val parsed = customFxInput.toDoubleOrNull()
+                            if (parsed != null && parsed >= 100.0) {
+                                viewModel.setManualUsdToNgnRate(parsed)
+                                Toast.makeText(context, "Applied $1 = ${nairaFormat.format(parsed)}", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier.height(48.dp)
+                    ) {
+                        Text("Apply", fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                HorizontalDivider()
+
+                AnalyticsRow("Revenue (USD)", fmtUsd(totalRevenue))
+                AnalyticsRow("Total Profit (USD)", fmtUsd(totalProfit))
+                AnalyticsRow("Average Order Value", "${nairaFormat.format(averageOrderValue)} (${fmtUsd(averageOrderValue)})")
+                AnalyticsRow("Inventory Value (USD)", fmtUsd(totalInventoryValue))
+
+                var simDiscountPctStr by remember { mutableStateOf("5") }
+                var simPromoPctStr by remember(adminPromo.discountPercent, adminPromo.isActive) {
+                    mutableStateOf((if (adminPromo.isActive) adminPromo.discountPercent else 10).toString())
+                }
+                var simBargainPctStr by remember(adminBargainConfig.maxBargainDiscountPercent) {
+                    mutableStateOf(adminBargainConfig.maxBargainDiscountPercent.toInt().toString())
+                }
+
+                val simDiscountPct = simDiscountPctStr.toIntOrNull()?.coerceIn(0, 80) ?: 0
+                val simPromoPct = simPromoPctStr.toIntOrNull()?.coerceIn(0, 80) ?: 0
+                val simBargainPct = simBargainPctStr.toIntOrNull()?.coerceIn(0, 80) ?: 0
+                val simCombinedPct = (simDiscountPct + simPromoPct + simBargainPct).coerceIn(0, 95)
+
+                val stdGrossProfit = (totalInventoryValue - totalInventoryCost).coerceAtLeast(0.0)
+                val promoRevenue = totalInventoryValue * (1.0 - (simDiscountPct + simPromoPct).coerceIn(0, 90) / 100.0)
+                val promoNetProfit = promoRevenue - totalInventoryCost
+                val bargainRevenue = totalInventoryValue * (1.0 - simBargainPct / 100.0)
+                val bargainNetProfit = bargainRevenue - totalInventoryCost
+                val combinedRevenue = totalInventoryValue * (1.0 - simCombinedPct / 100.0)
+                val combinedNetProfit = combinedRevenue - totalInventoryCost
+                val atRiskSkuCount = products.count { p ->
+                    val unitCost = if (p.costPrice > 0.0) p.costPrice else p.basePrice * 0.70
+                    val stressedUnitPrice = p.basePrice * (1.0 - simCombinedPct / 100.0)
+                    stressedUnitPrice < unitCost
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "Catalog Price Setting, Discount, Promo & Bargain Stress Test",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = simDiscountPctStr,
+                                onValueChange = { simDiscountPctStr = it.filter { c -> c.isDigit() }.take(2) },
+                                label = { Text("Discount %", fontSize = 10.sp) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("analytics_sim_discount_input")
+                            )
+                            OutlinedTextField(
+                                value = simPromoPctStr,
+                                onValueChange = { simPromoPctStr = it.filter { c -> c.isDigit() }.take(2) },
+                                label = { Text("Promo %", fontSize = 10.sp) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("analytics_sim_promo_input")
+                            )
+                            OutlinedTextField(
+                                value = simBargainPctStr,
+                                onValueChange = { simBargainPctStr = it.filter { c -> c.isDigit() }.take(2) },
+                                label = { Text("Bargain %", fontSize = 10.sp) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("analytics_sim_bargain_input")
+                            )
+                        }
+                        Text(
+                            text = "• Full List Profit: +${nairaFormat.format(stdGrossProfit)} (${fmtUsd(stdGrossProfit)})",
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = SuccessGreen
+                        )
+                        Text(
+                            text = "• At ${simDiscountPct + simPromoPct}% Discount+Promo: ${if (promoNetProfit >= 0) "+" else ""}${nairaFormat.format(promoNetProfit)} (${fmtUsd(promoNetProfit)})",
+                            fontSize = 10.5.sp,
+                            color = if (promoNetProfit >= 0) MaterialTheme.colorScheme.onSurface else Color(0xFFDC2626)
+                        )
+                        Text(
+                            text = "• At $simBargainPct% Price Bargain Offer: ${if (bargainNetProfit >= 0) "+" else ""}${nairaFormat.format(bargainNetProfit)} (${fmtUsd(bargainNetProfit)})",
+                            fontSize = 10.5.sp,
+                            color = if (bargainNetProfit >= 0) MaterialTheme.colorScheme.onSurface else Color(0xFFDC2626)
+                        )
+                        Text(
+                            text = "• Combined Worst-Case (-$simCombinedPct%): ${if (combinedNetProfit >= 0) "+" else ""}${nairaFormat.format(combinedNetProfit)} (${fmtUsd(combinedNetProfit)}) • At-Risk SKUs: $atRiskSkuCount/${products.size}",
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (combinedNetProfit >= 0 && atRiskSkuCount == 0) MaterialTheme.colorScheme.primary else Color(0xFFDC2626)
+                        )
+                    }
+                }
+            }
+        }
 
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             StatCard(
@@ -7933,7 +8351,7 @@ private fun SalesAnalyticsTab(products: List<Product>, orders: List<Order>) {
                 title = "SUM TOTAL PROFIT",
                 value = nairaFormat.format(totalProfit),
                 icon = Icons.Default.BarChart,
-                color = AccentGold,
+                color = Color(0xFFD97706),
                 modifier = Modifier.weight(1f)
             )
         }
@@ -7943,14 +8361,14 @@ private fun SalesAnalyticsTab(products: List<Product>, orders: List<Order>) {
                 title = "10% from Profit",
                 value = nairaFormat.format(totalProfit * 0.10),
                 icon = Icons.Default.Sell,
-                color = CyberCyan,
+                color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.weight(1f)
             )
             StatCard(
                 title = "Orders Recv.",
                 value = totalOrders.toString(),
                 icon = Icons.Default.ReceiptLong,
-                color = Color.White,
+                color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.weight(1f)
             )
         }
@@ -7965,14 +8383,14 @@ private fun SalesAnalyticsTab(products: List<Product>, orders: List<Order>) {
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Inventory, contentDescription = null, tint = CyberCyan)
+                    Icon(Icons.Default.Inventory, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     Spacer(modifier = Modifier.width(10.dp))
                     Text("Live Stock Status", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 }
                 Spacer(modifier = Modifier.height(12.dp))
                 AnalyticsRow("Total Catalog Items", products.size.toString())
                 AnalyticsRow("Total Units in Stock", totalStock.toString())
-                AnalyticsRow("Estimated Inventory Value", nairaFormat.format(products.sumOf { it.basePrice * it.stockQuantity }))
+                AnalyticsRow("Estimated Inventory Value", "${nairaFormat.format(totalInventoryValue)} (${fmtUsd(totalInventoryValue)})")
             }
         }
 
@@ -8254,20 +8672,20 @@ private fun SalesAnalyticsTab(products: List<Product>, orders: List<Order>) {
                                         Spacer(modifier = Modifier.height(2.dp))
 
                                         Text(
-                                            text = "Unit: ${nairaFormat.format(item.basePrice)}",
+                                            text = "Unit: ${nairaFormat.format(item.basePrice)} (${fmtUsd(item.basePrice)})",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.primary,
                                             fontWeight = FontWeight.Bold
                                         )
 
                                         Text(
-                                            text = "Val: ${nairaFormat.format(itemValuation)}",
+                                            text = "Val: ${nairaFormat.format(itemValuation)} (${fmtUsd(itemValuation)})",
                                             style = MaterialTheme.typography.labelSmall,
                                             fontWeight = FontWeight.ExtraBold
                                         )
 
                                         Text(
-                                            text = "+${nairaFormat.format(itemEstProfit)}",
+                                            text = "+${nairaFormat.format(itemEstProfit)} (${fmtUsd(itemEstProfit)})",
                                             fontSize = 9.5.sp,
                                             color = SuccessGreen,
                                             fontWeight = FontWeight.Black

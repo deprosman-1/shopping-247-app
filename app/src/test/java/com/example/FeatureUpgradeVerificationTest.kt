@@ -4,10 +4,15 @@ import android.app.Application
 import android.content.Context
 import android.os.Looper
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextInput
 import androidx.lifecycle.viewModelScope
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.DeprosDatabase
@@ -20,9 +25,14 @@ import com.example.data.model.ProductColor
 import com.example.data.remote.LiveCallMode
 import com.example.data.remote.LiveCallPhase
 import com.example.ui.screens.AdminControlRoomScreen
+import com.example.ui.screens.CartScreen
+import com.example.ui.screens.CategoriesScreen
 import com.example.ui.screens.CustomerPartnershipPage
+import com.example.ui.screens.HelpSupportScreen
+import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.LiveCallScreen
 import com.example.ui.screens.PartnerPortalScreen
+import com.example.ui.screens.ProductDetailScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.util.PartnerDocumentExporter
 import kotlinx.coroutines.cancel
@@ -361,5 +371,364 @@ class FeatureUpgradeVerificationTest {
         composeRule.onNodeWithText("Customer Order Files", substring = true).performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("admin_customer_alphabetical_dropdown").assertExists()
+    }
+
+    @Test
+    fun uiSmoke_homeScreenRemovesPartnershipFormNoticeFromAppfront() {
+        composeRule.setContent {
+            MyApplicationTheme {
+                HomeScreen(viewModel = viewModel)
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("home_partner_portal_banner").assertDoesNotExist()
+        composeRule.onNodeWithText("Sign MOU & host categorized products", substring = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun uiSmoke_adminCounterSignaturePadActivatesAfterPartnerSignsAndSubmits() {
+        var createdPartnerId = ""
+        runBlocking {
+            assertTrue(viewModel.verifyAdminPassword(viewModel.adminPassword.value))
+            viewModel.submitPartnerAgreementApplication(
+                businessName = "Zaria Silk Atelier",
+                ownerName = "Amina Bello",
+                ownerPhone = "08031112222",
+                businessAddress = "Plot 9, Ahmadu Bello Way",
+                primaryCategory = "Clothes",
+                opayAccountNumber = "8031112222",
+                opayAccountName = "Zaria Silk Atelier",
+                moniepointAccountNumber = "9031112222",
+                moniepointAccountName = "Zaria Silk Atelier",
+                agreementDate = "26 Nov 2026",
+                hostingDuration = "6 Months",
+                agreedQuantityPerPeriod = 20,
+                periodUnit = HostingPeriodUnit.PER_MONTH,
+                monthlyHostingPayment = 15000.0,
+                stipulatedCommissionPercent = 10.0,
+                partnerSignatureName = "Amina Bello",
+                partnerSignatureStrokes = "0.1,0.2;0.7,0.8",
+                nextOfKinName = "Ibrahim Bello",
+                nextOfKinGender = "Male",
+                nextOfKinPhone = "08055566677",
+                customerId = "cust_zaria"
+            ) { created ->
+                createdPartnerId = created.id
+            }
+            pumpLooper(6)
+        }
+        assertTrue(createdPartnerId.isNotBlank())
+
+        composeRule.setContent {
+            MyApplicationTheme {
+                AdminControlRoomScreen(viewModel = viewModel)
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("admin_partners_hub_tab")
+            .performScrollTo()
+            .performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Partner Signed & Submitted", substring = true)
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("admin_mou_counter_sig_$createdPartnerId")
+            .performScrollTo()
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun uiSmoke_homeScreenEyeCareControlAndRelocatedOfficialBar() {
+        composeRule.setContent {
+            MyApplicationTheme {
+                HomeScreen(viewModel = viewModel)
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("home_customer_credentials_bar").assertDoesNotExist()
+        composeRule.onNodeWithTag("official_installed_horizontal_bar").assertIsDisplayed()
+        composeRule.onNodeWithTag("home_eye_care_button").assertIsDisplayed().performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("eye_care_control_panel").assertIsDisplayed()
+        composeRule.onNodeWithTag("eye_care_switch").performClick()
+        composeRule.waitForIdle()
+        assertTrue(viewModel.eyeCareEnabled.value)
+
+        viewModel.setEyeCareBrightness(0.55f)
+        assertEquals(0.55f, viewModel.eyeCareBrightness.value, 0.01f)
+    }
+
+    @Test
+    fun uiSmoke_categoriesScreenSelectsCategoryDirectly() {
+        composeRule.setContent {
+            MyApplicationTheme {
+                CategoriesScreen(viewModel = viewModel)
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("categories_screen").assertIsDisplayed()
+        composeRule.onNodeWithTag("category_page_item_clothes").performClick()
+        composeRule.waitForIdle()
+
+        assertEquals("Clothes", viewModel.selectedCategory.value)
+        assertEquals(AppScreen.HOME, viewModel.currentScreen.value)
+    }
+
+    @Test
+    fun uiSmoke_cartScreenShowsProceedToPaymentPageAndSummary() {
+        runBlocking {
+            val sampleProduct = viewModel.allProducts.value.first()
+            viewModel.addToCart(sampleProduct) { _, _ -> }
+            pumpLooper(4)
+        }
+
+        composeRule.setContent {
+            MyApplicationTheme {
+                CartScreen(viewModel = viewModel)
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("Proceed to Payment Page").assertIsDisplayed()
+        composeRule.onNodeWithTag("cart_summary_breakdown_card").assertExists()
+    }
+
+    @Test
+    fun uiSmoke_productDetailStrictlyGatesReviewToExactDeliveredProduct() {
+        val watchProduct = com.example.data.model.Product(
+            id = "p_watch_1",
+            title = "Luxury Wristwatch",
+            category = "Watches",
+            brand = "Odiya",
+            availableSizes = listOf("Standard"),
+            availableColors = listOf(ProductColor("Gold", "#F59E0B")),
+            basePrice = 45000.0,
+            imageUrl = "",
+            description = "Luxury watch",
+            stockQuantity = 10
+        )
+        val bagProduct = com.example.data.model.Product(
+            id = "p_bag_1",
+            title = "Bag",
+            category = "Bags",
+            brand = "Odiya",
+            availableSizes = listOf("Medium"),
+            availableColors = listOf(ProductColor("Black", "#000000")),
+            basePrice = 25000.0,
+            imageUrl = "",
+            description = "Classic bag",
+            stockQuantity = 10
+        )
+        val leatherBagProduct = com.example.data.model.Product(
+            id = "p_leather_bag_1",
+            title = "Leather Bag",
+            category = "Bags",
+            brand = "Odiya",
+            availableSizes = listOf("Large"),
+            availableColors = listOf(ProductColor("Brown", "#78350F")),
+            basePrice = 35000.0,
+            imageUrl = "",
+            description = "Leather bag",
+            stockQuantity = 10
+        )
+
+        runBlocking {
+            val order = com.example.data.local.OrderEntity(
+                orderId = "ORD-STRICT-1",
+                customerId = "",
+                customerName = "Chidi Okafor",
+                customerEmail = "chidi@example.com",
+                customerPhone = "08012345678",
+                deliveryAddress = "Lagos",
+                itemsSummary = "1x Leather Bag (Black)",
+                totalAmount = 35000.0,
+                profit = 8000.0,
+                paymentMethod = PaymentMethod.OPAY.title,
+                paymentAccount = "8012345678",
+                paymentReference = "REF-STRICT-1",
+                senderName = "Chidi Okafor",
+                status = com.example.data.model.OrderStatus.DELIVERED.name,
+                createdAt = System.currentTimeMillis(),
+                verificationNote = "Delivered"
+            )
+            dao.insertOrder(order)
+            pumpLooper(4)
+        }
+
+        // Substring trap: "Bag" must NOT unlock when only "Leather Bag" or "Luxury Wristwatch" was delivered
+        assertTrue(viewModel.hasVerifiedDeliveredPurchaseForProduct(leatherBagProduct))
+        org.junit.Assert.assertFalse(viewModel.hasVerifiedDeliveredPurchaseForProduct(bagProduct))
+        org.junit.Assert.assertFalse(viewModel.hasVerifiedDeliveredPurchaseForProduct(watchProduct))
+
+        runBlocking {
+            viewModel.openProductDetails(bagProduct)
+            pumpLooper(2)
+        }
+
+        composeRule.setContent {
+            MyApplicationTheme {
+                ProductDetailScreen(viewModel = viewModel)
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("reviews_locked_notice")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("Ratings & Views Locked", substring = true)
+            .assertIsDisplayed()
+
+        // Logged-in different customer must NOT inherit a delivered order even if order.customerId was blank
+        runBlocking {
+            viewModel.signUp(
+                name = "Bola Ade",
+                pass = "Password1!",
+                phone = "08099998888",
+                email = "bola@example.com",
+                onSuccess = {},
+                onError = {}
+            )
+            pumpLooper(4)
+        }
+        org.junit.Assert.assertFalse(viewModel.hasVerifiedDeliveredPurchaseForProduct(leatherBagProduct))
+    }
+
+    @Test
+    fun uiSmoke_helpSupportFaqReflectsCurrentLoyaltyTerms() {
+        composeRule.setContent {
+            MyApplicationTheme {
+                HelpSupportScreen(viewModel = viewModel)
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNode(hasScrollToIndexAction())
+            .performScrollToNode(hasText("How do Loyalty Points & Referral Credits work?", substring = true))
+        composeRule.onNodeWithText("How do Loyalty Points & Referral Credits work?", substring = true)
+            .performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNode(hasScrollToIndexAction())
+            .performScrollToNode(hasText("Regular Customer 5th-Patronage Loyalty Reward", substring = true))
+        composeRule.onNodeWithText("Regular Customer 5th-Patronage Loyalty Reward", substring = true)
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun partnerPortal_supportsMultipleCategoriesAndMouSampleProductImage() {
+        var createdPartner: com.example.data.model.PartnerOrganization? = null
+        runBlocking {
+            viewModel.submitPartnerAgreementApplication(
+                businessName = "Kano Crafts Ltd",
+                ownerName = "Yusuf Musa",
+                ownerPhone = "08022233344",
+                businessAddress = "Suite 3, Kano",
+                primaryCategory = "Clothes, Bags",
+                opayAccountNumber = "8022233344",
+                opayAccountName = "Kano Crafts Ltd",
+                moniepointAccountNumber = "9022233344",
+                moniepointAccountName = "Kano Crafts Ltd",
+                agreementDate = "27 Nov 2026",
+                hostingDuration = "12 Months",
+                agreedQuantityPerPeriod = 30,
+                periodUnit = HostingPeriodUnit.PER_MONTH,
+                monthlyHostingPayment = 15000.0,
+                stipulatedCommissionPercent = 10.0,
+                partnerSignatureName = "Yusuf Musa",
+                partnerSignatureStrokes = "0.1,0.1;0.6,0.6",
+                selectedCategories = listOf("Clothes", "Bags"),
+                sampleProductName = "Handwoven Tote Bag",
+                sampleProductImageUrl = "content://media/picker/109"
+            ) { created ->
+                createdPartner = created
+            }
+            pumpLooper(4)
+        }
+        assertNotNull(createdPartner)
+        assertEquals(listOf("Clothes", "Bags"), createdPartner!!.selectedCategories)
+        assertEquals("Handwoven Tote Bag", createdPartner!!.sampleProductName)
+        assertEquals("content://media/picker/109", createdPartner!!.sampleProductImageUrl)
+
+        composeRule.setContent {
+            MyApplicationTheme {
+                PartnerPortalScreen(viewModel = viewModel)
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("partner_mou_pick_image_button")
+            .performScrollTo()
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun adminAnalytics_displaysUsdToNgnFxAnalysisCardAndUpdatesRate() {
+        viewModel.setManualUsdToNgnRate(1625.0)
+        runBlocking {
+            assertTrue(viewModel.verifyAdminPassword(viewModel.adminPassword.value))
+            pumpLooper(4)
+        }
+
+        composeRule.setContent {
+            MyApplicationTheme {
+                AdminControlRoomScreen(viewModel = viewModel)
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Sales Analytics", substring = true)
+            .performScrollTo()
+            .performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("analytics_usd_fx_card").assertIsDisplayed()
+        composeRule.onNodeWithTag("analytics_refresh_fx_button").assertIsDisplayed()
+        composeRule.onNodeWithTag("analytics_sim_discount_input").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("analytics_sim_promo_input").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("analytics_sim_bargain_input").performScrollTo().assertIsDisplayed()
+        assertEquals(1625.0, viewModel.usdToNgnRate.value, 0.01)
+    }
+
+    @Test
+    fun adminProductEntry_showsFxProfitAnalysisAndRecommendedPrice() {
+        viewModel.setManualUsdToNgnRate(1600.0)
+        runBlocking {
+            assertTrue(viewModel.verifyAdminPassword(viewModel.adminPassword.value))
+            pumpLooper(4)
+        }
+
+        composeRule.setContent {
+            MyApplicationTheme {
+                AdminControlRoomScreen(viewModel = viewModel)
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Add New Product", substring = true)
+            .performScrollTo()
+            .performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("admin_cost_usd_input")
+            .performScrollTo()
+            .performTextInput("10")
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("admin_price_fixing_profit_box")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("admin_sim_discount_input")
+            .performScrollTo()
+            .performTextInput("5")
+        composeRule.onNodeWithTag("admin_sim_bargain_input")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("admin_apply_recommended_price_button")
+            .performScrollTo()
+            .performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("profit_analysis_usd_summary")
+            .performScrollTo()
+            .assertIsDisplayed()
     }
 }

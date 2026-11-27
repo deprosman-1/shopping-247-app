@@ -54,7 +54,6 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
-import androidx.compose.material.icons.filled.Handshake
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.History
@@ -69,10 +68,12 @@ import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Brightness6
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.RemoveRedEye
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShoppingCart
@@ -100,7 +101,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -148,8 +153,8 @@ import com.example.data.model.ProductCategory
 import com.example.ui.components.CategorySelectorButton
 import com.example.ui.components.DualAxisScrollContainer
 import com.example.ui.components.HorizontalCategoryStrip
+import com.example.ui.components.OfficialInstalledHorizontalBar
 import com.example.ui.components.QrCodeView
-import com.example.ui.components.ShopEmblemWatermark
 import com.example.ui.components.ProductStandardCard
 import com.example.ui.components.QuickEditProductDialog
 import com.example.ui.components.ShareAppDialog
@@ -160,6 +165,7 @@ import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.SuccessGreen
 import com.example.util.ProductImageHelper
 import java.util.Locale
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -201,6 +207,9 @@ fun HomeScreen(
     val offlineQueue by viewModel.offlineQueue.collectAsState()
     val lockedPartnerIds by viewModel.lockedPartnerIds.collectAsState()
     val allOrders by viewModel.allOrders.collectAsState()
+    val eyeCareEnabled by viewModel.eyeCareEnabled.collectAsState()
+    val eyeCareBrightness by viewModel.eyeCareBrightness.collectAsState()
+    var isEyeCarePanelExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(products) {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -323,7 +332,7 @@ fun HomeScreen(
                                     text = storeProfile.storeName.uppercase(),
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Black,
-                                    color = Color.White,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -405,7 +414,7 @@ fun HomeScreen(
                                     Icon(
                                         imageVector = Icons.Default.ShoppingCart,
                                         contentDescription = "Shopping Cart",
-                                        tint = Color.White,
+                                        tint = MaterialTheme.colorScheme.onSurface,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
@@ -510,6 +519,35 @@ fun HomeScreen(
                             }
 
                             Surface(
+                                onClick = { isEyeCarePanelExpanded = !isEyeCarePanelExpanded },
+                                shape = RoundedCornerShape(9.dp),
+                                color = if (eyeCareEnabled || isEyeCarePanelExpanded) AccentGold else Color.White.copy(alpha = 0.12f),
+                                modifier = Modifier
+                                    .height(30.dp)
+                                    .testTag("home_eye_care_button")
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 7.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.RemoveRedEye,
+                                        contentDescription = "Eye Care Brightness",
+                                        tint = if (eyeCareEnabled || isEyeCarePanelExpanded) Color.Black else AccentGold,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text(
+                                        text = if (eyeCareEnabled) "Eye ${(eyeCareBrightness * 100).roundToInt()}%" else "Eye Care",
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = if (eyeCareEnabled || isEyeCarePanelExpanded) Color.Black else Color.White,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+
+                            Surface(
                                 onClick = { viewModel.toggleFullScreen() },
                                 shape = RoundedCornerShape(9.dp),
                                 color = Color.White.copy(alpha = 0.10f),
@@ -529,104 +567,102 @@ fun HomeScreen(
                 }
             }
 
-            // Permanent Customer Credentials Strip (Name, Phone & Delivery Address — Never Hidden, No Email/Gmail)
-            val credName = currentCustomer?.fullName?.takeIf { it.isNotBlank() } ?: savedDeliveryInfo.fullName.trim()
-            val credPhone = currentCustomer?.phoneNumber?.takeIf { it.isNotBlank() } ?: savedDeliveryInfo.phoneNumber.trim()
-            val credAddress = currentCustomer?.deliveryAddress?.takeIf { it.isNotBlank() } ?: savedDeliveryInfo.deliveryAddress.trim()
-            val hasCredentials = credName.isNotBlank() || credPhone.isNotBlank() || credAddress.isNotBlank()
-
-            Surface(
-                onClick = { viewModel.openCustomerAccountShortcut() },
-                shape = RoundedCornerShape(10.dp),
-                color = Color(0xFF052E16),
-                border = BorderStroke(
-                    1.dp,
-                    if (hasCredentials) SuccessGreen.copy(alpha = 0.65f) else AccentGold.copy(alpha = 0.5f)
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 2.dp)
-                    .heightIn(min = 48.dp)
-                    .testTag("home_customer_credentials_bar")
+            // Expandable Eye Care Protection & App Brightness Control Panel
+            AnimatedVisibility(
+                visible = !isFullScreen && isEyeCarePanelExpanded,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
             ) {
-                Row(
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)),
+                    shadowElevation = 2.dp,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .padding(horizontal = 12.dp, vertical = 3.dp)
+                        .testTag("eye_care_control_panel")
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
+                    Column(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .size(30.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (hasCredentials) SuccessGreen.copy(alpha = 0.2f)
-                                    else AccentGold.copy(alpha = 0.18f)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Icon(
+                                    imageVector = Icons.Default.Brightness6,
+                                    contentDescription = "Eye Care Filter",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
                                 )
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Person,
-                                contentDescription = "Customer Credentials",
-                                tint = if (hasCredentials) SuccessGreen else AccentGold,
-                                modifier = Modifier.size(17.dp)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = "Eye Care Protection & Brightness",
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = if (eyeCareEnabled) {
+                                            "Warm filter active • Brightness ${(eyeCareBrightness * 100).roundToInt()}%"
+                                        } else {
+                                            "Brightness ${(eyeCareBrightness * 100).roundToInt()}% • Toggle warm comfort filter"
+                                        },
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Switch(
+                                checked = eyeCareEnabled,
+                                onCheckedChange = { viewModel.toggleEyeCare(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary
+                                ),
+                                modifier = Modifier.testTag("eye_care_switch")
                             )
                         }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = if (hasCredentials) {
-                                    listOfNotNull(
-                                        credName.takeIf { it.isNotBlank() },
-                                        credPhone.takeIf { it.isNotBlank() }
-                                    ).joinToString(" • ").ifBlank { "Saved Customer" }
-                                } else {
-                                    "Customer Credentials"
-                                },
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Black,
-                                color = Color.White,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.testTag("home_customer_credentials_title")
-                            )
-                            Text(
-                                text = if (hasCredentials) {
-                                    credAddress.ifBlank { "Tap to add or update delivery address" }
-                                } else {
-                                    "Tap to Sign In or save Name, Phone & Address"
-                                },
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (hasCredentials && credAddress.isNotBlank()) CyberCyan else AccentGold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.testTag("home_customer_credentials_subtitle")
-                            )
-                        }
-                    }
-                    if (currentCustomer == null && !hasCredentials) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = AccentGold.copy(alpha = 0.16f),
-                            border = BorderStroke(
-                                0.8.dp,
-                                AccentGold.copy(alpha = 0.55f)
-                            )
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(
-                                text = "SIGN IN",
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.Black,
-                                color = AccentGold,
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                            Text("Dim", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Slider(
+                                value = eyeCareBrightness,
+                                onValueChange = { viewModel.setEyeCareBrightness(it) },
+                                valueRange = 0.25f..1.0f,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = MaterialTheme.colorScheme.primary,
+                                    activeTrackColor = MaterialTheme.colorScheme.primary
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("eye_care_brightness_slider")
                             )
+                            Text("Bright", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            listOf("35%" to 0.35f, "65%" to 0.65f, "100%" to 1.0f).forEach { (label, level) ->
+                                val isPresetActive = kotlin.math.abs(eyeCareBrightness - level) < 0.05f
+                                FilterChip(
+                                    selected = isPresetActive,
+                                    onClick = { viewModel.setEyeCareBrightness(level) },
+                                    label = { Text(label, fontSize = 10.5.sp, fontWeight = FontWeight.Bold) },
+                                    modifier = Modifier.height(30.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -661,7 +697,7 @@ fun HomeScreen(
                                 text = if (cartCount > 0) "$receiptLabel Receipt Attached — Tap to Checkout" else "$receiptLabel Receipt Ready — Add item(s) to Checkout",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Black,
-                                color = Color.White,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -670,7 +706,7 @@ fun HomeScreen(
                             onClick = { viewModel.clearPendingSharedReceipt() },
                             modifier = Modifier.size(22.dp)
                         ) {
-                            Icon(Icons.Default.Clear, contentDescription = "Dismiss shared receipt", tint = Color.White, modifier = Modifier.size(14.dp))
+                            Icon(Icons.Default.Clear, contentDescription = "Dismiss shared receipt", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(14.dp))
                         }
                     }
                 }
@@ -789,7 +825,8 @@ fun HomeScreen(
                             )
                         },
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = AccentGold.copy(alpha = 0.22f),
+                            labelColor = MaterialTheme.colorScheme.onSurface,
+                            selectedContainerColor = Color(0xFF064E3B),
                             selectedLabelColor = AccentGold
                         ),
                         modifier = Modifier.height(34.dp).testTag("browse_mode_${catalogBrowseMode.name}")
@@ -810,9 +847,9 @@ fun HomeScreen(
                                 Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(15.dp))
                             },
                             colors = FilterChipDefaults.filterChipColors(
-                                labelColor = Color.White,
-                                iconColor = AccentGold,
-                                selectedContainerColor = AccentGold.copy(alpha = 0.22f),
+                                labelColor = MaterialTheme.colorScheme.onSurface,
+                                iconColor = MaterialTheme.colorScheme.primary,
+                                selectedContainerColor = Color(0xFF064E3B),
                                 selectedLabelColor = AccentGold,
                                 selectedLeadingIconColor = AccentGold,
                                 selectedTrailingIconColor = AccentGold
@@ -876,9 +913,9 @@ fun HomeScreen(
                                 Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(15.dp))
                             },
                             colors = FilterChipDefaults.filterChipColors(
-                                labelColor = Color.White,
-                                iconColor = AccentGold,
-                                selectedContainerColor = AccentGold.copy(alpha = 0.22f),
+                                labelColor = MaterialTheme.colorScheme.onSurface,
+                                iconColor = MaterialTheme.colorScheme.primary,
+                                selectedContainerColor = Color(0xFF064E3B),
                                 selectedLabelColor = AccentGold,
                                 selectedLeadingIconColor = AccentGold,
                                 selectedTrailingIconColor = AccentGold
@@ -940,9 +977,9 @@ fun HomeScreen(
                                     Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(15.dp))
                                 },
                                 colors = FilterChipDefaults.filterChipColors(
-                                    labelColor = Color.White,
-                                    iconColor = AccentGold,
-                                    selectedContainerColor = AccentGold.copy(alpha = 0.22f),
+                                    labelColor = MaterialTheme.colorScheme.onSurface,
+                                    iconColor = MaterialTheme.colorScheme.primary,
+                                    selectedContainerColor = Color(0xFF064E3B),
                                     selectedLabelColor = AccentGold,
                                     selectedTrailingIconColor = AccentGold
                                 ),
@@ -1079,6 +1116,16 @@ fun HomeScreen(
                 onSelectCategory = { viewModel.selectCategory(it) }
             )
 
+            // Relocated Compact Rectangular "OFFICIAL INSTALLED ODIYA" Horizontal Bar below Category Strip
+            OfficialInstalledHorizontalBar(
+                onOpenQrShare = { showQrShareDialog = true },
+                storeName = storeProfile.storeName,
+                tagline = storeProfile.tagline,
+                storePhone = storeProfile.phoneNumber,
+                secondaryPhone = storeProfile.secondaryPhoneNumber,
+                storeAddress = storeProfile.storeAddress
+            )
+
             // Expandable Search Panel (Takes 0dp until tapped so catalog stays front-and-center)
             AnimatedVisibility(
                 visible = isSearchExpanded || searchQuery.isNotEmpty(),
@@ -1123,18 +1170,6 @@ fun HomeScreen(
                             .fillMaxSize()
                             .testTag("home_category_shelves_list")
                     ) {
-                        if (searchQuery.isEmpty() && selectedCategory == null) {
-                            item(contentType = "crest") {
-                                ShopEmblemWatermark(
-                                    onOpenQrShare = { showQrShareDialog = true },
-                                    storeName = storeProfile.storeName,
-                                    tagline = storeProfile.tagline,
-                                    storePhone = storeProfile.phoneNumber,
-                                    secondaryPhone = storeProfile.secondaryPhoneNumber,
-                                    storeAddress = storeProfile.storeAddress
-                                )
-                            }
-                        }
 
                         if (adminPromo.isActive) {
                             item(contentType = "promo_banner") {
@@ -1234,8 +1269,8 @@ fun HomeScreen(
                                             ) { product ->
                                                 val effectiveDiscount = viewModel.getEffectiveDiscountPercent(product.category)
                                                 val isLocked = product.isCatalogLocked || (product.partnerId.isNotBlank() && product.partnerId in lockedPartnerIds)
-                                                val isDeliveredOrdered = remember(product.title, allOrders) {
-                                                    allOrders.any { it.status == com.example.data.model.OrderStatus.DELIVERED && it.itemsSummary.contains(product.title, ignoreCase = true) }
+                                                val isDeliveredOrdered = remember(product.id, product.title, allOrders) {
+                                                    viewModel.hasVerifiedDeliveredPurchaseForProduct(product)
                                                 }
                                                 ProductStandardCard(
                                                     product = product,
@@ -1272,24 +1307,11 @@ fun HomeScreen(
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(gridColumns),
                         state = gridState,
-                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 80.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 80.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        // ODIYA Official Installed Crest
-                        if (searchQuery.isEmpty() && selectedCategory == null) {
-                            item(span = { GridItemSpan(gridColumns) }) {
-                                ShopEmblemWatermark(
-                                    onOpenQrShare = { showQrShareDialog = true },
-                                    storeName = storeProfile.storeName,
-                                    tagline = storeProfile.tagline,
-                                    storePhone = storeProfile.phoneNumber,
-                                    secondaryPhone = storeProfile.secondaryPhoneNumber,
-                                    storeAddress = storeProfile.storeAddress
-                                )
-                            }
-                        }
 
                         // Active Admin Promo Discount Banner
                         if (adminPromo.isActive) {
@@ -1388,120 +1410,7 @@ fun HomeScreen(
                             }
                         }
 
-                        // Business Partnership Portal Entry Banner
-                        item(span = { GridItemSpan(gridColumns) }) {
-                            Surface(
-                                onClick = { viewModel.navigateTo(AppScreen.PARTNER_PORTAL) },
-                                shape = RoundedCornerShape(14.dp),
-                                color = Color(0xFF065F46),
-                                border = BorderStroke(1.2.dp, AccentGold.copy(alpha = 0.7f)),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("home_partner_portal_banner")
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                        Icon(Icons.Default.Handshake, contentDescription = null, tint = AccentGold, modifier = Modifier.size(22.dp))
-                                        Spacer(modifier = Modifier.width(10.dp))
-                                        Column {
-                                            Text(
-                                                text = "Partner With ${storeProfile.storeName}",
-                                                fontWeight = FontWeight.Black,
-                                                fontSize = 12.5.sp,
-                                                color = AccentGold
-                                            )
-                                            Text(
-                                                text = "Sign MOU & host categorized products in your Partner Folder",
-                                                fontSize = 10.5.sp,
-                                                color = Color.White.copy(alpha = 0.9f),
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                    }
-                                    Surface(
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = AccentGold
-                                    ) {
-                                        Text(
-                                            text = "OPEN",
-                                            color = Color.Black,
-                                            fontWeight = FontWeight.Black,
-                                            fontSize = 10.5.sp,
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        // Horizontal Featured Strip inside vertical grid (Dual-axis browsing out of the box)
-                        if (products.isNotEmpty() && catalogBrowseMode == CatalogBrowseMode.CAROUSEL_AND_GRID) {
-                            val horizontalSpotlight = products.take(12)
-                            item(span = { GridItemSpan(gridColumns) }) {
-                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "Featured Showcase",
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.Black,
-                                            color = AccentGold
-                                        )
-                                        Text(
-                                            text = "Swipe ↔ Horizontal",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = CyberCyan
-                                        )
-                                    }
-                                    LazyRow(
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                        contentPadding = PaddingValues(end = 6.dp),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .testTag("home_horizontal_showcase_row")
-                                    ) {
-                                        lazyListItems(
-                                            items = horizontalSpotlight,
-                                            key = { "spot_${it.id}" },
-                                            contentType = { "product_card" }
-                                        ) { product ->
-                                            val effectiveDiscount = viewModel.getEffectiveDiscountPercent(product.category)
-                                            val isLocked = product.isCatalogLocked || (product.partnerId.isNotBlank() && product.partnerId in lockedPartnerIds)
-                                            val isDeliveredOrdered = remember(product.title, allOrders) {
-                                                allOrders.any { it.status == com.example.data.model.OrderStatus.DELIVERED && it.itemsSummary.contains(product.title, ignoreCase = true) }
-                                            }
-                                            ProductStandardCard(
-                                                product = product,
-                                                promoDiscountPercent = effectiveDiscount,
-                                                onClick = { stableOpenProductDetails(product) },
-                                                onAddToCart = stableAddToCart,
-                                                isWishlisted = wishlistSet.contains(product.id),
-                                                onToggleWishlist = { stableToggleWishlist(product.id) },
-                                                isRestockWatched = backInStockIds.contains(product.id),
-                                                onToggleRestockWatch = {
-                                                    val watching = viewModel.toggleBackInStockWatch(product)
-                                                    Toast.makeText(context, if (watching) "Restock alert set!" else "Restock alert removed", Toast.LENGTH_SHORT).show()
-                                                },
-                                                isCatalogLocked = isLocked,
-                                                isDeliveredOrdered = isDeliveredOrdered,
-                                                modifier = Modifier.width(166.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Products Header
+                        // Products Header (Two side-by-side product catalogs right in the central space)
                         item(span = { GridItemSpan(gridColumns) }) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -1512,7 +1421,8 @@ fun HomeScreen(
                                     Text(
                                         text = selectedCategory ?: "Product Catalog",
                                         style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.ExtraBold
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = MaterialTheme.colorScheme.onSurface
                                     )
                                     Text(
                                         text = if (effectiveWide) {
@@ -1521,7 +1431,7 @@ fun HomeScreen(
                                             "${products.size} Products Available"
                                         },
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = if (effectiveWide) CyberCyan else MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
@@ -1563,7 +1473,7 @@ fun HomeScreen(
                             }
                         }
 
-                        // Standard Free-Scrolling Product Cards
+                        // Dual Side-by-Side Product Catalog Cards in the Central Space
                         items(
                             items = products,
                             key = { "grid_${it.id}" },
@@ -1571,8 +1481,8 @@ fun HomeScreen(
                         ) { product ->
                             val effectiveDiscount = viewModel.getEffectiveDiscountPercent(product.category)
                             val isLocked = product.isCatalogLocked || (product.partnerId.isNotBlank() && product.partnerId in lockedPartnerIds)
-                            val isDeliveredOrdered = remember(product.title, allOrders) {
-                                allOrders.any { it.status == com.example.data.model.OrderStatus.DELIVERED && it.itemsSummary.contains(product.title, ignoreCase = true) }
+                            val isDeliveredOrdered = remember(product.id, product.title, allOrders) {
+                                viewModel.hasVerifiedDeliveredPurchaseForProduct(product)
                             }
                             ProductStandardCard(
                                 product = product,
@@ -1589,6 +1499,68 @@ fun HomeScreen(
                                 isCatalogLocked = isLocked,
                                 isDeliveredOrdered = isDeliveredOrdered
                             )
+                        }
+
+                        // Horizontal Featured Strip placed cleanly after main 2-column catalog grid
+                        if (products.isNotEmpty() && catalogBrowseMode == CatalogBrowseMode.CAROUSEL_AND_GRID) {
+                            val horizontalSpotlight = products.take(12)
+                            item(span = { GridItemSpan(gridColumns) }) {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Featured Showcase",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Black,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Text(
+                                            text = "Swipe ↔ Horizontal",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.secondary
+                                        )
+                                    }
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        contentPadding = PaddingValues(end = 6.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("home_horizontal_showcase_row")
+                                    ) {
+                                        lazyListItems(
+                                            items = horizontalSpotlight,
+                                            key = { "spot_${it.id}" },
+                                            contentType = { "product_card" }
+                                        ) { product ->
+                                            val effectiveDiscount = viewModel.getEffectiveDiscountPercent(product.category)
+                                            val isLocked = product.isCatalogLocked || (product.partnerId.isNotBlank() && product.partnerId in lockedPartnerIds)
+                                            val isDeliveredOrdered = remember(product.id, product.title, allOrders) {
+                                                viewModel.hasVerifiedDeliveredPurchaseForProduct(product)
+                                            }
+                                            ProductStandardCard(
+                                                product = product,
+                                                promoDiscountPercent = effectiveDiscount,
+                                                onClick = { stableOpenProductDetails(product) },
+                                                onAddToCart = stableAddToCart,
+                                                isWishlisted = wishlistSet.contains(product.id),
+                                                onToggleWishlist = { stableToggleWishlist(product.id) },
+                                                isRestockWatched = backInStockIds.contains(product.id),
+                                                onToggleRestockWatch = {
+                                                    val watching = viewModel.toggleBackInStockWatch(product)
+                                                    Toast.makeText(context, if (watching) "Restock alert set!" else "Restock alert removed", Toast.LENGTH_SHORT).show()
+                                                },
+                                                isCatalogLocked = isLocked,
+                                                isDeliveredOrdered = isDeliveredOrdered,
+                                                modifier = Modifier.width(166.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     }

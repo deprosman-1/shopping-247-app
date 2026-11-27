@@ -35,17 +35,17 @@ import com.example.util.AppDefenseManager
 import com.example.util.ShopNotificationHelper
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.outlined.AdminPanelSettings
+import androidx.compose.material.icons.outlined.Category
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Person
-import androidx.compose.material.icons.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.ShoppingCart
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -95,11 +95,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
+import androidx.compose.foundation.background
 import com.example.ui.components.AppUpdateDialog
 import com.example.ui.components.ReceiptViewDialog
 import com.example.ui.screens.AdminControlRoomScreen
 import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.CartScreen
+import com.example.ui.screens.CategoriesScreen
 import com.example.ui.screens.CheckoutScreen
 import com.example.ui.screens.HelpSupportScreen
 import com.example.ui.screens.HomeScreen
@@ -308,6 +310,8 @@ fun DeprosApp(
     val updateDownloadUrl by viewModel.updateDownloadUrl.collectAsState()
     val isOnline by viewModel.isOnline.collectAsState()
     val offlineQueue by viewModel.offlineQueue.collectAsState()
+    val eyeCareEnabled by viewModel.eyeCareEnabled.collectAsState()
+    val eyeCareBrightness by viewModel.eyeCareBrightness.collectAsState()
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -400,6 +404,21 @@ fun DeprosApp(
     }
 
     val view = LocalView.current
+
+    // Sync window brightness & Eye Care dimming safely
+    LaunchedEffect(eyeCareEnabled, eyeCareBrightness) {
+        val window = (view.context as? ComponentActivity)?.window ?: return@LaunchedEffect
+        runCatching {
+            val lp = window.attributes
+            lp.screenBrightness = if (eyeCareEnabled || eyeCareBrightness < 0.99f) {
+                eyeCareBrightness.coerceIn(0.15f, 1.0f)
+            } else {
+                WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+            }
+            window.attributes = lp
+        }
+    }
+
     val effectiveImmersiveFullScreen = isFullScreen || showFullScreenBrandSplash
     LaunchedEffect(effectiveImmersiveFullScreen) {
         val window = (view.context as? ComponentActivity)?.window ?: return@LaunchedEffect
@@ -525,18 +544,18 @@ fun DeprosApp(
                         modifier = Modifier.testTag("nav_cart")
                     )
 
-                    // Orders & Receipts
+                    // Category Direct Shortcut
                     NavigationBarItem(
-                        selected = currentScreen == AppScreen.ORDERS,
-                        onClick = { viewModel.navigateTo(AppScreen.ORDERS) },
+                        selected = currentScreen == AppScreen.CATEGORIES,
+                        onClick = { viewModel.navigateTo(AppScreen.CATEGORIES) },
                         icon = {
                             Icon(
-                                imageVector = if (currentScreen == AppScreen.ORDERS) Icons.Filled.ReceiptLong else Icons.Outlined.ReceiptLong,
-                                contentDescription = "Receipts"
+                                imageVector = if (currentScreen == AppScreen.CATEGORIES) Icons.Filled.Category else Icons.Outlined.Category,
+                                contentDescription = "Category"
                             )
                         },
-                        label = { Text("Receipts", fontWeight = if (currentScreen == AppScreen.ORDERS) FontWeight.Bold else FontWeight.Normal) },
-                        modifier = Modifier.testTag("nav_orders")
+                        label = { Text("Category", fontWeight = if (currentScreen == AppScreen.CATEGORIES) FontWeight.Bold else FontWeight.Normal) },
+                        modifier = Modifier.testTag("nav_categories")
                     )
 
                     // Account
@@ -639,6 +658,7 @@ fun DeprosApp(
                     AppScreen.PARTNER_PORTAL -> PartnerPortalScreen(viewModel = viewModel)
                     AppScreen.HELP_SUPPORT -> HelpSupportScreen(viewModel = viewModel)
                     AppScreen.LIVE_CALL -> LiveCallScreen(viewModel = viewModel)
+                    AppScreen.CATEGORIES -> CategoriesScreen(viewModel = viewModel)
                 }
 
             // Floating Incoming Customer Live Call Alert for Admin across all screens
@@ -850,6 +870,22 @@ fun DeprosApp(
                     }
                 }
             }
+        }
+
+        // Non-blocking Eye Care Comfort & Brightness Filter Overlay across the entire app
+        if (eyeCareEnabled || eyeCareBrightness < 0.99f) {
+            val dimAlpha = (1f - eyeCareBrightness).coerceIn(0f, 0.72f)
+            val tintColor = if (eyeCareEnabled) {
+                Color(0xFF3E2707).copy(alpha = (dimAlpha + 0.14f).coerceIn(0.10f, 0.76f))
+            } else {
+                Color.Black.copy(alpha = dimAlpha)
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(tintColor)
+                    .testTag("eye_care_brightness_overlay")
+            )
         }
     }
 }

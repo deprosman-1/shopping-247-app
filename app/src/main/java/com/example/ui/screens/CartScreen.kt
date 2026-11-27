@@ -140,55 +140,37 @@ fun CartScreen(
                         modifier = Modifier.fillMaxWidth(),
                         contentAlignment = Alignment.Center
                     ) {
-                        Column(
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .widthIn(max = 500.dp)
-                                .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp)
+                                .widthIn(max = 540.dp)
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("Subtotal", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(nairaFormat.format(subtotal), fontWeight = FontWeight.SemiBold)
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("Flat Shipping", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(nairaFormat.format(deliveryFee), fontWeight = FontWeight.SemiBold)
-                            }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            HorizontalDivider()
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Total Payable", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Column(modifier = Modifier.weight(0.42f)) {
                                 Text(
-                                    nairaFormat.format(total),
-                                    style = MaterialTheme.typography.titleLarge,
+                                    text = "Total Payable",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = nairaFormat.format(total),
+                                    style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Black,
                                     color = MaterialTheme.colorScheme.primary
                                 )
                             }
-                            Spacer(modifier = Modifier.height(14.dp))
-
                             Button(
                                 onClick = { viewModel.navigateTo(AppScreen.CHECKOUT) },
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(52.dp)
+                                    .weight(0.58f)
+                                    .height(48.dp)
                                     .testTag("proceed_to_checkout_button"),
                                 shape = RoundedCornerShape(14.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                             ) {
-                                Text("Proceed to Offline Payment", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+                                Text("Proceed to Payment Page", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, maxLines = 1)
                             }
                         }
                     }
@@ -247,10 +229,32 @@ fun CartScreen(
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
-                        .then(if (isWideDualAxisMode) Modifier else Modifier.widthIn(max = 500.dp))
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                        .then(if (isWideDualAxisMode) Modifier else Modifier.widthIn(max = 540.dp))
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 2.dp, vertical = 2.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Selected Products (${cartItems.size} lines • ${cartItems.sumOf { it.quantity }} units)",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = nairaFormat.format(subtotal),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
                     item {
                         Card(
                             shape = RoundedCornerShape(14.dp),
@@ -334,6 +338,45 @@ fun CartScreen(
                             onDecrease = { viewModel.updateCartQuantity(item.cartItemId, -1) },
                             onRemove = { viewModel.removeCartItem(item.cartItemId) }
                         )
+                    }
+
+                    item {
+                        Card(
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("cart_summary_breakdown_card")
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = "Order Summary",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Black
+                                )
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Subtotal (${cartItems.sumOf { it.quantity }} items)", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                                    Text(nairaFormat.format(subtotal), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Flat Shipping", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                                    Text(nairaFormat.format(deliveryFee), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                }
+                                HorizontalDivider()
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Total Payable", fontWeight = FontWeight.Black, fontSize = 14.sp)
+                                    Text(nairaFormat.format(total), fontWeight = FontWeight.Black, fontSize = 15.sp, color = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                        }
+                    }
+
+                    item {
+                        Spacer(modifier = Modifier.height(12.dp))
                     }
                 }
             }

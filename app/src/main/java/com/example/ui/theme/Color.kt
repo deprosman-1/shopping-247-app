@@ -2,12 +2,12 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val PrimaryBlue = Color(0xFF16A34A)
-val PrimaryLightBlue = Color(0xFF22C55E)
-val CyberCyan = Color(0xFF4ADE80)
+val PrimaryBlue = Color(0xFF15803D)
+val PrimaryLightBlue = Color(0xFF16A34A)
+val CyberCyan = Color(0xFF0F766E)
 val AccentGold = Color(0xFFF59E0B)
-val SuccessGreen = Color(0xFF10B981)
-val ErrorRed = Color(0xFFEF4444)
+val SuccessGreen = Color(0xFF059669)
+val ErrorRed = Color(0xFFDC2626)
 
 // Payment brands
 val OPayGreen = Color(0xFF00B875)
@@ -18,16 +18,16 @@ val CodOrange = Color(0xFFF97316)
 val PaystackTeal = Color(0xFF00C3F7)
 val PaystackNavy = Color(0xFF011B33)
 
-// Dark theme colors (Green with White write-ups)
+// Dark theme colors (Deep Emerald with White write-ups)
 val DarkBackground = Color(0xFF052E16)
 val DarkSurface = Color(0xFF064E3B)
 val DarkSurfaceVariant = Color(0xFF065F46)
 val DarkOnBackground = Color(0xFFFFFFFF)
 val DarkOnSurface = Color(0xFFFFFFFF)
 
-// App theme colors (Green background with White write-ups)
-val LightBackground = Color(0xFF052E16)
-val LightSurface = Color(0xFF064E3B)
-val LightSurfaceVariant = Color(0xFF065F46)
-val LightOnBackground = Color(0xFFFFFFFF)
-val LightOnSurface = Color(0xFFFFFFFF)
+// Enhanced App Light Green theme colors (Soothing Light Green background with Deep Emerald ink)
+val LightBackground = Color(0xFFE8FAEE)
+val LightSurface = Color(0xFFF2FDF6)
+val LightSurfaceVariant = Color(0xFFD8F7E3)
+val LightOnBackground = Color(0xFF052E16)
+val LightOnSurface = Color(0xFF064E3B)

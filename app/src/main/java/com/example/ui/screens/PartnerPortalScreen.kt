@@ -172,6 +172,7 @@ fun PartnerPortalScreen(
     var uploadSellingPrice by rememberSaveable { mutableStateOf("") }
     var uploadPromoPercent by rememberSaveable { mutableStateOf("0") }
     var uploadCommissionPercent by rememberSaveable { mutableStateOf("10.0") }
+    var uploadImageUri by rememberSaveable { mutableStateOf("") }
 
     // PDF Save Launcher for MOU
     var pendingPdfPartner by remember { mutableStateOf<PartnerOrganization?>(null) }
@@ -278,7 +279,13 @@ fun PartnerPortalScreen(
                     var ownerName by rememberSaveable { mutableStateOf(pendingDraft?.customerName.orEmpty()) }
                     var ownerPhone by rememberSaveable { mutableStateOf(pendingDraft?.customerPhone.orEmpty()) }
                     var businessAddress by rememberSaveable { mutableStateOf(pendingDraft?.officeAddress.orEmpty()) }
-                    var primaryCategory by rememberSaveable { mutableStateOf(pendingDraft?.productCategories?.firstOrNull() ?: ProductCategory.CLOTHES.displayName) }
+                    var selectedCategories by remember {
+                        mutableStateOf(
+                            pendingDraft?.productCategories?.takeIf { it.isNotEmpty() }
+                                ?: listOf(ProductCategory.CLOTHES.displayName)
+                        )
+                    }
+                    val primaryCategory = selectedCategories.firstOrNull() ?: ProductCategory.CLOTHES.displayName
                     var nextOfKinName by rememberSaveable { mutableStateOf("") }
                     var nextOfKinGender by rememberSaveable { mutableStateOf("Male") }
                     var nextOfKinPhone by rememberSaveable { mutableStateOf("") }
@@ -289,7 +296,9 @@ fun PartnerPortalScreen(
                         if (ownerName.isBlank()) ownerName = draft.customerName
                         if (ownerPhone.isBlank()) ownerPhone = draft.customerPhone
                         if (businessAddress.isBlank()) businessAddress = draft.officeAddress
-                        draft.productCategories.firstOrNull()?.let { primaryCategory = it }
+                        if (draft.productCategories.isNotEmpty()) {
+                            selectedCategories = draft.productCategories
+                        }
                     }
 
                     // Schedule / Initial Product Spec inside MOU
@@ -300,6 +309,15 @@ fun PartnerPortalScreen(
                     var sampleSellingPrice by rememberSaveable { mutableStateOf("") }
                     var samplePromoPercent by rememberSaveable { mutableStateOf("0") }
                     var sampleColors by remember { mutableStateOf(listOf(ProductColor("Black", "#000000"), ProductColor("Accent Gold", "#F59E0B"))) }
+                    var sampleProductImageUri by rememberSaveable { mutableStateOf("") }
+                    val sampleMouImagePicker = rememberLauncherForActivityResult(
+                        contract = ActivityResultContracts.PickVisualMedia()
+                    ) { uri ->
+                        if (uri != null) {
+                            sampleProductImageUri = uri.toString()
+                            Toast.makeText(context, "Product photo attached from phone!", Toast.LENGTH_SHORT).show()
+                        }
+                    }
 
                     // Agreement & Editable Commercial Terms
                     var agreementDate by rememberSaveable { mutableStateOf(todayDateStr) }
@@ -406,7 +424,7 @@ fun PartnerPortalScreen(
                                                     Column(modifier = Modifier.weight(1f)) {
                                                         Text(p.businessName, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                                         Text(
-                                                            "${p.id} • ${p.primaryCategory} • ${p.stipulatedCommissionPercent}% fee",
+                                                            "${p.id} • ${p.selectedCategories.ifEmpty { listOf(p.primaryCategory) }.joinToString(", ")} • ${p.stipulatedCommissionPercent}% fee",
                                                             fontSize = 11.sp,
                                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                                         )
@@ -544,21 +562,44 @@ fun PartnerPortalScreen(
                                     modifier = Modifier.fillMaxWidth().testTag("partner_nok_phone_input")
                                 )
 
-                                Text("Select Sold Product Category *", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = CyberCyan)
+                                Text(
+                                    text = "Select Product Categories (Tap 1 or more) *",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = "Selected (${selectedCategories.size}): ${selectedCategories.joinToString(", ")}",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.testTag("partner_mou_selected_categories_summary")
+                                )
                                 FlowRow(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     ProductCategory.entries.forEach { cat ->
-                                        val isSel = primaryCategory == cat.displayName
+                                        val isSel = selectedCategories.any { it.equals(cat.displayName, ignoreCase = true) }
                                         FilterChip(
                                             selected = isSel,
-                                            onClick = { primaryCategory = cat.displayName },
+                                            onClick = {
+                                                selectedCategories = if (isSel) {
+                                                    if (selectedCategories.size > 1) {
+                                                        selectedCategories.filterNot { it.equals(cat.displayName, ignoreCase = true) }
+                                                    } else {
+                                                        selectedCategories
+                                                    }
+                                                } else {
+                                                    selectedCategories + cat.displayName
+                                                }
+                                            },
                                             label = { Text(cat.displayName, fontSize = 11.5.sp, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium) },
                                             colors = FilterChipDefaults.filterChipColors(
-                                                selectedContainerColor = CyberCyan,
-                                                selectedLabelColor = Color.Black
-                                            )
+                                                selectedContainerColor = Color(0xFF064E3B),
+                                                selectedLabelColor = AccentGold
+                                            ),
+                                            modifier = Modifier.testTag("partner_mou_category_${cat.name.lowercase()}")
                                         )
                                     }
                                 }
@@ -635,6 +676,58 @@ fun PartnerPortalScreen(
                                     selectedColors = sampleColors,
                                     onColorsChanged = { sampleColors = it }
                                 )
+
+                                // Phone Photo Picker Upload Link for Product of Interest in MOU Form
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.surface,
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (sampleProductImageUri.isNotBlank()) SuccessGreen else MaterialTheme.colorScheme.outlineVariant
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(10.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        if (sampleProductImageUri.isNotBlank()) {
+                                            AsyncImage(
+                                                model = sampleProductImageUri,
+                                                contentDescription = "Selected Product of Interest Photo",
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(150.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .testTag("partner_mou_picked_image_preview")
+                                            )
+                                        }
+                                        OutlinedButton(
+                                            onClick = {
+                                                sampleMouImagePicker.launch(
+                                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                                )
+                                            },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .testTag("partner_mou_pick_image_button")
+                                        ) {
+                                            Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = if (sampleProductImageUri.isNotBlank()) {
+                                                    "Change Product Photo from Phone"
+                                                } else {
+                                                    "Upload Product Image from Phone (Product of Interest)"
+                                                },
+                                                fontSize = 11.5.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
 
@@ -860,7 +953,7 @@ fun PartnerPortalScreen(
                                         text = """
                                             THIS MEMORANDUM OF UNDERSTANDING is entered on $agreementDate between ${storeProfile.storeName} ("Host Platform") and ${businessName.ifBlank { "[Partner Business]" }} ("Partner").
                                             
-                                            1. Category & Supply: Partner supplies authentic '$primaryCategory' items at ${agreedQtyPerPeriod.ifBlank { "20" }} units ${periodUnit.label} for a hosting duration of $hostingDuration.
+                                            1. Category & Supply: Partner supplies authentic '${selectedCategories.joinToString(", ")}' items at ${agreedQtyPerPeriod.ifBlank { "20" }} units ${periodUnit.label} for a hosting duration of $hostingDuration.
                                             2. Automated Per-Product MOU % Split: When a customer pays for a Partner product, $commVal% is automatically deducted to ${storeProfile.storeName}'s account and the remaining balance is deposited to the Partner's account.
                                             3. Automated 30-Day Hosting Deduction: Monthly Hosting Payment of ${nairaFormat.format(feeAmt)} is automatically deducted every 30-day cycle from the Partner's account to ${storeProfile.storeName}'s account.
                                             4. End-of-Period Catalog Lock, Renewal & Termination: At the end of each hosting period, Admin clicks Catalog Lock to pause customer Add-to-Cart while keeping products displayed. On renewal, Admin unlocks the Catalog Lock. On contract termination, Admin permanently deletes all Partner product images and information.
@@ -915,7 +1008,7 @@ fun PartnerPortalScreen(
                                     ownerName = ownerName,
                                     ownerPhone = ownerPhone,
                                     businessAddress = businessAddress,
-                                    primaryCategory = primaryCategory,
+                                    primaryCategory = selectedCategories.joinToString(", "),
                                     opayAccountNumber = opayNumber,
                                     opayAccountName = opayName,
                                     moniepointAccountNumber = monieNumber,
@@ -935,11 +1028,14 @@ fun PartnerPortalScreen(
                                     nextOfKinName = nextOfKinName,
                                     nextOfKinGender = nextOfKinGender,
                                     nextOfKinPhone = nextOfKinPhone,
-                                    customerId = pendingDraft?.customerId ?: viewModel.currentCustomer.value?.id.orEmpty()
+                                    customerId = pendingDraft?.customerId ?: viewModel.currentCustomer.value?.id.orEmpty(),
+                                    selectedCategories = selectedCategories,
+                                    sampleProductName = sampleProductName.trim(),
+                                    sampleProductImageUrl = sampleProductImageUri
                                 ) { created ->
                                     viewModel.clearPendingPartnershipDraft()
                                     selectedPartnerId = created.id
-                                    uploadCategory = primaryCategory
+                                    uploadCategory = selectedCategories.firstOrNull() ?: primaryCategory
                                     uploadProductName = sampleProductName
                                     uploadBrand = sampleBrand
                                     uploadQuantity = sampleQuantity
@@ -948,6 +1044,7 @@ fun PartnerPortalScreen(
                                     uploadSellingPrice = sampleSellingPrice
                                     uploadPromoPercent = samplePromoPercent
                                     uploadCommissionPercent = commissionPercent
+                                    uploadImageUri = sampleProductImageUri
                                     Toast.makeText(
                                         context,
                                         "MOU Signed & Submitted (${created.id})! Awaiting ODIYA counter-signature in Admin Control Room.",
@@ -977,13 +1074,16 @@ fun PartnerPortalScreen(
                     // =============================================================
                     var uploadDescription by rememberSaveable { mutableStateOf("") }
                     var uploadBatchNumber by rememberSaveable { mutableStateOf("") }
-                    var pickedImageUri by remember { mutableStateOf<Uri?>(null) }
+                    var pickedImageUri by remember(uploadImageUri) {
+                        mutableStateOf<Uri?>(uploadImageUri.takeIf { it.isNotBlank() }?.let { Uri.parse(it) })
+                    }
 
                     val imagePickerLauncher = rememberLauncherForActivityResult(
                         contract = ActivityResultContracts.PickVisualMedia()
                     ) { uri ->
                         if (uri != null) {
                             pickedImageUri = uri
+                            uploadImageUri = uri.toString()
                             Toast.makeText(context, "Product image selected for Admin Staging!", Toast.LENGTH_SHORT).show()
                         }
                     }
@@ -1150,16 +1250,31 @@ fun PartnerPortalScreen(
                                             color = CyberCyan
                                         )
 
+                                        val mouCategories = partner.selectedCategories
+                                            .ifEmpty { partner.primaryCategory.split(",").map { it.trim() }.filter { it.isNotBlank() } }
+                                        Text(
+                                            text = "MOU Approved Categories: ${mouCategories.joinToString(", ")}",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                         FlowRow(
                                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                                             verticalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
                                             ProductCategory.entries.forEach { cat ->
                                                 val sel = uploadCategory == cat.displayName
+                                                val inMou = mouCategories.any { it.equals(cat.displayName, ignoreCase = true) }
                                                 FilterChip(
                                                     selected = sel,
                                                     onClick = { uploadCategory = cat.displayName },
-                                                    label = { Text(cat.displayName, fontSize = 11.sp) }
+                                                    label = {
+                                                        Text(
+                                                            text = if (inMou) "${cat.displayName} ★" else cat.displayName,
+                                                            fontSize = 11.sp,
+                                                            fontWeight = if (sel || inMou) FontWeight.Bold else FontWeight.Normal
+                                                        )
+                                                    }
                                                 )
                                             }
                                         }
