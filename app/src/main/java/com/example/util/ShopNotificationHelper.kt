@@ -404,22 +404,90 @@ object ShopNotificationHelper {
         )
     }
 
+    private fun createMerchantCopyPendingIntent(
+        context: Context,
+        requestCode: Int,
+        label: String,
+        value: String,
+        toastMessage: String
+    ): PendingIntent {
+        val intent = Intent(context, MerchantClipboardActionReceiver::class.java).apply {
+            action = MerchantClipboardActionReceiver.ACTION_COPY_MERCHANT_DETAIL
+            putExtra(MerchantClipboardActionReceiver.EXTRA_COPY_LABEL, label)
+            putExtra(MerchantClipboardActionReceiver.EXTRA_COPY_VALUE, value)
+            putExtra(MerchantClipboardActionReceiver.EXTRA_TOAST_MESSAGE, toastMessage)
+        }
+        return PendingIntent.getBroadcast(
+            context,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
     fun notifyActiveMerchantPaymentDetails(
         context: Context,
         merchantTitle: String,
         accountNumber: String,
         accountName: String,
-        formattedAmount: String
+        formattedAmount: String,
+        plainAmount: String = ""
     ) {
         if (!hasNotificationPermission(context)) return
         ensureChannels(context)
-        postNotification(
+        val numericAmount = plainAmount.ifBlank {
+            formattedAmount.filter { it.isDigit() || it == '.' }
+        }
+        val title = "ODIYA Pay: $formattedAmount -> Acct $accountNumber"
+        val body = "Merchant: $merchantTitle • Account: $accountNumber ($accountName) • Total Payable: $formattedAmount. Use Copy buttons below right inside $merchantTitle, then tap to return to ODIYA Checkout."
+
+        val copyAcctPendingIntent = createMerchantCopyPendingIntent(
             context = context,
-            channelId = CHANNEL_ORDERS,
-            notificationId = 24899,
-            title = "ODIYA Account Ready • $merchantTitle ($formattedAmount)",
-            body = "Account: $accountNumber ($accountName) • Payable Amount: $formattedAmount. After completing transfer in $merchantTitle, tap here to return to ODIYA Checkout & forward your Word/PDF receipt."
+            requestCode = 24901,
+            label = "ODIYA Account",
+            value = accountNumber,
+            toastMessage = "Copied ODIYA Account: $accountNumber"
         )
+        val copyAmtPendingIntent = createMerchantCopyPendingIntent(
+            context = context,
+            requestCode = 24902,
+            label = "Payable Amount",
+            value = numericAmount,
+            toastMessage = "Copied Payable Amount: $formattedAmount"
+        )
+
+        try {
+            val builder = NotificationCompat.Builder(context, CHANNEL_ORDERS)
+                .setSmallIcon(R.drawable.shopping_logo_icon_1794752250458)
+                .setContentTitle(title)
+                .setContentText("Acct: $accountNumber • Amount: $formattedAmount ($accountName)")
+                .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                .setPriority(NotificationCompat.PRIORITY_MAX)
+                .setCategory(NotificationCompat.CATEGORY_STATUS)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setContentIntent(launchAppPendingIntent(context))
+                .addAction(
+                    R.drawable.shopping_logo_icon_1794752250458,
+                    "Copy Acct ($accountNumber)",
+                    copyAcctPendingIntent
+                )
+                .addAction(
+                    R.drawable.shopping_logo_icon_1794752250458,
+                    "Copy Amt ($numericAmount)",
+                    copyAmtPendingIntent
+                )
+
+            NotificationManagerCompat.from(context).notify(24899, builder.build())
+        } catch (_: SecurityException) {
+        } catch (_: Exception) {
+        }
+    }
+
+    fun cancelActiveMerchantPaymentDetails(context: Context) {
+        runCatching {
+            NotificationManagerCompat.from(context).cancel(24899)
+        }
     }
 
     private fun postNotification(

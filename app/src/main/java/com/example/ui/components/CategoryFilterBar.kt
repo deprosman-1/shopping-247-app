@@ -102,12 +102,12 @@ fun CategorySelectorButton(
             ),
             shadowElevation = 2.dp,
             modifier = Modifier
-                .height(34.dp)
+                .height(30.dp)
                 .testTag("category_dropdown_button")
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(horizontal = 10.dp)
+                modifier = Modifier.padding(horizontal = 9.dp)
             ) {
                 Icon(
                     imageVector = activeIcon,
@@ -232,27 +232,27 @@ fun HorizontalCategoryStrip(
         modifier = modifier
             .fillMaxWidth()
             .testTag("horizontal_category_strip"),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         item(key = "cat_all", contentType = "category_pill") {
             val isAll = selectedCategory == null
             Surface(
                 onClick = { onSelectCategory(null) },
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(10.dp),
                 color = if (isAll) AccentGold else Color(0xFF064E3B),
                 border = BorderStroke(
                     width = 1.dp,
                     color = if (isAll) AccentGold else CyberCyan.copy(alpha = 0.45f)
                 ),
                 modifier = Modifier
-                    .height(34.dp)
+                    .height(30.dp)
                     .testTag("horizontal_cat_all")
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 11.dp)
+                    modifier = Modifier.padding(horizontal = 9.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.LocalMall,
@@ -281,19 +281,19 @@ fun HorizontalCategoryStrip(
             val count = categoryCounts[cat.displayName] ?: 0
             Surface(
                 onClick = { onSelectCategory(if (isSelected) null else cat.displayName) },
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(10.dp),
                 color = if (isSelected) AccentGold else Color(0xFF064E3B),
                 border = BorderStroke(
                     width = 1.dp,
                     color = if (isSelected) AccentGold else CyberCyan.copy(alpha = 0.38f)
                 ),
                 modifier = Modifier
-                    .height(34.dp)
+                    .height(30.dp)
                     .testTag("horizontal_cat_${cat.name.lowercase()}")
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 11.dp)
+                    modifier = Modifier.padding(horizontal = 9.dp)
                 ) {
                     Icon(
                         imageVector = getCategoryIcon(cat),

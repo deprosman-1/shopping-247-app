@@ -59,19 +59,38 @@ object PdfInvoiceExporter {
         }
         val dateStr = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date(order.createdAt))
         val storeTitle = storeProfile.storeName.ifBlank { "ODIYA" }.uppercase()
-        val lines = listOf(
-            "$storeTitle - OFFICIAL PURCHASE INVOICE",
-            "Target Recipient: $storeTitle OFFICIAL RECIPIENT",
-            "Order Reference: ${order.orderId}",
-            "Date: $dateStr",
-            "Status: ${order.status.label}",
-            "Customer: ${order.customerName} (${order.customerPhone})",
-            "Delivery: ${order.deliveryAddress}",
-            "Payment Portal: ${order.paymentMethod.title}",
-            "Destination Account: ${order.paymentAccount}",
-            "Payment Reference: ${order.paymentReference}",
-            "Total Paid: ${naira.format(order.totalAmount)}"
-        )
+        val parsed = OrderSlipFormatter.parseOrderSlipDetails(order)
+        val itemLines = parsed.items.mapIndexed { idx, item ->
+            val priceSuffix = when {
+                item.unitPriceText.isNotBlank() && item.lineTotalText.isNotBlank() ->
+                    " | Unit: ${item.unitPriceText} | Total: ${item.lineTotalText}"
+                item.lineTotalText.isNotBlank() -> " | Price: ${item.lineTotalText}"
+                else -> ""
+            }
+            "  ${idx + 1}. ${item.titleAndSpecs}$priceSuffix"
+        }
+        val lines = buildList {
+            add("$storeTitle - OFFICIAL PURCHASE INVOICE")
+            add("Target Recipient: $storeTitle OFFICIAL RECIPIENT")
+            add("Order Reference: ${order.orderId}")
+            add("Date: $dateStr")
+            add("Status: ${order.status.label}")
+            add("Customer: ${order.customerName} (${order.customerPhone})")
+            add("Delivery Destination: ${parsed.cleanDeliveryAddress}")
+            if (parsed.deliveryConditionAndFee.isNotBlank()) {
+                add("Shipping / Delivery: ${parsed.deliveryConditionAndFee}")
+            }
+            add("Payment Portal: ${order.paymentMethod.title}")
+            add("Destination Account: ${order.paymentAccount}")
+            add("Sender / Payer: ${order.senderName}")
+            add("Payment Reference: ${order.paymentReference}")
+            if (order.verificationNote.isNotBlank()) {
+                add("Verification Note: ${order.verificationNote}")
+            }
+            add("Purchased Items:")
+            addAll(itemLines)
+            add("Total Paid: ${naira.format(order.totalAmount)}")
+        }
         fun escPdf(s: String): String = s
             .replace("\\", "\\\\")
             .replace("(", "\\(")
@@ -242,11 +261,15 @@ object PdfInvoiceExporter {
         canvas.drawLine(36f, y, 559f, y, linePaint)
         y += 24f
 
+        val parsed = OrderSlipFormatter.parseOrderSlipDetails(order)
         canvas.drawText("CUSTOMER & DELIVERY DETAILS", 36f, y, sectionPaint)
         y += 18f
         drawRow("Customer Name:", order.customerName)
         drawRow("Contact Phone:", order.customerPhone)
-        drawRow("Delivery Destination:", order.deliveryAddress)
+        drawRow("Delivery Destination:", parsed.cleanDeliveryAddress)
+        if (parsed.deliveryConditionAndFee.isNotBlank()) {
+            drawRow("Shipping / Delivery:", parsed.deliveryConditionAndFee)
+        }
 
         y += 6f
         canvas.drawLine(36f, y, 559f, y, linePaint)
@@ -263,13 +286,31 @@ object PdfInvoiceExporter {
         canvas.drawLine(36f, y, 559f, y, linePaint)
         y += 24f
 
-        canvas.drawText("PURCHASED ITEMS", 36f, y, sectionPaint)
+        canvas.drawText("PURCHASED ITEMS & INDIVIDUAL PRICES", 36f, y, sectionPaint)
         y += 20f
-        val cleanSummary = order.itemsSummary.replace(Regex("""\s*\[Sold:[^\]]+\]"""), "").trim()
-        for (rawLine in cleanSummary.split("\n")) {
-            val trimmed = rawLine.trim()
-            if (trimmed.isNotBlank() && y < 740f) {
-                canvas.drawText("• ${trimmed.take(78)}", 42f, y, valuePaint)
+        if (parsed.items.isEmpty()) {
+            val cleanSummary = order.itemsSummary.replace(Regex("""\s*\[Sold:[^\]]+\]"""), "").trim()
+            for (rawLine in cleanSummary.split(";", "\n")) {
+                val trimmed = rawLine.trim()
+                if (trimmed.isNotBlank() && y < 740f) {
+                    canvas.drawText("• ${trimmed.take(78)}", 42f, y, valuePaint)
+                    y += 18f
+                }
+            }
+        } else {
+            for ((idx, item) in parsed.items.withIndex()) {
+                if (y >= 736f) break
+                val priceTag = when {
+                    item.unitPriceText.isNotBlank() && item.lineTotalText.isNotBlank() ->
+                        "${item.unitPriceText} ea -> ${item.lineTotalText}"
+                    item.lineTotalText.isNotBlank() -> item.lineTotalText
+                    else -> ""
+                }
+                val itemText = "${idx + 1}. ${item.titleAndSpecs}"
+                canvas.drawText(itemText.take(54), 42f, y, valuePaint)
+                if (priceTag.isNotBlank()) {
+                    canvas.drawText(priceTag.take(26), 400f, y, labelPaint)
+                }
                 y += 18f
             }
         }

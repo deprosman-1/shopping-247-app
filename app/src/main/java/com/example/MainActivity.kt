@@ -131,6 +131,7 @@ class MainActivity : ComponentActivity() {
     private val pendingPaystackReference = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     private val pendingAppOpenSignal = kotlinx.coroutines.flow.MutableStateFlow(0L)
     private val pendingCatalogFilter = kotlinx.coroutines.flow.MutableStateFlow<Pair<String?, String?>?>(null)
+    private val isInPipModeState = kotlinx.coroutines.flow.MutableStateFlow(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -177,8 +178,34 @@ class MainActivity : ComponentActivity() {
                     pendingSharedReceiptPayload = pendingSharedReceiptPayload,
                     pendingPaystackReference = pendingPaystackReference,
                     pendingAppOpenSignal = pendingAppOpenSignal,
-                    pendingCatalogFilter = pendingCatalogFilter
+                    pendingCatalogFilter = pendingCatalogFilter,
+                    isInPipModeFlow = isInPipModeState
                 )
+            }
+        }
+    }
+
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: android.content.res.Configuration
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        isInPipModeState.value = isInPictureInPictureMode
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !isInPictureInPictureMode) {
+            val overlay = com.example.util.MerchantPaymentOverlayManager.activeOverlay.value
+            if (overlay != null && com.example.util.MerchantPaymentOverlayManager.consumeAutoPip()) {
+                val hasPip = packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+                if (hasPip) {
+                    runCatching {
+                        val params = com.example.util.MerchantAppLauncher.buildPaymentPipParams(this, overlay)
+                        enterPictureInPictureMode(params)
+                    }
+                }
             }
         }
     }
@@ -291,7 +318,8 @@ fun DeprosApp(
     pendingSharedReceiptPayload: kotlinx.coroutines.flow.MutableStateFlow<RawSharedReceiptPayload?>? = null,
     pendingPaystackReference: kotlinx.coroutines.flow.MutableStateFlow<String?>? = null,
     pendingAppOpenSignal: kotlinx.coroutines.flow.MutableStateFlow<Long>? = null,
-    pendingCatalogFilter: kotlinx.coroutines.flow.MutableStateFlow<Pair<String?, String?>?>? = null
+    pendingCatalogFilter: kotlinx.coroutines.flow.MutableStateFlow<Pair<String?, String?>?>? = null,
+    isInPipModeFlow: kotlinx.coroutines.flow.StateFlow<Boolean>? = null
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val currentScreen by viewModel.currentScreen.collectAsState()
@@ -312,6 +340,8 @@ fun DeprosApp(
     val offlineQueue by viewModel.offlineQueue.collectAsState()
     val eyeCareEnabled by viewModel.eyeCareEnabled.collectAsState()
     val eyeCareBrightness by viewModel.eyeCareBrightness.collectAsState()
+    val isInPipMode by (isInPipModeFlow?.collectAsState() ?: remember { mutableStateOf(false) })
+    val activeMerchantOverlay by com.example.util.MerchantPaymentOverlayManager.activeOverlay.collectAsState()
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -432,12 +462,15 @@ fun DeprosApp(
     }
 
     // Dynamic anti-spying & screen-capture shield on sensitive payment, auth & Admin screens
-    DisposableEffect(currentScreen) {
+    // Clear FLAG_SECURE while in Picture-in-Picture so the embedded ODIYA payment card stays readable over the merchant app.
+    DisposableEffect(currentScreen, isInPipMode) {
         val activity = view.context as? ComponentActivity
-        val protectScreen = currentScreen == AppScreen.ADMIN_CONTROL_ROOM ||
-            currentScreen == AppScreen.CHECKOUT ||
-            currentScreen == AppScreen.AUTH ||
-            currentScreen == AppScreen.PARTNER_PORTAL
+        val protectScreen = !isInPipMode && (
+            currentScreen == AppScreen.ADMIN_CONTROL_ROOM ||
+                currentScreen == AppScreen.CHECKOUT ||
+                currentScreen == AppScreen.AUTH ||
+                currentScreen == AppScreen.PARTNER_PORTAL
+            )
         runCatching {
             if (protectScreen) {
                 activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
@@ -446,6 +479,11 @@ fun DeprosApp(
             }
         }
         onDispose { }
+    }
+
+    if (isInPipMode && activeMerchantOverlay != null) {
+        EmbeddedMerchantPipOverlayCard(overlay = activeMerchantOverlay!!)
+        return
     }
 
     // Handle system back button smoothly
@@ -886,6 +924,87 @@ fun DeprosApp(
                     .background(tintColor)
                     .testTag("eye_care_brightness_overlay")
             )
+        }
+    }
+}
+
+@Composable
+fun EmbeddedMerchantPipOverlayCard(
+    overlay: com.example.util.ActiveMerchantPaymentOverlay
+) {
+    Surface(
+        color = Color(0xFF052E16),
+        border = androidx.compose.foundation.BorderStroke(2.dp, AccentGold),
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("pip_embedded_payment_card")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "PAY ${overlay.storeName.uppercase()} • ${overlay.merchantTitle.uppercase()}",
+                    color = AccentGold,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = "ACCOUNT NUMBER",
+                    color = Color(0xFFA7F3D0),
+                    fontSize = 8.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = overlay.accountNumber,
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    maxLines = 1
+                )
+                Text(
+                    text = overlay.accountName,
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "AMOUNT:",
+                    color = Color(0xFFA7F3D0),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = overlay.formattedAmount,
+                    color = AccentGold,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 1
+                )
+            }
         }
     }
 }

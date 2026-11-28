@@ -217,7 +217,7 @@ class CustomerOnlinePresenceAdminTest {
         composeRule.waitForIdle()
 
         composeRule.onNodeWithTag("home_customer_credentials_bar").assertDoesNotExist()
-        composeRule.onNodeWithTag("official_installed_horizontal_bar").assertIsDisplayed()
+        composeRule.onNodeWithTag("official_installed_horizontal_bar").assertDoesNotExist()
         assertEquals(0, composeRule.onAllNodesWithTag("home_offline_status_banner").fetchSemanticsNodes().size)
         assertEquals(0, composeRule.onAllNodesWithText("ACTIVE").fetchSemanticsNodes().size)
         assertEquals(0, composeRule.onAllNodesWithText("SAVED").fetchSemanticsNodes().size)

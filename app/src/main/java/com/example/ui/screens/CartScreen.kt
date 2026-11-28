@@ -85,7 +85,12 @@ fun CartScreen(
     val cartItems by viewModel.cartItems.collectAsState()
     val subtotal by viewModel.cartSubtotal.collectAsState()
     val isWideDualAxisMode by viewModel.isWideDualAxisMode.collectAsState()
-    val deliveryFee = if (cartItems.isEmpty()) 0.0 else 1500.0
+    val flatShippingConfig by viewModel.flatShippingFeeConfig.collectAsState()
+    val deliveryFee = when {
+        cartItems.isEmpty() -> 0.0
+        flatShippingConfig.isActive -> flatShippingConfig.amount
+        else -> 1500.0
+    }
     val total = subtotal + deliveryFee
 
     val nairaFormat = remember {
@@ -363,8 +368,17 @@ fun CartScreen(
                                     Text(nairaFormat.format(subtotal), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                                 }
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("Flat Shipping", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
-                                    Text(nairaFormat.format(deliveryFee), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                    Text(
+                                        text = if (flatShippingConfig.isActive) "Flat Shipping Fee (Active)" else "Estimated Shipping",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 13.sp
+                                    )
+                                    Text(
+                                        text = if (deliveryFee == 0.0) "FREE" else nairaFormat.format(deliveryFee),
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.sp,
+                                        color = if (deliveryFee == 0.0) SuccessGreen else MaterialTheme.colorScheme.onSurface
+                                    )
                                 }
                                 HorizontalDivider()
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {

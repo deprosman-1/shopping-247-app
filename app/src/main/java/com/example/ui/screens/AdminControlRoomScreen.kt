@@ -68,6 +68,8 @@ import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Handshake
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Inventory
@@ -193,7 +195,11 @@ import com.example.data.model.ReturnRefundStatus
 import com.example.data.model.StoreProfileConfig
 import com.example.data.model.SupportTicket
 import com.example.data.model.SupportTicketStatus
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.example.AdminAlertCategory
+import com.example.AdminHangingCustomerAlert
 import com.example.util.BiometricLockHelper
+import com.example.util.OrderSlipFormatter
 import com.example.util.PdfInvoiceExporter
 import com.example.util.ProductImageHelper
 import com.example.util.WordInvoiceExporter
@@ -255,6 +261,8 @@ fun AdminControlRoomScreen(
     val latestCustomerOnlineNotice by viewModel.latestCustomerOnlineNotice.collectAsState()
     val isAdminNetOnline by viewModel.isOnline.collectAsState()
     val offlineQueue by viewModel.offlineQueue.collectAsState()
+    val hangingAlerts by viewModel.hangingAdminAlerts.collectAsState()
+    val activeAdminAlertMessage by viewModel.activeAdminAlertMessage.collectAsState()
 
     var selectedCustomerFile by remember { mutableStateOf<Customer?>(null) }
 
@@ -511,6 +519,114 @@ fun AdminControlRoomScreen(
                 }
             }
 
+            // Hanging Admin Notification Bar: Incoming Orders & Customer Messages stay pinned until Admin clicks Customer Name
+            if (hangingAlerts.isNotEmpty()) {
+                Surface(
+                    color = Color(0xFF1F1605),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.5.dp, AccentGold),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .testTag("admin_hanging_alerts_bar")
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Icon(
+                                    imageVector = Icons.Default.NotificationsActive,
+                                    contentDescription = "Pending customer alerts",
+                                    tint = AccentGold,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "PENDING CUSTOMER ALERTS (${hangingAlerts.size}) — Tap Name to Open",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = AccentGold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(hangingAlerts, key = { it.alertKey }) { alert ->
+                                val badgeColor = when (alert.category) {
+                                    AdminAlertCategory.ORDER -> SuccessGreen
+                                    AdminAlertCategory.LIVE_MESSAGE -> CyberCyan
+                                    AdminAlertCategory.RETURN_REQUEST -> Color(0xFFF87171)
+                                    else -> AccentGold
+                                }
+                                Surface(
+                                    onClick = {
+                                        viewModel.acknowledgeAndOpenAdminAlert(alert)
+                                        selectedTab = alert.category.targetTab
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = badgeColor.copy(alpha = 0.16f),
+                                    border = BorderStroke(1.2.dp, badgeColor),
+                                    modifier = Modifier
+                                        .widthIn(min = 140.dp, max = 240.dp)
+                                        .testTag("admin_hanging_alert_${alert.alertKey}")
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Surface(
+                                                shape = RoundedCornerShape(4.dp),
+                                                color = badgeColor
+                                            ) {
+                                                Text(
+                                                    text = alert.category.label.uppercase(),
+                                                    color = Color.Black,
+                                                    fontSize = 8.5.sp,
+                                                    fontWeight = FontWeight.Black,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                )
+                                            }
+                                            Text(
+                                                text = alert.customerName,
+                                                color = Color.White,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Black,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        Text(
+                                            text = alert.title,
+                                            color = Color.White.copy(alpha = 0.82f),
+                                            fontSize = 10.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Tabs Bar
             ScrollableTabRow(
                 selectedTabIndex = selectedTab,
@@ -653,6 +769,71 @@ fun AdminControlRoomScreen(
                 orders = orders.filter { matchesCustomerFolder(it, liveCustomer) },
                 onDismiss = { selectedCustomerFile = null },
                 viewModel = viewModel
+            )
+        }
+
+        activeAdminAlertMessage?.let { alertMsg ->
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissActiveAdminAlertMessage() },
+                title = {
+                    Column {
+                        Text(
+                            text = "${alertMsg.category.label} • ${alertMsg.customerName}",
+                            fontWeight = FontWeight.Black,
+                            fontSize = 16.sp
+                        )
+                        if (alertMsg.customerPhone.isNotBlank()) {
+                            Text(
+                                text = "Phone: ${alertMsg.customerPhone}",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = alertMsg.title,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = alertMsg.messageBody.ifBlank { "Open tab to inspect full message." },
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier
+                                    .padding(12.dp)
+                                    .testTag("admin_alert_dialog_message_body")
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            selectedTab = alertMsg.category.targetTab
+                            viewModel.selectAdminTab(alertMsg.category.targetTab)
+                            viewModel.dismissActiveAdminAlertMessage()
+                        },
+                        modifier = Modifier.testTag("admin_alert_dialog_open_tab_button")
+                    ) {
+                        Text("Open ${alertMsg.category.label} Tab")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { viewModel.dismissActiveAdminAlertMessage() },
+                        modifier = Modifier.testTag("admin_alert_dialog_close_button")
+                    ) {
+                        Text("Close")
+                    }
+                },
+                modifier = Modifier.testTag("admin_alert_message_dialog")
             )
         }
     }
@@ -5933,22 +6114,39 @@ private fun AdminOrderWorkflowActionsRow(
             }
         }
 
-        OutlinedButton(
-            onClick = {
-                WhatsAppHelper.sendAdminOrderStatusToCustomer(
-                    context = context,
-                    order = order,
-                    storeProfile = adminStoreProfile
-                )
-            },
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("admin_whatsapp_customer_${order.orderId}")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(Icons.Default.Chat, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("WhatsApp Customer (${order.status.label})", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = SuccessGreen)
+            OutlinedButton(
+                onClick = { viewModel.showReceipt(order) },
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("admin_view_confirmation_slip_${order.orderId}")
+            ) {
+                Icon(Icons.Default.ReceiptLong, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Confirmation Slip", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+            }
+
+            OutlinedButton(
+                onClick = {
+                    WhatsAppHelper.sendAdminOrderStatusToCustomer(
+                        context = context,
+                        order = order,
+                        storeProfile = adminStoreProfile
+                    )
+                },
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("admin_whatsapp_customer_${order.orderId}")
+            ) {
+                Icon(Icons.Default.Chat, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("WhatsApp", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = SuccessGreen)
+            }
         }
     }
 }
@@ -6061,7 +6259,13 @@ private fun AdminFullOrderAndReceiptBlock(
                 }
             }
 
-            Text("Delivery Address: ${order.deliveryAddress.ifBlank { "N/A" }}", style = MaterialTheme.typography.bodySmall)
+            val parsedSlip = remember(order.itemsSummary, order.deliveryAddress) {
+                OrderSlipFormatter.parseOrderSlipDetails(order)
+            }
+            Text("Delivery Address: ${parsedSlip.cleanDeliveryAddress.ifBlank { "N/A" }}", style = MaterialTheme.typography.bodySmall)
+            if (parsedSlip.deliveryConditionAndFee.isNotBlank()) {
+                Text("Shipping / Delivery Fee: ${parsedSlip.deliveryConditionAndFee}", style = MaterialTheme.typography.bodySmall, color = CyberCyan, fontWeight = FontWeight.Bold)
+            }
             if (order.paymentAccount.isNotBlank()) {
                 Text("Paid To Account: ${order.paymentAccount}", style = MaterialTheme.typography.bodySmall, color = CyberCyan, fontWeight = FontWeight.SemiBold)
             }
@@ -6082,7 +6286,7 @@ private fun AdminFullOrderAndReceiptBlock(
                 )
             }
 
-            // Full Unclipped Items & Profit Breakdown
+            // Full Unclipped Items, Individual Prices & Profit Breakdown
             Surface(
                 shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.surface,
@@ -6094,16 +6298,51 @@ private fun AdminFullOrderAndReceiptBlock(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("ORDERED ITEMS (FULL BREAKDOWN):", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = CyberCyan)
+                        Text("ORDERED ITEMS & PRICES (${parsedSlip.items.size}):", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = CyberCyan)
                         Text("Profit: +${nairaFormat.format(order.profit)}", fontSize = 11.sp, fontWeight = FontWeight.Black, color = SuccessGreen)
                     }
-                    order.itemsSummary.split(";", "\n").filter { it.isNotBlank() }.forEach { line ->
-                        Text(
-                            text = "• ${line.trim()}",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontSize = 11.5.sp,
-                            lineHeight = 16.sp
-                        )
+                    if (parsedSlip.items.isEmpty()) {
+                        order.itemsSummary.split(";", "\n").filter { it.isNotBlank() }.forEach { line ->
+                            Text(
+                                text = "• ${line.trim()}",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontSize = 11.5.sp,
+                                lineHeight = 16.sp
+                            )
+                        }
+                    } else {
+                        parsedSlip.items.forEachIndexed { idx, item ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 6.dp)) {
+                                    Text(
+                                        text = "${idx + 1}. ${item.titleAndSpecs}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        lineHeight = 16.sp
+                                    )
+                                    if (item.unitPriceText.isNotBlank()) {
+                                        Text(
+                                            text = "Unit Price: ${item.unitPriceText}",
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                if (item.lineTotalText.isNotBlank()) {
+                                    Text(
+                                        text = item.lineTotalText,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
                     }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                     Row(
@@ -6203,6 +6442,7 @@ private fun AdminFullOrderAndReceiptBlock(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PaymentReceiptsTab(
     viewModel: MainViewModel,
@@ -6211,10 +6451,21 @@ private fun PaymentReceiptsTab(
     val context = LocalContext.current
     var filterStatus by remember { mutableStateOf<OrderStatus?>(null) }
     var customerSearchQuery by remember { mutableStateOf("") }
+    var searchDropdownExpanded by remember { mutableStateOf(false) }
+    var isExpandedReceiptView by rememberSaveable { mutableStateOf(false) }
 
     var selectedCustomerFolderKey by remember { mutableStateOf<String?>(null) }
     var viewingReceiptImageOrderId by remember { mutableStateOf<String?>(null) }
     var fullZoomReceiptUrl by remember { mutableStateOf<String?>(null) }
+
+    val focusedAdminOrderId by viewModel.focusedAdminOrderId.collectAsState()
+    LaunchedEffect(focusedAdminOrderId) {
+        val targetId = focusedAdminOrderId
+        if (!targetId.isNullOrBlank()) {
+            viewingReceiptImageOrderId = targetId
+            viewModel.clearFocusedAdminOrder()
+        }
+    }
 
     val filteredOrders = remember(orders, filterStatus) {
         if (filterStatus == null) orders else orders.filter { it.status == filterStatus }
@@ -6227,7 +6478,8 @@ private fun PaymentReceiptsTab(
                 folder.customerPhone.contains(q, ignoreCase = true) ||
                 folder.orders.any {
                     it.orderId.contains(q, ignoreCase = true) ||
-                        it.paymentReference.contains(q, ignoreCase = true)
+                        it.paymentReference.contains(q, ignoreCase = true) ||
+                        it.itemsSummary.contains(q, ignoreCase = true)
                 }
         }
     }
@@ -6399,11 +6651,23 @@ private fun PaymentReceiptsTab(
                                     fontWeight = FontWeight.Bold
                                 )
                             }
-                            IconButton(
-                                onClick = { viewingReceiptImageOrderId = null },
-                                modifier = Modifier.testTag("close_full_order_receipt_page")
-                            ) {
-                                Icon(Icons.Default.Close, contentDescription = "Close")
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = { isExpandedReceiptView = !isExpandedReceiptView },
+                                    modifier = Modifier.testTag("admin_full_receipt_expand_toggle")
+                                ) {
+                                    Icon(
+                                        imageVector = if (isExpandedReceiptView) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                                        contentDescription = if (isExpandedReceiptView) "Compact View" else "Expand Broad View",
+                                        tint = AccentGold
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { viewingReceiptImageOrderId = null },
+                                    modifier = Modifier.testTag("close_full_order_receipt_page")
+                                ) {
+                                    Icon(Icons.Default.Close, contentDescription = "Close")
+                                }
                             }
                         }
                     }
@@ -6453,7 +6717,7 @@ private fun PaymentReceiptsTab(
     val isRefreshing by viewModel.isRefreshing.collectAsState()
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp)) {
-        // Live Sync Orders & Receipts Button Bar
+        // Live Sync & Expand Broad View Bar
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -6462,69 +6726,138 @@ private fun PaymentReceiptsTab(
             Text(
                 text = "Customer Folders (${customerFolders.size}) • Orders (${filteredOrders.size})",
                 style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Black
+                fontWeight = FontWeight.Black,
+                modifier = Modifier.weight(1f)
             )
-            OutlinedButton(
-                enabled = !isRefreshing,
-                onClick = {
-                    viewModel.syncAllCloudRecordsNow { msg ->
-                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                    }
-                },
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                modifier = Modifier.height(36.dp).testTag("admin_sync_orders_now_button")
-            ) {
-                if (isRefreshing) {
-                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.Default.CloudSync, contentDescription = null, modifier = Modifier.size(15.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
+                    onClick = { isExpandedReceiptView = !isExpandedReceiptView },
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    modifier = Modifier.height(36.dp).testTag("admin_receipts_expand_toggle")
+                ) {
+                    Icon(
+                        imageVector = if (isExpandedReceiptView) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                        contentDescription = null,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = if (isExpandedReceiptView) "Compact" else "Expand",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Sync Cloud Orders", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                OutlinedButton(
+                    enabled = !isRefreshing,
+                    onClick = {
+                        viewModel.syncAllCloudRecordsNow { msg ->
+                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                        }
+                    },
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    modifier = Modifier.height(36.dp).testTag("admin_sync_orders_now_button")
+                ) {
+                    if (isRefreshing) {
+                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.CloudSync, contentDescription = null, modifier = Modifier.size(15.dp))
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Sync", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
 
         Spacer(modifier = Modifier.height(6.dp))
 
-        OutlinedTextField(
-            value = customerSearchQuery,
-            onValueChange = { customerSearchQuery = it },
-            placeholder = { Text("Search customer name, phone, Order ID or ref...", fontSize = 12.sp) },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
-            trailingIcon = {
-                if (customerSearchQuery.isNotBlank()) {
-                    IconButton(onClick = { customerSearchQuery = "" }) {
-                        Icon(Icons.Default.Close, contentDescription = "Clear")
-                    }
-                }
-            },
-            singleLine = true,
-            shape = RoundedCornerShape(12.dp),
+        // Search Dropdown replacing plain flat filter setting
+        ExposedDropdownMenuBox(
+            expanded = searchDropdownExpanded,
+            onExpandedChange = { searchDropdownExpanded = !searchDropdownExpanded },
             modifier = Modifier
                 .fillMaxWidth()
-                .testTag("admin_customer_folder_search_input")
-        )
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        // Filter Chips Bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                .testTag("admin_receipt_search_dropdown")
         ) {
-            FilterChip(
-                selected = filterStatus == null,
-                onClick = { filterStatus = null },
-                label = { Text("All (${orders.size})") }
+            OutlinedTextField(
+                value = customerSearchQuery,
+                onValueChange = {
+                    customerSearchQuery = it
+                    searchDropdownExpanded = true
+                },
+                label = {
+                    Text(
+                        filterStatus?.let { "Filter: ${it.label}" }
+                            ?: "Search & Filter Customer Receipts Dropdown"
+                    )
+                },
+                placeholder = { Text("Type customer name, Order ID, product or pick filter...", fontSize = 12.sp) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                trailingIcon = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (customerSearchQuery.isNotBlank() || filterStatus != null) {
+                            IconButton(onClick = {
+                                customerSearchQuery = ""
+                                filterStatus = null
+                            }) {
+                                Icon(Icons.Default.Close, contentDescription = "Clear")
+                            }
+                        }
+                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = searchDropdownExpanded)
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .menuAnchor()
+                    .fillMaxWidth()
+                    .testTag("admin_customer_folder_search_input")
             )
-            OrderStatus.values().forEach { st ->
-                FilterChip(
-                    selected = filterStatus == st,
-                    onClick = { filterStatus = st },
-                    label = { Text(st.name.replace("_", " ")) }
+
+            ExposedDropdownMenu(
+                expanded = searchDropdownExpanded,
+                onDismissRequest = { searchDropdownExpanded = false }
+            ) {
+                DropdownMenuItem(
+                    text = { Text("All Customer Folders & Receipts (${orders.size})", fontWeight = FontWeight.Bold) },
+                    onClick = {
+                        filterStatus = null
+                        customerSearchQuery = ""
+                        searchDropdownExpanded = false
+                    }
                 )
+                OrderStatus.values().forEach { st ->
+                    val count = orders.count { it.status == st }
+                    DropdownMenuItem(
+                        text = { Text("Status: ${st.label} ($count)") },
+                        onClick = {
+                            filterStatus = st
+                            searchDropdownExpanded = false
+                        }
+                    )
+                }
+                allCustomerFolders.filter { folder ->
+                    val q = customerSearchQuery.trim()
+                    q.isBlank() ||
+                        folder.customerName.contains(q, ignoreCase = true) ||
+                        folder.customerPhone.contains(q, ignoreCase = true) ||
+                        folder.orders.any { it.orderId.contains(q, ignoreCase = true) }
+                }.take(8).forEach { folder ->
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                "${folder.customerName} (${folder.orders.size} order(s) • ${nairaFormat.format(folder.totalAmount)})",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                fontSize = 12.sp
+                            )
+                        },
+                        onClick = {
+                            customerSearchQuery = folder.customerName
+                            filterStatus = null
+                            searchDropdownExpanded = false
+                        }
+                    )
+                }
             }
         }
 
@@ -6691,6 +7024,30 @@ private fun PaymentReceiptsTab(
                                                 fontSize = 10.sp,
                                                 color = CyberCyan
                                             )
+                                            if (isExpandedReceiptView) {
+                                                val parsed = OrderSlipFormatter.parseOrderSlipDetails(ord)
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Text(
+                                                    text = "Address: ${parsed.cleanDeliveryAddress}",
+                                                    fontSize = 10.5.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                                if (parsed.deliveryConditionAndFee.isNotBlank()) {
+                                                    Text(
+                                                        text = "Shipping: ${parsed.deliveryConditionAndFee}",
+                                                        fontSize = 10.5.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                }
+                                                parsed.items.forEach { li ->
+                                                    Text(
+                                                        text = "• ${li.titleAndSpecs} ${if (li.lineTotalText.isNotBlank()) "(${li.lineTotalText})" else ""}",
+                                                        fontSize = 10.5.sp,
+                                                        color = MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                }
+                                            }
                                         }
                                         Text(
                                             text = nairaFormat.format(ord.totalAmount),
@@ -8888,6 +9245,7 @@ private fun AnalyticsRow(label: String, value: String) {
 private fun DeliveryOptionsTab(viewModel: MainViewModel) {
     val context = LocalContext.current
     val deliveryOptions by viewModel.deliveryOptions.collectAsState()
+    val flatShippingConfig by viewModel.flatShippingFeeConfig.collectAsState()
     val nairaFormat = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "NG")).apply {
             maximumFractionDigits = 0
@@ -8898,6 +9256,121 @@ private fun DeliveryOptionsTab(viewModel: MainViewModel) {
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        item {
+            var flatAmountInput by remember(flatShippingConfig.amount) {
+                mutableStateOf(flatShippingConfig.amount.toInt().toString())
+            }
+            var flatActiveInput by remember(flatShippingConfig.isActive) {
+                mutableStateOf(flatShippingConfig.isActive)
+            }
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (flatShippingConfig.isActive) SuccessGreen.copy(alpha = 0.12f)
+                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                ),
+                border = BorderStroke(1.5.dp, if (flatShippingConfig.isActive) SuccessGreen else AccentGold),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("admin_flat_shipping_card")
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "FLAT SHIPPING FEE",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Black,
+                                color = if (flatShippingConfig.isActive) SuccessGreen else AccentGold
+                            )
+                            Text(
+                                text = "Edit flat shipping rate anytime & activate to override delivery condition & distance fees at Cart & Checkout.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (flatShippingConfig.isActive) SuccessGreen.copy(alpha = 0.2f) else AccentGold.copy(alpha = 0.2f)
+                        ) {
+                            Text(
+                                text = if (flatShippingConfig.isActive) "ACTIVE" else "INACTIVE",
+                                color = if (flatShippingConfig.isActive) SuccessGreen else AccentGold,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 10.sp,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = flatAmountInput,
+                        onValueChange = { flatAmountInput = it.filter { ch -> ch.isDigit() || ch == '.' } },
+                        label = { Text("Flat Shipping Fee Amount (₦)") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("admin_flat_shipping_amount_input")
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (flatActiveInput) "Flat Shipping Fee Activated" else "Activate Flat Shipping Fee",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
+                        Switch(
+                            checked = flatActiveInput,
+                            onCheckedChange = { checked ->
+                                flatActiveInput = checked
+                                val amt = flatAmountInput.toDoubleOrNull() ?: flatShippingConfig.amount
+                                viewModel.updateFlatShippingFee(amt, checked)
+                                Toast.makeText(
+                                    context,
+                                    if (checked) "Flat Shipping Fee (${nairaFormat.format(amt)}) Activated!"
+                                    else "Flat Shipping Fee Deactivated",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            modifier = Modifier.testTag("admin_flat_shipping_active_switch")
+                        )
+                    }
+
+                    Button(
+                        onClick = {
+                            val amt = flatAmountInput.toDoubleOrNull() ?: 0.0
+                            viewModel.updateFlatShippingFee(amt, flatActiveInput)
+                            Toast.makeText(
+                                context,
+                                "Flat Shipping Fee saved: ${nairaFormat.format(amt)} (${if (flatActiveInput) "Active" else "Inactive"})",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (flatActiveInput) SuccessGreen else MaterialTheme.colorScheme.primary
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(46.dp)
+                            .testTag("admin_flat_shipping_save_button")
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Save & Apply Flat Shipping Fee", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
         item {
             Text(
                 text = "Manage Delivery Conditions & Fees",

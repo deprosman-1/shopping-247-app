@@ -8,7 +8,13 @@ import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import com.example.FlatShippingFeeConfig
+import com.example.util.OrderSlipFormatter
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -198,6 +204,7 @@ fun CheckoutScreen(
     val selectedDeliveryZone by viewModel.selectedDeliveryZone.collectAsState()
     val savedAddresses by viewModel.savedAddresses.collectAsState()
     val loyaltyAccount by viewModel.loyaltyAccount.collectAsState()
+    val flatShippingConfig by viewModel.flatShippingFeeConfig.collectAsState()
     val isWideDualAxisMode by viewModel.isWideDualAxisMode.collectAsState()
     var selectedDeliveryOption by remember { mutableStateOf<com.example.data.model.DeliveryOption?>(null) }
 
@@ -209,7 +216,7 @@ fun CheckoutScreen(
 
     val baseOptionFee = selectedDeliveryOption?.price ?: 0.0
     val zoneFee = selectedDeliveryZone.fee
-    val deliveryFee = baseOptionFee + zoneFee
+    val deliveryFee = if (flatShippingConfig.isActive) flatShippingConfig.amount else (baseOptionFee + zoneFee)
     val total = subtotal + deliveryFee
 
     var hasManuallyEditedDelivery by rememberSaveable { mutableStateOf(false) }
@@ -234,6 +241,7 @@ fun CheckoutScreen(
     var paymentReference by rememberSaveable { mutableStateOf("REF-${System.currentTimeMillis().toString().takeLast(6)}") }
     var receiptImageUri by remember { mutableStateOf<Uri?>(null) }
     val pendingSharedReceipt by viewModel.pendingSharedReceipt.collectAsState()
+    val topPaystackUiState by viewModel.paystackCheckoutState.collectAsState()
     var lastAppliedSharedTimestamp by rememberSaveable { mutableStateOf(0L) }
 
     var currentStepName by rememberSaveable { mutableStateOf(CheckoutStep.SELECT_DELIVERY_CONDITION.name) }
@@ -318,12 +326,29 @@ fun CheckoutScreen(
         placedOrderId?.let { id -> allOrders.find { it.orderId == id } } ?: placedOrderSnapshot
     }
 
+    val checkoutCoroutineScope = rememberCoroutineScope()
+
     val photoPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         if (uri != null) {
             receiptImageUri = uri
             Toast.makeText(context, "Payment Receipt Selected!", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val documentReceiptLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            receiptImageUri = uri
+            Toast.makeText(context, "Bank Payment Receipt Attached!", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -442,7 +467,8 @@ fun CheckoutScreen(
                             nairaFormat = nairaFormat,
                             autoFullName = fullName,
                             autoPhone = phone,
-                            autoAddress = address
+                            autoAddress = address,
+                            flatShippingConfig = flatShippingConfig
                         )
                     }
 
@@ -452,6 +478,7 @@ fun CheckoutScreen(
                             subtotal = subtotal,
                             selectedDeliveryOption = selectedDeliveryOption,
                             deliveryFee = deliveryFee,
+                            flatShippingConfig = flatShippingConfig,
                             total = total,
                             fullName = fullName,
                             onFullNameChange = {
@@ -481,7 +508,14 @@ fun CheckoutScreen(
                             paymentReference = paymentReference,
                             onPaymentReferenceChange = { paymentReference = it },
                             receiptImageUri = receiptImageUri,
-                            onChooseReceipt = { photoPickerLauncher.launch("image/*") },
+                            onChooseReceipt = {
+                                photoPickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            },
+                            onChooseDocumentReceipt = {
+                                documentReceiptLauncher.launch(arrayOf("image/*", "application/pdf"))
+                            },
                             currentCustomer = currentCustomer,
                             hasSavedDelivery = (currentCustomer != null) || savedDeliveryInfo.fullName.isNotBlank() || savedDeliveryInfo.phoneNumber.isNotBlank() || savedDeliveryInfo.deliveryAddress.isNotBlank(),
                             nairaFormat = nairaFormat,
@@ -497,6 +531,24 @@ fun CheckoutScreen(
                                     return@UploadPaymentReceiptOrderConfirmationAndTotalStep
                                 }
                                 if (cartItems.isEmpty() && liveOrder == null) {
+                                    val activePaystackOrderId = topPaystackUiState.orderId
+                                    if (selectedPaymentMethod == PaymentMethod.PAYSTACK && activePaystackOrderId.isNotBlank()) {
+                                        isPlacingOrder = true
+                                        viewModel.attachReceiptToPaystackOrder(
+                                            orderId = activePaystackOrderId,
+                                            receiptImageUrl = receiptImageUri.toString(),
+                                            senderName = senderName.ifBlank { fullName },
+                                            paymentReference = paymentReference.ifBlank { topPaystackUiState.reference }
+                                        ) { ok, msg ->
+                                            isPlacingOrder = false
+                                            if (ok) {
+                                                placedOrderId = activePaystackOrderId
+                                                currentStepName = CheckoutStep.PAYMENT_CONFIRMED_STATUS.name
+                                            }
+                                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                        }
+                                        return@UploadPaymentReceiptOrderConfirmationAndTotalStep
+                                    }
                                     Toast.makeText(context, "Your cart is empty", Toast.LENGTH_SHORT).show()
                                     return@UploadPaymentReceiptOrderConfirmationAndTotalStep
                                 }
@@ -658,20 +710,25 @@ fun CheckoutScreen(
                                     PaymentMethod.PALMPAY -> storeProfile.palmpayAccountName.ifBlank { storeProfile.storeName }
                                     else -> storeProfile.storeName
                                 }
-                                val launchResult = MerchantAppLauncher.launchInstalledMerchantApp(
-                                    context = context,
-                                    method = portalMethod,
-                                    accountNumber = acctNum,
-                                    accountName = acctName,
-                                    storeName = storeProfile.storeName,
-                                    payableAmount = payableNow
-                                )
-                                if (launchResult.launchedInstalledApp) {
-                                    Toast.makeText(
-                                        context,
-                                        "Redirecting into your installed ${portalMethod.title} app! ODIYA Account ($acctNum) & ${nairaFormat.format(payableNow)} embedded.",
-                                        Toast.LENGTH_LONG
-                                    ).show()
+                                val plainAmt = String.format(Locale.US, "%.2f", payableNow)
+                                MerchantAppLauncher.copyAmountToClipboard(context, plainAmt)
+                                checkoutCoroutineScope.launch {
+                                    delay(180)
+                                    val launchResult = MerchantAppLauncher.launchInstalledMerchantApp(
+                                        context = context,
+                                        method = portalMethod,
+                                        accountNumber = acctNum,
+                                        accountName = acctName,
+                                        storeName = storeProfile.storeName,
+                                        payableAmount = payableNow
+                                    )
+                                    if (launchResult.launchedInstalledApp) {
+                                        Toast.makeText(
+                                            context,
+                                            "Opening ${portalMethod.title} — both Account ($acctNum) & Amount (${nairaFormat.format(payableNow)}) saved in clipboard!",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
                                 }
                             },
                             viewModel = viewModel
@@ -755,8 +812,20 @@ fun CheckoutScreen(
             customerName = fullName,
             customerPhone = phone,
             customerAddress = address,
+            receiptImageUri = receiptImageUri,
+            onChooseReceipt = {
+                photoPickerLauncher.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                )
+            },
+            onChooseDocumentReceipt = {
+                documentReceiptLauncher.launch(arrayOf("image/*", "application/pdf"))
+            },
             isProcessing = isPlacingOrder,
-            onDismiss = { activeDirectPortalMethod = null },
+            onDismiss = {
+                com.example.util.MerchantPaymentOverlayManager.clearOverlay(context)
+                activeDirectPortalMethod = null
+            },
             onPayNow = { simulateCredited, simulateNetDelay ->
                 if (fullName.isBlank() || phone.isBlank() || address.isBlank()) {
                     Toast.makeText(context, "Please fill Customer Delivery Information below first!", Toast.LENGTH_LONG).show()
@@ -789,6 +858,7 @@ fun CheckoutScreen(
                     specialLoyaltyPriorOrderIds = specialLoyaltyPriorOrderIds,
                     onSuccess = { order ->
                         isPlacingOrder = false
+                        com.example.util.MerchantPaymentOverlayManager.clearOverlay(context)
                         activeDirectPortalMethod = null
                         placedOrderSnapshot = order
                         placedOrderId = order.orderId
@@ -831,7 +901,8 @@ private fun SelectDeliveryConditionStep(
     nairaFormat: NumberFormat,
     autoFullName: String = "",
     autoPhone: String = "",
-    autoAddress: String = ""
+    autoAddress: String = "",
+    flatShippingConfig: FlatShippingFeeConfig = FlatShippingFeeConfig()
 ) {
     Column(
         modifier = Modifier.fillMaxWidth()
@@ -1030,9 +1101,53 @@ private fun SelectDeliveryConditionStep(
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        val combinedDeliveryFee = (selectedOption?.price ?: 0.0) + selectedZone.fee
+        if (flatShippingConfig.isActive) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = SuccessGreen.copy(alpha = 0.12f),
+                border = BorderStroke(1.5.dp, SuccessGreen),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp)
+                    .testTag("checkout_flat_shipping_active_banner")
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "FLAT SHIPPING FEE ACTIVE",
+                            fontWeight = FontWeight.Black,
+                            fontSize = 12.sp,
+                            color = SuccessGreen
+                        )
+                        Text(
+                            text = "Admin has activated a unified flat shipping rate across your order.",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text(
+                        text = if (flatShippingConfig.amount == 0.0) "FREE" else nairaFormat.format(flatShippingConfig.amount),
+                        fontWeight = FontWeight.Black,
+                        fontSize = 16.sp,
+                        color = SuccessGreen
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        val combinedDeliveryFee = if (flatShippingConfig.isActive) {
+            flatShippingConfig.amount
+        } else {
+            (selectedOption?.price ?: 0.0) + selectedZone.fee
+        }
         Button(
             onClick = onContinue,
             shape = RoundedCornerShape(14.dp),
@@ -1913,12 +2028,63 @@ private fun PaymentConfirmedStatusStep(
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    val cleanSummary = order?.itemsSummary?.replace(Regex("""\s*\[Sold:[^\]]+\]"""), "")?.trim()
-                    Text(
-                        text = cleanSummary.takeIf { !it.isNullOrBlank() } ?: "Registered in order archive.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    val parsedSlip = remember(order) { order?.let { OrderSlipFormatter.parseOrderSlipDetails(it) } }
+                    if (parsedSlip != null && parsedSlip.items.isNotEmpty()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            parsedSlip.items.forEachIndexed { idx, line ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    Text(
+                                        text = "${idx + 1}. ${line.titleAndSpecs}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    if (line.lineTotalText.isNotBlank() || line.unitPriceText.isNotBlank()) {
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Column(horizontalAlignment = Alignment.End) {
+                                            if (line.lineTotalText.isNotBlank()) {
+                                                Text(
+                                                    text = line.lineTotalText,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    fontWeight = FontWeight.Black,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                            }
+                                            if (line.unitPriceText.isNotBlank()) {
+                                                Text(
+                                                    text = "@ ${line.unitPriceText}",
+                                                    fontSize = 10.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                if (idx < parsedSlip.items.size - 1) {
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+                                }
+                            }
+                            if (parsedSlip.deliveryConditionAndFee.isNotBlank()) {
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                                Text(
+                                    text = "Shipping / Delivery: ${parsedSlip.deliveryConditionAndFee}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = CyberCyan
+                                )
+                            }
+                        }
+                    } else {
+                        Text(
+                            text = "Registered in order archive.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
 
@@ -2261,9 +2427,15 @@ private fun BankTransferDetailsBox(
     bankName: String,
     accountNumber: String,
     accountName: String,
-    brandColor: Color
+    brandColor: Color,
+    payableAmount: Double? = null
 ) {
     val context = LocalContext.current
+    val nairaFormat = remember {
+        NumberFormat.getCurrencyInstance(Locale("en", "NG")).apply {
+            maximumFractionDigits = 2
+        }
+    }
     Surface(
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surface,
@@ -2306,12 +2478,52 @@ private fun BankTransferDetailsBox(
 
                 IconButton(
                     onClick = {
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        clipboard.setPrimaryClip(ClipData.newPlainText("Account Number", accountNumber.replace(" ", "")))
-                        Toast.makeText(context, "Copied Account Number!", Toast.LENGTH_SHORT).show()
+                        MerchantAppLauncher.copyAccountToClipboard(
+                            context = context,
+                            accountNumber = accountNumber,
+                            plainAmount = payableAmount?.let { String.format(Locale.US, "%.2f", it) }.orEmpty()
+                        )
+                        Toast.makeText(context, "Copied Account & Payable Amount to clipboard!", Toast.LENGTH_SHORT).show()
                     }
                 ) {
                     Icon(Icons.Default.ContentCopy, contentDescription = "Copy Account Number", tint = brandColor)
+                }
+            }
+
+            if (payableAmount != null) {
+                Spacer(modifier = Modifier.height(6.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("Payable Amount (In Figures)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            text = nairaFormat.format(payableAmount),
+                            fontWeight = FontWeight.Black,
+                            fontSize = 16.sp,
+                            color = brandColor
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            val amtPlain = String.format(Locale.US, "%.2f", payableAmount)
+                            MerchantAppLauncher.copyAmountToClipboard(context, amtPlain)
+                            Toast.makeText(context, "Copied Amount in figures: $amtPlain", Toast.LENGTH_SHORT).show()
+                        },
+                        border = BorderStroke(1.dp, brandColor),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier
+                            .height(36.dp)
+                            .testTag("bank_box_copy_amount_button")
+                    ) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = null, tint = brandColor, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Copy Amt", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = brandColor)
+                    }
                 }
             }
 
@@ -2352,6 +2564,7 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
     subtotal: Double,
     selectedDeliveryOption: com.example.data.model.DeliveryOption?,
     deliveryFee: Double,
+    flatShippingConfig: FlatShippingFeeConfig = FlatShippingFeeConfig(),
     total: Double,
     fullName: String,
     onFullNameChange: (String) -> Unit,
@@ -2367,6 +2580,7 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
     onPaymentReferenceChange: (String) -> Unit,
     receiptImageUri: Uri?,
     onChooseReceipt: () -> Unit,
+    onChooseDocumentReceipt: () -> Unit = onChooseReceipt,
     currentCustomer: com.example.data.model.Customer?,
     hasSavedDelivery: Boolean,
     nairaFormat: NumberFormat,
@@ -2404,6 +2618,16 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
 ) {
     val effectivePayableTotal = (total - couponDiscountAmount - loyaltyDiscountAmount).coerceAtLeast(0.0)
     val pointsOnlyDiscountAmount = (loyaltyDiscountAmount - specialLoyaltyDiscountAmount).coerceAtLeast(0.0)
+    val stageCtx = LocalContext.current
+    val stageAmountNow = appliedBargainPrice ?: effectivePayableTotal
+    LaunchedEffect(stageAmountNow) {
+        if (stageAmountNow > 0.0) {
+            MerchantAppLauncher.copyAmountToClipboard(
+                stageCtx,
+                String.format(Locale.US, "%.2f", stageAmountNow)
+            )
+        }
+    }
     Column(
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -2466,12 +2690,20 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Delivery & Zone ETA:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(
-                            text = buildString {
-                                append(selectedDeliveryOption?.title ?: "Standard Delivery")
-                                if (selectedDeliveryZone != null) {
-                                    append(" • ${selectedDeliveryZone.zoneName} (${selectedDeliveryZone.etaLabel})")
+                            text = if (flatShippingConfig.isActive) "Flat Shipping Fee (Active):" else "Delivery & Zone ETA:",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = if (flatShippingConfig.isActive) {
+                                "Flat Rate • ${selectedDeliveryZone?.zoneName ?: "Standard"} (${selectedDeliveryZone?.etaLabel ?: "Fast Dispatch"})"
+                            } else {
+                                buildString {
+                                    append(selectedDeliveryOption?.title ?: "Standard Delivery")
+                                    if (selectedDeliveryZone != null) {
+                                        append(" • ${selectedDeliveryZone.zoneName} (${selectedDeliveryZone.etaLabel})")
+                                    }
                                 }
                             },
                             fontWeight = FontWeight.SemiBold,
@@ -3149,6 +3381,25 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
             )
         }
         val paystackContext = LocalContext.current
+        var lastSyncedPaystackReceiptKey by remember { mutableStateOf("") }
+        LaunchedEffect(receiptImageUri, paystackUiState.orderId, selectedPaymentMethod) {
+            val activeOrderId = paystackUiState.orderId
+            val currentUriStr = receiptImageUri?.toString().orEmpty()
+            val syncKey = "$activeOrderId|$currentUriStr"
+            if (selectedPaymentMethod == PaymentMethod.PAYSTACK &&
+                activeOrderId.isNotBlank() &&
+                currentUriStr.isNotBlank() &&
+                syncKey != lastSyncedPaystackReceiptKey
+            ) {
+                lastSyncedPaystackReceiptKey = syncKey
+                viewModel.attachReceiptToPaystackOrder(
+                    orderId = activeOrderId,
+                    receiptImageUrl = currentUriStr,
+                    senderName = senderName.ifBlank { fullName },
+                    paymentReference = paystackUiState.reference
+                )
+            }
+        }
 
         PaymentOptionCard(
             title = if (paystackSplitPlan.hasActiveSubaccountSplit) {
@@ -3165,7 +3416,7 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "Pay with Bank Transfer, USSD, OPay, Mastercard, Verve or Visa. Verified automatically via Paystack with encrypted security.",
+                    text = "Pay with Card, Bank Transfer, USSD, or OPay on Paystack. Tap Verify Payment for instant auto-confirmation — or attach your Paystack receipt image/PDF below or in Section 3 to submit order & receipt together.",
                     fontSize = 11.5.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -3239,6 +3490,7 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                             loyaltyDiscountAmount = loyaltyDiscountAmount,
                             specialLoyaltyOfferClaimed = specialLoyaltyDiscountAmount > 0.0,
                             specialLoyaltyPriorOrderIds = specialLoyaltyPriorOrderIds,
+                            receiptImageUrl = receiptImageUri?.toString().orEmpty(),
                             onReadyToOpenUrl = { authUrl, _, ref ->
                                 Toast.makeText(paystackContext, "Opening Paystack Checkout ($ref)...", Toast.LENGTH_LONG).show()
                                 com.example.util.WebPortalExporter.openExternalUrl(paystackContext, authUrl)
@@ -3322,6 +3574,61 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                                     }
                                 }
                             }
+                            HorizontalDivider(color = PaystackTeal.copy(alpha = 0.25f))
+                            Text(
+                                text = "Downloaded or screenshotted a Paystack receipt? Attach it directly to this order:",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                OutlinedButton(
+                                    onClick = {
+                                        onSelectPaymentMethod(PaymentMethod.PAYSTACK)
+                                        onChooseReceipt()
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(44.dp)
+                                        .testTag("paystack_attach_receipt_button")
+                                ) {
+                                    Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Attach Receipt", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        onSelectPaymentMethod(PaymentMethod.PAYSTACK)
+                                        onChooseDocumentReceipt()
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(44.dp)
+                                        .testTag("paystack_attach_pdf_button")
+                                ) {
+                                    Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Attach PDF", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            if (receiptImageUri != null) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = if (paystackUiState.orderId.isNotBlank()) {
+                                            "Paystack Receipt Attached to Order ${paystackUiState.orderId}"
+                                        } else {
+                                            "Paystack Receipt Selected — Ready to Submit!"
+                                        },
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = SuccessGreen
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -3348,7 +3655,8 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                 bankName = "OPay (Paycom)",
                 accountNumber = effectiveOpayNum,
                 accountName = effectiveOpayName,
-                brandColor = OPayGreen
+                brandColor = OPayGreen,
+                payableAmount = appliedBargainPrice ?: effectivePayableTotal
             )
             Spacer(modifier = Modifier.height(8.dp))
             Button(
@@ -3363,7 +3671,7 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                 Icon(Icons.Default.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Pay with OPay App (${nairaFormat.format(effectivePayableTotal)})",
+                    text = "Pay with OPay App (${nairaFormat.format(appliedBargainPrice ?: effectivePayableTotal)})",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Black
                 )
@@ -3390,7 +3698,8 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                 bankName = "Moniepoint Microfinance Bank",
                 accountNumber = effectiveMonieNum,
                 accountName = effectiveMonieName,
-                brandColor = MoniepointBlue
+                brandColor = MoniepointBlue,
+                payableAmount = appliedBargainPrice ?: effectivePayableTotal
             )
             Spacer(modifier = Modifier.height(8.dp))
             Button(
@@ -3405,7 +3714,7 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                 Icon(Icons.Default.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Pay with Moniepoint App (${nairaFormat.format(effectivePayableTotal)})",
+                    text = "Pay with Moniepoint App (${nairaFormat.format(appliedBargainPrice ?: effectivePayableTotal)})",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Black
                 )
@@ -3429,7 +3738,8 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                 bankName = "PalmPay Digital Bank",
                 accountNumber = effectivePalmpayNum,
                 accountName = effectivePalmpayName,
-                brandColor = PalmPayPurple
+                brandColor = PalmPayPurple,
+                payableAmount = appliedBargainPrice ?: effectivePayableTotal
             )
             Spacer(modifier = Modifier.height(8.dp))
             Button(
@@ -3444,7 +3754,7 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                 Icon(Icons.Default.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Pay with PalmPay App (${nairaFormat.format(effectivePayableTotal)})",
+                    text = "Pay with PalmPay App (${nairaFormat.format(appliedBargainPrice ?: effectivePayableTotal)})",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Black
                 )
@@ -3478,12 +3788,12 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
 
         // 3. UPLOAD PAYMENT RECEIPT SLIP / SCREENSHOT
         Text(
-            text = "3. Upload Payment Receipt",
+            text = "3. Upload Payment Receipt (OPay / Moniepoint / PalmPay)",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold
         )
         Text(
-            text = "Attach photo of payment slip or enter transfer reference",
+            text = "Attach your merchant bank payment receipt screenshot or PDF slip, then tap Submit Order and Payment Receipt below",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -3495,7 +3805,9 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
             shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
             border = BorderStroke(1.5.dp, if (receiptImageUri != null) SuccessGreen else MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("checkout_upload_receipt_box")
         ) {
             Column(
                 modifier = Modifier.padding(16.dp),
@@ -3538,9 +3850,9 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = if (activeSharedReceipt?.receiptUri == receiptImageUri?.toString()) {
-                                "Direct OPay / Moniepoint Receipt Attached!"
+                                "Merchant Bank Receipt Attached — Ready to Submit!"
                             } else {
-                                "Payment Receipt Attached & Visible"
+                                "Payment Receipt Uploaded & Ready to Submit Together"
                             },
                             fontWeight = FontWeight.Bold,
                             color = SuccessGreen,
@@ -3549,10 +3861,30 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedButton(onClick = onChooseReceipt, shape = RoundedCornerShape(10.dp)) {
-                        Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Change Receipt Photo")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onChooseReceipt,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text("Change Image", fontSize = 11.5.sp)
+                        }
+                        OutlinedButton(
+                            onClick = onChooseDocumentReceipt,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("upload_receipt_pdf_button")
+                        ) {
+                            Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text("Attach PDF/File", fontSize = 11.5.sp)
+                        }
                     }
                 } else {
                     Surface(
@@ -3567,7 +3899,7 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                     Spacer(modifier = Modifier.height(10.dp))
                     Text("No receipt selected yet", fontWeight = FontWeight.Bold)
                     Text(
-                        text = "Tip: Tap Share / Send directly on your OPay or Moniepoint invoice → select ODIYA (no need to save to folder!), or pick a photo below.",
+                        text = "In OPay, Moniepoint, PalmPay, or Paystack: tap Share -> select ODIYA, or select your bank/Paystack receipt image or PDF slip below.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
@@ -3576,11 +3908,27 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                     Button(
                         onClick = onChooseReceipt,
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.testTag("upload_receipt_picker_button")
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("upload_receipt_picker_button")
                     ) {
                         Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Select Payment Receipt Image")
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onChooseDocumentReceipt,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .testTag("upload_receipt_pdf_button")
+                    ) {
+                        Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(17.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Upload Bank PDF / Receipt File", fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -3784,7 +4132,7 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // 6. ACTION BUTTON: SEND ORDERS AND PAYMENT RECEIPT
+        // 6. ACTION BUTTON: SUBMIT ORDER AND PAYMENT RECEIPT TOGETHER
         Button(
             onClick = {
                 if (!isPlacingOrder) {
@@ -3808,14 +4156,16 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                     strokeWidth = 2.dp
                 )
                 Spacer(modifier = Modifier.width(10.dp))
-                Text(text = "SENDING ORDER...", fontWeight = FontWeight.Black)
+                Text(text = "SUBMITTING ORDER & RECEIPT...", fontWeight = FontWeight.Black)
             } else {
                 Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(20.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Send Orders & Payment Receipt (${nairaFormat.format(appliedBargainPrice ?: effectivePayableTotal)})",
+                    text = "Submit Order and Payment Receipt (${nairaFormat.format(appliedBargainPrice ?: effectivePayableTotal)})",
                     fontWeight = FontWeight.ExtraBold,
-                    fontSize = 15.sp
+                    fontSize = 14.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
@@ -3835,11 +4185,15 @@ private fun DirectPortalCheckoutDialog(
     customerName: String,
     customerPhone: String,
     customerAddress: String,
+    receiptImageUri: Uri? = null,
+    onChooseReceipt: () -> Unit = {},
+    onChooseDocumentReceipt: () -> Unit = {},
     isProcessing: Boolean,
     onDismiss: () -> Unit,
     onPayNow: (simulateCredited: Boolean, simulateNetworkDelay: Boolean) -> Unit
 ) {
     val context = LocalContext.current
+    val portalCoroutineScope = rememberCoroutineScope()
     val portalColor = when (paymentMethod) {
         PaymentMethod.PAYSTACK -> PaystackTeal
         PaymentMethod.OPAY -> OPayGreen
@@ -3897,7 +4251,7 @@ private fun DirectPortalCheckoutDialog(
                             color = portalColor
                         )
                         Text(
-                            text = "Embedded ODIYA account & exact amount ready",
+                            text = "Account & exact amount in figures copied for instant paste",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -3906,7 +4260,7 @@ private fun DirectPortalCheckoutDialog(
                         onClick = onDismiss,
                         modifier = Modifier.testTag("direct_portal_return_to_app_button")
                     ) {
-                        Text("Return to Checkout", fontWeight = FontWeight.Black, fontSize = 11.sp)
+                        Text("Return to Complete Payment", fontWeight = FontWeight.Black, fontSize = 11.sp)
                     }
                     IconButton(onClick = onDismiss) {
                         Icon(Icons.Default.Close, contentDescription = "Close Portal")
@@ -3931,29 +4285,34 @@ private fun DirectPortalCheckoutDialog(
                                 color = SuccessGreen
                             )
                             Text(
-                                text = "ODIYA Account ($accountNumber) and Payable Amount (${nairaFormat.format(payableAmount)}) are copied and embedded for quick debit inside your ${paymentMethod.title} app. After paying, tap Make Payment below to forward your Word/PDF receipt.",
+                                text = "Both ODIYA Account ($accountNumber) and Payable Amount (${nairaFormat.format(payableAmount)}) are copied as separate clipboard tiles when ${paymentMethod.title} opens. After paying, upload your bank receipt below and tap Return to Complete Payment.",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Button(
                                 onClick = {
-                                    val res = MerchantAppLauncher.launchInstalledMerchantApp(
-                                        context = context,
-                                        method = paymentMethod,
-                                        accountNumber = accountNumber,
-                                        accountName = accountName,
-                                        storeName = storeName,
-                                        payableAmount = payableAmount
-                                    )
-                                    Toast.makeText(
-                                        context,
-                                        if (res.launchedInstalledApp) {
-                                            "Opening your ${paymentMethod.title} app with ODIYA account copied!"
-                                        } else {
-                                            "ODIYA account copied! Open your ${paymentMethod.title} app or complete below."
-                                        },
-                                        Toast.LENGTH_LONG
-                                    ).show()
+                                    val plainAmt = String.format(Locale.US, "%.2f", payableAmount)
+                                    MerchantAppLauncher.copyAmountToClipboard(context, plainAmt)
+                                    portalCoroutineScope.launch {
+                                        delay(180)
+                                        val res = MerchantAppLauncher.launchInstalledMerchantApp(
+                                            context = context,
+                                            method = paymentMethod,
+                                            accountNumber = accountNumber,
+                                            accountName = accountName,
+                                            storeName = storeName,
+                                            payableAmount = payableAmount
+                                        )
+                                        Toast.makeText(
+                                            context,
+                                            if (res.launchedInstalledApp) {
+                                                "Opening ${paymentMethod.title} with Account ($accountNumber) & Amount ($plainAmt) ready in clipboard!"
+                                            } else {
+                                                "ODIYA account & amount copied! Open ${paymentMethod.title} or complete below."
+                                            },
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = portalColor, contentColor = Color.White),
                                 shape = RoundedCornerShape(10.dp),
@@ -3974,7 +4333,7 @@ private fun DirectPortalCheckoutDialog(
                                 color = AccentGold
                             )
                             Text(
-                                text = "Only download from Google Play if you do not already have a ${paymentMethod.title} account or app on your phone. You can also pay right below with ODIYA's embedded details.",
+                                text = "Only download from Google Play if you do not already have a ${paymentMethod.title} account or app on your phone. You can also pay with another device using ODIYA's details below.",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -4000,51 +4359,6 @@ private fun DirectPortalCheckoutDialog(
                     }
                 }
 
-                // Clickable ODIYA Official Recipient Target Logo
-                Surface(
-                    onClick = { targetLogoSelected = !targetLogoSelected },
-                    shape = RoundedCornerShape(14.dp),
-                    color = if (targetLogoSelected) portalColor.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant,
-                    border = BorderStroke(1.5.dp, if (targetLogoSelected) portalColor else MaterialTheme.colorScheme.outline),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("direct_portal_target_logo")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                            Image(
-                                painter = painterResource(id = R.drawable.shopping_logo_icon_1794752250458),
-                                contentDescription = "ODIYA Target Recipient Logo",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text(storeName, fontWeight = FontWeight.Black, fontSize = 13.sp)
-                                Text("Embedded ODIYA Recipient Logo", fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (targetLogoSelected) portalColor else MaterialTheme.colorScheme.outline
-                        ) {
-                            Text(
-                                text = if (targetLogoSelected) "TARGET ✓" else "TAP TO SELECT",
-                                color = Color.White,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Black,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
-                }
-
                 // Embedded ODIYA Account Number & Exact Payable Amount in Figures
                 Surface(
                     shape = RoundedCornerShape(14.dp),
@@ -4053,7 +4367,28 @@ private fun DirectPortalCheckoutDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("EMBEDDED ODIYA ACCOUNT DETAILS", fontSize = 10.sp, fontWeight = FontWeight.Black, color = portalColor)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("EMBEDDED ODIYA ACCOUNT DETAILS", fontSize = 10.sp, fontWeight = FontWeight.Black, color = portalColor)
+                            OutlinedButton(
+                                onClick = {
+                                    val amtPlain = String.format(Locale.US, "%.2f", payableAmount)
+                                    MerchantAppLauncher.copyAccountToClipboard(context, accountNumber, amtPlain)
+                                    Toast.makeText(context, "Copied Amount ($amtPlain) & Account ($accountNumber)!", Toast.LENGTH_SHORT).show()
+                                },
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier
+                                    .height(30.dp)
+                                    .testTag("direct_portal_copy_both_button")
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(12.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Copy Both", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -4070,8 +4405,7 @@ private fun DirectPortalCheckoutDialog(
                             }
                             IconButton(
                                 onClick = {
-                                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    cm.setPrimaryClip(ClipData.newPlainText("ODIYA Account", accountNumber))
+                                    MerchantAppLauncher.copyAccountToClipboard(context, accountNumber)
                                     Toast.makeText(context, "Account copied: $accountNumber", Toast.LENGTH_SHORT).show()
                                 }
                             ) {
@@ -4093,15 +4427,74 @@ private fun DirectPortalCheckoutDialog(
                             )
                             OutlinedButton(
                                 onClick = {
-                                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                     val amtPlain = String.format(Locale.US, "%.2f", payableAmount)
-                                    cm.setPrimaryClip(ClipData.newPlainText("Payable Amount", amtPlain))
-                                    Toast.makeText(context, "Amount copied: $amtPlain", Toast.LENGTH_SHORT).show()
-                                }
+                                    MerchantAppLauncher.copyAmountToClipboard(context, amtPlain)
+                                    Toast.makeText(context, "Amount copied in figures: $amtPlain", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.testTag("direct_portal_copy_amount_button")
                             ) {
                                 Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
                                 Spacer(Modifier.width(4.dp))
                                 Text("Copy Amount", fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+
+                // Upload Merchant Bank Receipt Directly into Checkout's "Upload Payment Receipt" Box
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (receiptImageUri != null) SuccessGreen.copy(alpha = 0.12f) else portalColor.copy(alpha = 0.08f),
+                    border = BorderStroke(1.5.dp, if (receiptImageUri != null) SuccessGreen else portalColor),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("direct_portal_receipt_upload_card")
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = if (receiptImageUri != null) {
+                                "✅ BANK PAYMENT RECEIPT UPLOADED TO CHECKOUT BOX"
+                            } else {
+                                "STEP AFTER PAYING: UPLOAD BANK RECEIPT"
+                            },
+                            fontWeight = FontWeight.Black,
+                            fontSize = 11.5.sp,
+                            color = if (receiptImageUri != null) SuccessGreen else portalColor
+                        )
+                        Text(
+                            text = if (receiptImageUri != null) {
+                                "Your ${paymentMethod.title} payment receipt is attached in Checkout's 'Upload Payment Receipt' box. Tap Return to Complete Payment, then tap Submit Order and Payment Receipt."
+                            } else {
+                                "Attach the payment receipt generated by ${paymentMethod.title} (or share directly from ${paymentMethod.title} to ODIYA), then return to submit your order & receipt together."
+                            },
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = onChooseReceipt,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("direct_portal_attach_receipt_image_button")
+                            ) {
+                                Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(if (receiptImageUri != null) "Change Image" else "Attach Image", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                            OutlinedButton(
+                                onClick = onChooseDocumentReceipt,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("direct_portal_attach_receipt_pdf_button")
+                            ) {
+                                Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Attach PDF/Slip", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -4142,7 +4535,7 @@ private fun DirectPortalCheckoutDialog(
                     }
                 }
 
-                // Optional Merchant Web Portal Preview (collapsed by default so mobile websites never hijack to Google Play)
+                // Optional Merchant Web Portal Preview
                 Surface(
                     shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
@@ -4227,40 +4620,41 @@ private fun DirectPortalCheckoutDialog(
                     }
                 }
 
+                // Primary Return to Complete Payment Button (takes customer straight back with receipt attached to submit Order + Receipt together)
                 Button(
-                    enabled = !isProcessing && targetLogoSelected,
-                    onClick = { onPayNow(simulateCreditAlert, simulateNetworkDelay) },
+                    onClick = onDismiss,
                     colors = ButtonDefaults.buttonColors(containerColor = portalColor, contentColor = Color.White),
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(52.dp)
+                        .testTag("direct_portal_bottom_return_button")
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Return to Complete Payment", fontWeight = FontWeight.Black, fontSize = 13.sp)
+                }
+
+                OutlinedButton(
+                    enabled = !isProcessing && targetLogoSelected,
+                    onClick = { onPayNow(simulateCreditAlert, simulateNetworkDelay) },
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
                         .testTag("direct_portal_pay_now_button")
                 ) {
                     if (isProcessing) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("COMPLETING PAYMENT...", fontWeight = FontWeight.Black)
                     } else {
                         Text(
-                            text = "MAKE PAYMENT ${nairaFormat.format(payableAmount)} & FORWARD RECEIPT",
-                            fontWeight = FontWeight.Black,
-                            fontSize = 12.sp
+                            text = "INSTANT PORTAL PAY ${nairaFormat.format(payableAmount)} (AUTO-VERIFY)",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.5.sp
                         )
                     }
-                }
-
-                OutlinedButton(
-                    onClick = onDismiss,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(46.dp)
-                        .testTag("direct_portal_bottom_return_button")
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Return to Checkout Page", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
             }
         }

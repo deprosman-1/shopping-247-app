@@ -1538,6 +1538,19 @@ class EcommerceRepository(
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             dao.updateOrderReceiptDetails(orderId, receiptImageUrl, senderName, paymentReference, status.name, note)
+            val updatedOrder = dao.getOrderById(orderId)?.toDomain()
+            if (updatedOrder != null) {
+                scope.launch {
+                    try {
+                        val res = supabaseSync.syncOrderToCloud(updatedOrder)
+                        if (res.isFailure) {
+                            Log.e("EcommerceRepository", "Supabase order receipt sync failed: ${res.exceptionOrNull()?.message}")
+                        }
+                    } catch (e: Exception) {
+                        Log.e("EcommerceRepository", "Cloud sync failed for receipt update", e)
+                    }
+                }
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

@@ -69,6 +69,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.window.DialogProperties
 import com.example.R
 import com.example.data.model.CreditVerificationStatus
 import com.example.data.model.Order
@@ -83,6 +88,7 @@ import com.example.ui.theme.PalmPayPurple
 import com.example.ui.theme.PaystackTeal
 import com.example.ui.theme.PosPurple
 import com.example.ui.theme.SuccessGreen
+import com.example.util.OrderSlipFormatter
 import com.example.util.PdfInvoiceExporter
 import com.example.util.WhatsAppHelper
 import com.example.util.WordInvoiceExporter
@@ -116,12 +122,20 @@ fun ReceiptViewDialog(
         PaymentMethod.CASH_ON_DELIVERY -> CodOrange
     }
     var isTargetRecipientSelected by remember(order.orderId) { mutableStateOf(true) }
+    var isExpandedView by rememberSaveable { mutableStateOf(false) }
+    val parsedSlip = remember(order.itemsSummary, order.deliveryAddress) {
+        OrderSlipFormatter.parseOrderSlipDetails(order)
+    }
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Card(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp)
+                .fillMaxWidth(if (isExpandedView) 0.98f else 0.92f)
+                .then(if (isExpandedView) Modifier.fillMaxHeight(0.95f) else Modifier)
+                .padding(if (isExpandedView) 2.dp else 8.dp)
                 .testTag("receipt_dialog"),
             shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(
@@ -132,7 +146,7 @@ fun ReceiptViewDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(20.dp)
+                    .padding(if (isExpandedView) 22.dp else 18.dp)
                     .verticalScroll(rememberScrollState())
             ) {
                 // Header Row
@@ -186,6 +200,16 @@ fun ReceiptViewDialog(
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = { isExpandedView = !isExpandedView },
+                            modifier = Modifier.testTag("receipt_expand_toggle_button")
+                        ) {
+                            Icon(
+                                imageVector = if (isExpandedView) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                                contentDescription = if (isExpandedView) "Compact Receipt View" else "Expand Receipt View",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                         IconButton(
                             onClick = onDismiss,
                             modifier = Modifier.testTag("receipt_back_button")
@@ -300,9 +324,13 @@ fun ReceiptViewDialog(
                 // Receipt Meta (Customer & Delivery info, no order profit summary)
                 ReceiptRow(label = "Order Reference", value = order.orderId, isMono = true)
                 ReceiptRow(label = "Date & Time", value = dateFormat.format(Date(order.createdAt)))
+                ReceiptRow(label = "Order Status", value = order.status.label, highlight = true)
                 ReceiptRow(label = "Customer Name", value = order.customerName)
                 ReceiptRow(label = "Customer Phone", value = order.customerPhone)
-                ReceiptRow(label = "Delivery Destination", value = order.deliveryAddress)
+                ReceiptRow(label = "Delivery Destination", value = parsedSlip.cleanDeliveryAddress)
+                if (parsedSlip.deliveryConditionAndFee.isNotBlank()) {
+                    ReceiptRow(label = "Shipping / Delivery Fee", value = parsedSlip.deliveryConditionAndFee, highlight = true)
+                }
 
                 Spacer(modifier = Modifier.height(10.dp))
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
@@ -318,24 +346,66 @@ fun ReceiptViewDialog(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Purchased Items Summary
+                // Purchased Items & Individual Prices Summary
                 Text(
-                    text = "Items Purchased",
+                    text = "Purchased Items & Prices (${parsedSlip.items.size})",
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold
                 )
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 Surface(
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    modifier = Modifier.fillMaxWidth()
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("receipt_items_breakdown")
                 ) {
-                    val cleanSummary = order.itemsSummary.replace(Regex("""\s*\[Sold:[^\]]+\]"""), "").trim()
-                    Text(
-                        text = cleanSummary,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(10.dp)
-                    )
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (parsedSlip.items.isEmpty()) {
+                            Text(
+                                text = order.itemsSummary.ifBlank { "Items recorded in order archive" },
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        } else {
+                            parsedSlip.items.forEachIndexed { idx, lineItem ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                        Text(
+                                            text = "${idx + 1}. ${lineItem.titleAndSpecs}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        if (lineItem.unitPriceText.isNotBlank()) {
+                                            Text(
+                                                text = "Unit price: ${lineItem.unitPriceText}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                    if (lineItem.lineTotalText.isNotBlank()) {
+                                        Text(
+                                            text = lineItem.lineTotalText,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.Black,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                                if (idx < parsedSlip.items.lastIndex) {
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                                }
+                            }
+                        }
+                    }
                 }
 
                 if (order.receiptImageUrl.isNotBlank()) {

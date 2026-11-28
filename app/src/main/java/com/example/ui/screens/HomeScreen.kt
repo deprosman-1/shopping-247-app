@@ -153,7 +153,6 @@ import com.example.data.model.ProductCategory
 import com.example.ui.components.CategorySelectorButton
 import com.example.ui.components.DualAxisScrollContainer
 import com.example.ui.components.HorizontalCategoryStrip
-import com.example.ui.components.OfficialInstalledHorizontalBar
 import com.example.ui.components.QrCodeView
 import com.example.ui.components.ProductStandardCard
 import com.example.ui.components.QuickEditProductDialog
@@ -282,22 +281,22 @@ fun HomeScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                            .padding(horizontal = 10.dp, vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        // Prominent ODIYA Logo Badge (Long-press opens restricted Admin area)
+                        // Compact ODIYA Logo Badge (Long-press opens restricted Admin area)
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.weight(1f)
                         ) {
                             Surface(
-                                shape = RoundedCornerShape(10.dp),
+                                shape = RoundedCornerShape(8.dp),
                                 color = Color(0xFF052E16),
-                                border = BorderStroke(1.2.dp, AccentGold),
+                                border = BorderStroke(1.dp, AccentGold),
                                 shadowElevation = 2.dp,
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(10.dp))
+                                    .clip(RoundedCornerShape(8.dp))
                                     .combinedClickable(
                                         onClick = { viewModel.navigateToHome() },
                                         onLongClick = { viewModel.navigateTo(AppScreen.ADMIN_CONTROL_ROOM) }
@@ -306,31 +305,32 @@ fun HomeScreen(
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                                 ) {
                                     AsyncImage(
                                         model = R.drawable.shopping_logo_icon_1794752250458,
                                         contentDescription = "ODIYA Logo",
                                         modifier = Modifier
-                                            .size(28.dp)
-                                            .clip(RoundedCornerShape(6.dp))
+                                            .size(22.dp)
+                                            .clip(RoundedCornerShape(5.dp))
                                     )
-                                    Spacer(modifier = Modifier.width(5.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
                                     Text(
                                         text = "ODIYA",
-                                        fontSize = 10.sp,
-                                        lineHeight = 11.sp,
+                                        fontSize = 9.5.sp,
+                                        lineHeight = 10.sp,
                                         fontWeight = FontWeight.Black,
                                         color = AccentGold,
                                         softWrap = false
                                     )
                                 }
                             }
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(7.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = storeProfile.storeName.uppercase(),
-                                    style = MaterialTheme.typography.titleSmall,
+                                    fontSize = 13.sp,
+                                    lineHeight = 14.sp,
                                     fontWeight = FontWeight.Black,
                                     color = MaterialTheme.colorScheme.onSurface,
                                     maxLines = 1,
@@ -338,10 +338,10 @@ fun HomeScreen(
                                 )
                                 Text(
                                     text = storeProfile.tagline,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Bold,
+                                    fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontSize = 10.sp,
+                                    fontSize = 9.sp,
+                                    lineHeight = 10.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -361,43 +361,43 @@ fun HomeScreen(
                                     }
                                     Toast.makeText(context, "Playing Live Welcome Voice Message...", Toast.LENGTH_SHORT).show()
                                 },
-                                modifier = Modifier.size(40.dp).testTag("voice_welcome_nav_button")
+                                modifier = Modifier.size(36.dp).testTag("voice_welcome_nav_button")
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.VolumeUp,
                                     contentDescription = "Live Welcome Audio",
                                     tint = AccentGold,
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(19.dp)
                                 )
                             }
 
                             IconButton(
                                 onClick = { showQrShareDialog = true },
-                                modifier = Modifier.size(40.dp).testTag("qr_share_nav_button")
+                                modifier = Modifier.size(36.dp).testTag("qr_share_nav_button")
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.QrCode2,
                                     contentDescription = "Share App & QR Code",
                                     tint = AccentGold,
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(19.dp)
                                 )
                             }
 
                             IconButton(
                                 onClick = { viewModel.openCustomerAccountShortcut() },
-                                modifier = Modifier.size(48.dp).testTag("home_customer_account_shortcut")
+                                modifier = Modifier.size(38.dp).testTag("home_customer_account_shortcut")
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Person,
                                     contentDescription = "Customer Account Shortcut",
                                     tint = if (currentCustomer != null) SuccessGreen else AccentGold,
-                                    modifier = Modifier.size(21.dp)
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
 
                             IconButton(
                                 onClick = { viewModel.navigateTo(AppScreen.CART) },
-                                modifier = Modifier.size(48.dp).testTag("cart_nav_button")
+                                modifier = Modifier.size(38.dp).testTag("cart_nav_button")
                             ) {
                                 BadgedBox(
                                     badge = {
@@ -415,7 +415,7 @@ fun HomeScreen(
                                         imageVector = Icons.Default.ShoppingCart,
                                         contentDescription = "Shopping Cart",
                                         tint = MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(19.dp)
                                     )
                                 }
                             }
@@ -431,18 +431,18 @@ fun HomeScreen(
                 exit = fadeOut() + shrinkVertically()
             ) {
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(10.dp),
                     color = Color(0xFF064E3B),
                     border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.4f)),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 2.dp)
+                        .padding(horizontal = 10.dp, vertical = 1.dp)
                         .testTag("home_top_clock_banner")
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -452,31 +452,31 @@ fun HomeScreen(
 
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             // Compact Search Pill (Opens full catalog search + history on demand)
                             Surface(
                                 onClick = { isSearchExpanded = !isSearchExpanded },
-                                shape = RoundedCornerShape(9.dp),
+                                shape = RoundedCornerShape(8.dp),
                                 color = if (isSearchExpanded || searchQuery.isNotEmpty()) AccentGold else Color.White.copy(alpha = 0.12f),
                                 modifier = Modifier
-                                    .height(30.dp)
+                                    .height(26.dp)
                                     .testTag("catalog_search_toggle_button")
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 8.dp)
+                                    modifier = Modifier.padding(horizontal = 7.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Search,
                                         contentDescription = "Search Catalog",
                                         tint = if (isSearchExpanded || searchQuery.isNotEmpty()) Color.Black else AccentGold,
-                                        modifier = Modifier.size(14.dp)
+                                        modifier = Modifier.size(13.dp)
                                     )
-                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Spacer(modifier = Modifier.width(3.dp))
                                     Text(
                                         text = if (searchQuery.isNotEmpty()) "\"${searchQuery.take(8)}\"" else "Search",
-                                        fontSize = 10.5.sp,
+                                        fontSize = 10.sp,
                                         fontWeight = FontWeight.Black,
                                         color = if (isSearchExpanded || searchQuery.isNotEmpty()) Color.Black else Color.White,
                                         maxLines = 1
@@ -494,24 +494,24 @@ fun HomeScreen(
                                         ).show()
                                     }
                                 },
-                                shape = RoundedCornerShape(9.dp),
+                                shape = RoundedCornerShape(8.dp),
                                 color = Color.White.copy(alpha = 0.10f),
-                                modifier = Modifier.height(30.dp).testTag("home_refresh_button")
+                                modifier = Modifier.height(26.dp).testTag("home_refresh_button")
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 8.dp)
+                                    modifier = Modifier.padding(horizontal = 7.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Refresh,
                                         contentDescription = "Refresh Catalog",
-                                        modifier = Modifier.size(14.dp),
+                                        modifier = Modifier.size(13.dp),
                                         tint = CyberCyan
                                     )
                                     Spacer(modifier = Modifier.width(3.dp))
                                     Text(
                                         text = if (isRefreshing) "..." else "Sync",
-                                        fontSize = 10.sp,
+                                        fontSize = 9.5.sp,
                                         fontWeight = FontWeight.Black,
                                         color = CyberCyan
                                     )
@@ -520,26 +520,26 @@ fun HomeScreen(
 
                             Surface(
                                 onClick = { isEyeCarePanelExpanded = !isEyeCarePanelExpanded },
-                                shape = RoundedCornerShape(9.dp),
+                                shape = RoundedCornerShape(8.dp),
                                 color = if (eyeCareEnabled || isEyeCarePanelExpanded) AccentGold else Color.White.copy(alpha = 0.12f),
                                 modifier = Modifier
-                                    .height(30.dp)
+                                    .height(26.dp)
                                     .testTag("home_eye_care_button")
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 7.dp)
+                                    modifier = Modifier.padding(horizontal = 6.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.RemoveRedEye,
                                         contentDescription = "Eye Care Brightness",
                                         tint = if (eyeCareEnabled || isEyeCarePanelExpanded) Color.Black else AccentGold,
-                                        modifier = Modifier.size(14.dp)
+                                        modifier = Modifier.size(13.dp)
                                     )
                                     Spacer(modifier = Modifier.width(3.dp))
                                     Text(
                                         text = if (eyeCareEnabled) "Eye ${(eyeCareBrightness * 100).roundToInt()}%" else "Eye Care",
-                                        fontSize = 9.5.sp,
+                                        fontSize = 9.sp,
                                         fontWeight = FontWeight.Black,
                                         color = if (eyeCareEnabled || isEyeCarePanelExpanded) Color.Black else Color.White,
                                         maxLines = 1
@@ -549,16 +549,16 @@ fun HomeScreen(
 
                             Surface(
                                 onClick = { viewModel.toggleFullScreen() },
-                                shape = RoundedCornerShape(9.dp),
+                                shape = RoundedCornerShape(8.dp),
                                 color = Color.White.copy(alpha = 0.10f),
-                                modifier = Modifier.size(30.dp).testTag("full_screen_toggle")
+                                modifier = Modifier.size(26.dp).testTag("full_screen_toggle")
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
                                         imageVector = if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
                                         contentDescription = "Toggle Full Screen",
                                         tint = AccentGold,
-                                        modifier = Modifier.size(16.dp)
+                                        modifier = Modifier.size(15.dp)
                                     )
                                 }
                             }
@@ -759,7 +759,7 @@ fun HomeScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 3.dp)
+                    .padding(horizontal = 10.dp, vertical = 1.dp)
                     .testTag("home_upper_controls_row"),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -797,7 +797,7 @@ fun HomeScreen(
                         label = {
                             Text("Live Call", fontSize = 11.sp, fontWeight = FontWeight.Black, color = SuccessGreen)
                         },
-                        modifier = Modifier.height(34.dp).testTag("home_live_call_chip")
+                        modifier = Modifier.height(30.dp).testTag("home_live_call_chip")
                     )
 
                     // Single-Tap Layout Mode Toggle (Grid View <-> Category Shelves)
@@ -829,7 +829,7 @@ fun HomeScreen(
                             selectedContainerColor = Color(0xFF064E3B),
                             selectedLabelColor = AccentGold
                         ),
-                        modifier = Modifier.height(34.dp).testTag("browse_mode_${catalogBrowseMode.name}")
+                        modifier = Modifier.height(30.dp).testTag("browse_mode_${catalogBrowseMode.name}")
                     )
 
                     // Sort Dropdown Chip
@@ -854,7 +854,7 @@ fun HomeScreen(
                                 selectedLeadingIconColor = AccentGold,
                                 selectedTrailingIconColor = AccentGold
                             ),
-                            modifier = Modifier.height(34.dp).testTag("catalog_sort_chip")
+                            modifier = Modifier.height(30.dp).testTag("catalog_sort_chip")
                         )
 
                         DropdownMenu(
@@ -920,7 +920,7 @@ fun HomeScreen(
                                 selectedLeadingIconColor = AccentGold,
                                 selectedTrailingIconColor = AccentGold
                             ),
-                            modifier = Modifier.height(34.dp).testTag("catalog_price_filter_chip")
+                            modifier = Modifier.height(30.dp).testTag("catalog_price_filter_chip")
                         )
 
                         DropdownMenu(
@@ -983,7 +983,7 @@ fun HomeScreen(
                                     selectedLabelColor = AccentGold,
                                     selectedTrailingIconColor = AccentGold
                                 ),
-                                modifier = Modifier.height(34.dp).testTag("catalog_brand_filter_chip")
+                                modifier = Modifier.height(30.dp).testTag("catalog_brand_filter_chip")
                             )
                             DropdownMenu(
                                 expanded = brandMenuExpanded,
@@ -1067,7 +1067,7 @@ fun HomeScreen(
                             selectedContainerColor = SuccessGreen.copy(alpha = 0.2f),
                             selectedLabelColor = SuccessGreen
                         ),
-                        modifier = Modifier.height(34.dp).testTag("catalog_instock_chip")
+                        modifier = Modifier.height(30.dp).testTag("catalog_instock_chip")
                     )
 
                     // Loyalty Points Quick Access Chip
@@ -1079,7 +1079,7 @@ fun HomeScreen(
                         label = {
                             Text("${loyaltyAccount.pointsBalance} pts", fontSize = 11.sp, fontWeight = FontWeight.Black, color = AccentGold)
                         },
-                        modifier = Modifier.height(34.dp).testTag("home_loyalty_chip")
+                        modifier = Modifier.height(30.dp).testTag("home_loyalty_chip")
                     )
 
                     // Dynamic Catalog QR Generator Chip
@@ -1091,7 +1091,7 @@ fun HomeScreen(
                         label = {
                             Text("Catalog QR", fontSize = 11.sp, fontWeight = FontWeight.Black, color = CyberCyan)
                         },
-                        modifier = Modifier.height(34.dp).testTag("home_catalog_qr_chip")
+                        modifier = Modifier.height(30.dp).testTag("home_catalog_qr_chip")
                     )
 
                     // Help Center, Support & Legal Chip
@@ -1103,7 +1103,7 @@ fun HomeScreen(
                         label = {
                             Text("Help", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CyberCyan)
                         },
-                        modifier = Modifier.height(34.dp).testTag("home_help_support_chip")
+                        modifier = Modifier.height(30.dp).testTag("home_help_support_chip")
                     )
                 }
             }
@@ -1114,16 +1114,6 @@ fun HomeScreen(
                 categoryCounts = categoryCounts,
                 totalCount = allProducts.size,
                 onSelectCategory = { viewModel.selectCategory(it) }
-            )
-
-            // Relocated Compact Rectangular "OFFICIAL INSTALLED ODIYA" Horizontal Bar below Category Strip
-            OfficialInstalledHorizontalBar(
-                onOpenQrShare = { showQrShareDialog = true },
-                storeName = storeProfile.storeName,
-                tagline = storeProfile.tagline,
-                storePhone = storeProfile.phoneNumber,
-                secondaryPhone = storeProfile.secondaryPhoneNumber,
-                storeAddress = storeProfile.storeAddress
             )
 
             // Expandable Search Panel (Takes 0dp until tapped so catalog stays front-and-center)
@@ -1164,8 +1154,8 @@ fun HomeScreen(
 
                     LazyColumn(
                         state = listState,
-                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 90.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 80.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier
                             .fillMaxSize()
                             .testTag("home_category_shelves_list")
@@ -1307,9 +1297,9 @@ fun HomeScreen(
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(gridColumns),
                         state = gridState,
-                        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 80.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 2.dp, bottom = 76.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
 
@@ -1410,30 +1400,30 @@ fun HomeScreen(
                             }
                         }
 
-                        // Products Header (Two side-by-side product catalogs right in the central space)
+                        // Compact Products Header (Dual side-by-side product catalogs directly below)
                         item(span = { GridItemSpan(gridColumns) }) {
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 2.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = selectedCategory ?: "Product Catalog",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = if (effectiveWide) {
-                                            "${products.size} Products • Pan Horizontal ↔ & Scroll Vertical ↕"
-                                        } else {
-                                            "${products.size} Products Available"
-                                        },
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
+                                Text(
+                                    text = selectedCategory ?: "Product Catalog",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = if (effectiveWide) {
+                                        "${products.size} items • ↔ ↕"
+                                    } else {
+                                        "${products.size} Available"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
 
@@ -2005,36 +1995,27 @@ private fun DropdownSearchBar(
 
 @Composable
 fun DigitalClock(modifier: Modifier = Modifier) {
-    var time by remember { mutableStateOf("") }
-    var date by remember { mutableStateOf("") }
+    var timeAndDate by remember { mutableStateOf("") }
 
     androidx.compose.runtime.LaunchedEffect(Unit) {
         while (true) {
             val now = java.util.Calendar.getInstance().time
-            time = java.text.SimpleDateFormat("hh:mm:ss a", java.util.Locale.getDefault()).format(now)
-            date = java.text.SimpleDateFormat("EEE, dd MMM", java.util.Locale.getDefault()).format(now)
-            kotlinx.coroutines.delay(1000L) // Live second-by-second digital clock
+            val timeStr = java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault()).format(now)
+            val dateStr = java.text.SimpleDateFormat("EEE, dd MMM", java.util.Locale.getDefault()).format(now)
+            timeAndDate = "$timeStr • $dateStr"
+            kotlinx.coroutines.delay(1000L)
         }
     }
 
-    Column(modifier = modifier, horizontalAlignment = Alignment.Start) {
-        Text(
-            text = time,
-            fontSize = 13.sp,
-            lineHeight = 14.sp,
-            fontWeight = FontWeight.Black,
-            color = AccentGold,
-            letterSpacing = 0.5.sp,
-            maxLines = 1
-        )
-        Text(
-            text = date,
-            fontSize = 9.5.sp,
-            lineHeight = 11.sp,
-            fontWeight = FontWeight.Bold,
-            color = CyberCyan,
-            maxLines = 1
-        )
-    }
+    Text(
+        text = timeAndDate,
+        fontSize = 10.5.sp,
+        lineHeight = 12.sp,
+        fontWeight = FontWeight.Black,
+        color = AccentGold,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier
+    )
 }
 

@@ -74,21 +74,39 @@ import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.filled.AssignmentReturn
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.Replay
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Storefront
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
+import coil.compose.AsyncImage
 import com.example.data.model.ReturnRefundRequest
 import com.example.data.model.ReturnRefundStatus
 import com.example.ui.components.CancelOrderConfirmDialog
@@ -98,6 +116,8 @@ import com.example.ui.components.OrderProgressStepper
 import com.example.ui.components.PreOrderRequestCard
 import com.example.ui.components.PreOrderRequestDialog
 import com.example.ui.components.ReturnRefundRequestDialog
+import com.example.util.OrderSlipFormatter
+import com.example.util.ProductImageHelper
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -114,6 +134,28 @@ fun OrdersReceiptsScreen(
     var showPreOrderDialog by remember { mutableStateOf(false) }
     var cancellingOrder by remember { mutableStateOf<Order?>(null) }
     var returningOrder by remember { mutableStateOf<Order?>(null) }
+    var isExpandedReceiptView by rememberSaveable { mutableStateOf(false) }
+    var receiptSearchQuery by rememberSaveable { mutableStateOf("") }
+    var selectedStatusFilterName by rememberSaveable { mutableStateOf<String?>(null) }
+    var receiptSearchDropdownExpanded by remember { mutableStateOf(false) }
+
+    val selectedStatusFilter = remember(selectedStatusFilterName) {
+        selectedStatusFilterName?.let { name -> OrderStatus.values().find { it.name == name } }
+    }
+    val filteredOrders = remember(orders, receiptSearchQuery, selectedStatusFilter) {
+        val q = receiptSearchQuery.trim()
+        orders.filter { ord ->
+            val matchesStatus = selectedStatusFilter == null || ord.status == selectedStatusFilter
+            val matchesQuery = q.isBlank() ||
+                ord.orderId.contains(q, ignoreCase = true) ||
+                ord.customerName.contains(q, ignoreCase = true) ||
+                ord.customerPhone.contains(q, ignoreCase = true) ||
+                ord.paymentMethod.title.contains(q, ignoreCase = true) ||
+                ord.paymentReference.contains(q, ignoreCase = true) ||
+                ord.itemsSummary.contains(q, ignoreCase = true)
+            matchesStatus && matchesQuery
+        }
+    }
 
     val nairaFormat = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "NG")).apply {
@@ -129,7 +171,7 @@ fun OrdersReceiptsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("My Orders & Pre-Orders", fontWeight = FontWeight.Bold) },
+                title = { Text("My Orders & Receipts", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(
                         onClick = { viewModel.navigateBack() },
@@ -139,6 +181,16 @@ fun OrdersReceiptsScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = { isExpandedReceiptView = !isExpandedReceiptView },
+                        modifier = Modifier.testTag("orders_expand_view_toggle")
+                    ) {
+                        Icon(
+                            imageVector = if (isExpandedReceiptView) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                            contentDescription = if (isExpandedReceiptView) "Compact Receipt View" else "Expand Receipt View",
+                            tint = AccentGold
+                        )
+                    }
                     IconButton(
                         onClick = { viewModel.openOrderTracking() },
                         modifier = Modifier.testTag("orders_open_tracking_button")
@@ -164,8 +216,8 @@ fun OrdersReceiptsScreen(
         modifier = modifier
     ) { innerPadding ->
         DualAxisScrollContainer(
-            wideMode = isWideDualAxisMode,
-            minWideWidth = 680.dp,
+            wideMode = isWideDualAxisMode || isExpandedReceiptView,
+            minWideWidth = if (isExpandedReceiptView) 760.dp else 680.dp,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
@@ -173,7 +225,7 @@ fun OrdersReceiptsScreen(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .then(if (isWideDualAxisMode) Modifier else Modifier.widthIn(max = 500.dp))
+                    .then(if (isWideDualAxisMode || isExpandedReceiptView) Modifier else Modifier.widthIn(max = 500.dp))
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
@@ -328,16 +380,131 @@ fun OrdersReceiptsScreen(
                 }
 
                 item {
-                    Text(
-                        text = "ORDER & PAYMENT RECEIPTS (${orders.size})",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Black,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "ORDER & PAYMENT RECEIPTS (${filteredOrders.size}/${orders.size})",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            OutlinedButton(
+                                onClick = { isExpandedReceiptView = !isExpandedReceiptView },
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.testTag("orders_header_expand_button")
+                            ) {
+                                Icon(
+                                    imageVector = if (isExpandedReceiptView) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = if (isExpandedReceiptView) "Compact View" else "Expand Broad View",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        // Search Dropdown for Payment Receipts
+                        ExposedDropdownMenuBox(
+                            expanded = receiptSearchDropdownExpanded,
+                            onExpandedChange = { receiptSearchDropdownExpanded = !receiptSearchDropdownExpanded },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("orders_receipt_search_dropdown")
+                        ) {
+                            OutlinedTextField(
+                                value = receiptSearchQuery,
+                                onValueChange = {
+                                    receiptSearchQuery = it
+                                    receiptSearchDropdownExpanded = true
+                                },
+                                label = {
+                                    Text(
+                                        selectedStatusFilter?.let { "Filter: ${it.label}" }
+                                            ?: "Search & Filter Payment Receipts Dropdown"
+                                    )
+                                },
+                                placeholder = { Text("Type Order ID, product, payment ref or pick filter...", fontSize = 12.sp) },
+                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                                trailingIcon = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        if (receiptSearchQuery.isNotBlank() || selectedStatusFilter != null) {
+                                            IconButton(onClick = {
+                                                receiptSearchQuery = ""
+                                                selectedStatusFilterName = null
+                                            }) {
+                                                Icon(Icons.Default.Close, contentDescription = "Clear search & filter")
+                                            }
+                                        }
+                                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = receiptSearchDropdownExpanded)
+                                    }
+                                },
+                                singleLine = true,
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .menuAnchor()
+                                    .fillMaxWidth()
+                                    .testTag("orders_receipt_search_input")
+                            )
+
+                            ExposedDropdownMenu(
+                                expanded = receiptSearchDropdownExpanded,
+                                onDismissRequest = { receiptSearchDropdownExpanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("All Orders & Receipts (${orders.size})", fontWeight = FontWeight.Bold) },
+                                    onClick = {
+                                        selectedStatusFilterName = null
+                                        receiptSearchQuery = ""
+                                        receiptSearchDropdownExpanded = false
+                                    }
+                                )
+                                OrderStatus.values().forEach { status ->
+                                    val count = orders.count { it.status == status }
+                                    DropdownMenuItem(
+                                        text = { Text("Status: ${status.label} ($count)") },
+                                        onClick = {
+                                            selectedStatusFilterName = status.name
+                                            receiptSearchDropdownExpanded = false
+                                        }
+                                    )
+                                }
+                                orders.filter {
+                                    val q = receiptSearchQuery.trim()
+                                    q.isBlank() ||
+                                        it.orderId.contains(q, ignoreCase = true) ||
+                                        it.paymentMethod.title.contains(q, ignoreCase = true) ||
+                                        it.itemsSummary.contains(q, ignoreCase = true)
+                                }.take(8).forEach { ord ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                "${ord.orderId} • ${ord.paymentMethod.title} • ${nairaFormat.format(ord.totalAmount)}",
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                fontSize = 12.sp
+                                            )
+                                        },
+                                        onClick = {
+                                            receiptSearchQuery = ord.orderId
+                                            selectedStatusFilterName = null
+                                            receiptSearchDropdownExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
 
-                if (orders.isEmpty()) {
+                if (filteredOrders.isEmpty()) {
                     item {
                         Card(
                             shape = RoundedCornerShape(18.dp),
@@ -359,23 +526,36 @@ fun OrdersReceiptsScreen(
                                     )
                                     Spacer(modifier = Modifier.height(10.dp))
                                     Text(
-                                        text = "No Orders Placed Yet",
+                                        text = if (orders.isEmpty()) "No Orders Placed Yet" else "No Matching Payment Receipts",
                                         style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.Bold
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        text = "Your offline payment receipts will show here once confirmed.",
+                                        text = if (orders.isEmpty()) {
+                                            "Your offline payment receipts will show here once confirmed."
+                                        } else {
+                                            "Clear the search dropdown filter to view all ${orders.size} receipt(s)."
+                                        },
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                     Spacer(modifier = Modifier.height(14.dp))
-                                    Button(
-                                        onClick = { viewModel.navigateToHome() },
-                                        shape = RoundedCornerShape(12.dp),
-                                        modifier = Modifier.testTag("orders_empty_browse_button")
-                                    ) {
-                                        Text("Browse ${storeProfile.storeName}", fontWeight = FontWeight.Bold)
+                                    if (orders.isNotEmpty()) {
+                                        TextButton(onClick = {
+                                            receiptSearchQuery = ""
+                                            selectedStatusFilterName = null
+                                        }) {
+                                            Text("Show All Orders (${orders.size})", fontWeight = FontWeight.Bold)
+                                        }
+                                    } else {
+                                        Button(
+                                            onClick = { viewModel.navigateToHome() },
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier.testTag("orders_empty_browse_button")
+                                        ) {
+                                            Text("Browse ${storeProfile.storeName}", fontWeight = FontWeight.Bold)
+                                        }
                                     }
                                 }
                             }
@@ -383,13 +563,14 @@ fun OrdersReceiptsScreen(
                     }
                 } else {
                     items(
-                        items = orders,
+                        items = filteredOrders,
                         key = { it.orderId },
                         contentType = { "order_receipt_card" }
                     ) { order ->
                         val existingReturn = returnRequests.find { it.orderId == order.orderId }
                         OrderReceiptCard(
                             order = order,
+                            isExpandedView = isExpandedReceiptView,
                             existingReturn = existingReturn,
                             onTrackOrder = { viewModel.openOrderTracking(order.orderId) },
                             onViewReceipt = { viewModel.showReceipt(order) },
@@ -458,6 +639,7 @@ fun OrdersReceiptsScreen(
 @Composable
 private fun OrderReceiptCard(
     order: Order,
+    isExpandedView: Boolean = false,
     existingReturn: ReturnRefundRequest? = null,
     onTrackOrder: () -> Unit = {},
     onViewReceipt: () -> Unit,
@@ -466,6 +648,10 @@ private fun OrderReceiptCard(
     onRequestReturn: () -> Unit = {},
     onRateOrder: () -> Unit = {}
 ) {
+    val context = LocalContext.current
+    val parsedSlip = remember(order.itemsSummary, order.deliveryAddress) {
+        OrderSlipFormatter.parseOrderSlipDetails(order)
+    }
     val nairaFormat = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "NG")).apply {
             maximumFractionDigits = 0
@@ -553,14 +739,97 @@ private fun OrderReceiptCard(
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Items Summary
-            val cleanSummary = order.itemsSummary.replace(Regex("""\s*\[Sold:[^\]]+\]"""), "").trim()
-            Text(
-                text = cleanSummary,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Normal,
-                maxLines = 2
-            )
+            // Items Summary & Expanded Broad View Breakdown
+            if (isExpandedView) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("expanded_receipt_details_${order.orderId}"),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "Customer: ${order.customerName} (${order.customerPhone})",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Delivery: ${parsedSlip.cleanDeliveryAddress}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (parsedSlip.deliveryConditionAndFee.isNotBlank()) {
+                        Text(
+                            text = "Shipping: ${parsedSlip.deliveryConditionAndFee}",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Text(
+                        text = "Paid To: ${order.paymentAccount.ifBlank { order.paymentMethod.title }} • Payer: ${order.senderName}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (order.verificationNote.isNotBlank()) {
+                        Text(
+                            text = "Verification: ${order.verificationNote}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SuccessGreen,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    parsedSlip.items.forEachIndexed { idx, item ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "${idx + 1}. ${item.titleAndSpecs}",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f).padding(end = 8.dp)
+                            )
+                            Text(
+                                text = listOf(item.unitPriceText.takeIf { it.isNotBlank() }?.let { "$it ea" }, item.lineTotalText)
+                                    .filterNotNull()
+                                    .filter { it.isNotBlank() }
+                                    .joinToString(" -> "),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                    if (order.receiptImageUrl.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        AsyncImage(
+                            model = ProductImageHelper.buildImageRequest(
+                                context = context,
+                                imageUrl = order.receiptImageUrl,
+                                title = "Receipt ${order.orderId}",
+                                highRes = false
+                            ),
+                            contentDescription = "Receipt Preview",
+                            contentScale = ContentScale.Fit,
+                            filterQuality = FilterQuality.Medium,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(130.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                                .clickable { onViewReceipt() }
+                        )
+                    }
+                }
+            } else {
+                val cleanSummary = order.itemsSummary.replace(Regex("""\s*\[Sold:[^\]]+\]"""), "").trim()
+                Text(
+                    text = cleanSummary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Normal,
+                    maxLines = 2
+                )
+            }
 
             Spacer(modifier = Modifier.height(8.dp))
 

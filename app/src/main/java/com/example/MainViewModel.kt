@@ -172,6 +172,32 @@ data class CustomerLoyaltyOfferStatus(
     val statusDetail: String
 )
 
+data class FlatShippingFeeConfig(
+    val amount: Double = 1500.0,
+    val isActive: Boolean = false
+)
+
+enum class AdminAlertCategory(val label: String, val targetTab: Int) {
+    ORDER("New Order", 2),
+    LIVE_MESSAGE("Message", 11),
+    PRE_ORDER("Pre-Order", 7),
+    SUPPORT_TICKET("Support Msg", 10),
+    RETURN_REQUEST("Return Req", 10),
+    PRODUCT_REVIEW("Feedback", 10),
+    PARTNERSHIP("Partner Msg", 9)
+}
+
+data class AdminHangingCustomerAlert(
+    val alertKey: String,
+    val customerName: String,
+    val customerPhone: String = "",
+    val category: AdminAlertCategory,
+    val title: String,
+    val messageBody: String,
+    val referenceId: String,
+    val createdAt: Long
+)
+
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     val repository = EcommerceRepository(application, viewModelScope)
     val voiceManager = com.example.util.WelcomeVoiceManager(application)
@@ -1045,24 +1071,78 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         ids.first().size
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
-    // Delivery Options (Editable by Admin)
-    private val _deliveryOptions = MutableStateFlow(
-        listOf(
-            DeliveryOption("opt_a", "Free local pickup / Zone A Express Delivery", 0.0),
-            DeliveryOption("opt_b", "Standard ODIYA City Delivery", 1500.0),
-            DeliveryOption("opt_c", "Inter-State Regional Delivery", 2500.0),
-            DeliveryOption("opt_d", "Nationwide Express Doorstep Delivery", 5000.0),
-            DeliveryOption("opt_e", "VIP Special Gift Package Local Delivery", 5000.0),
-            DeliveryOption("opt_f", "VIP Special Gift Package Nationwide Delivery", 8000.0)
-        )
+    private fun defaultDeliveryOptions(): List<DeliveryOption> = listOf(
+        DeliveryOption("opt_a", "Free local pickup / Zone A Express Delivery", 0.0),
+        DeliveryOption("opt_b", "Standard ODIYA City Delivery", 1500.0),
+        DeliveryOption("opt_c", "Inter-State Regional Delivery", 2500.0),
+        DeliveryOption("opt_d", "Nationwide Express Doorstep Delivery", 5000.0),
+        DeliveryOption("opt_e", "VIP Special Gift Package Local Delivery", 5000.0),
+        DeliveryOption("opt_f", "VIP Special Gift Package Nationwide Delivery", 8000.0)
     )
+
+    private fun loadPersistedDeliveryOptions(): List<DeliveryOption> {
+        val raw = adminPrefs.getString("delivery_options_json", null) ?: return defaultDeliveryOptions()
+        return try {
+            val arr = JSONArray(raw)
+            val parsed = (0 until arr.length()).mapNotNull { idx ->
+                val obj = arr.optJSONObject(idx) ?: return@mapNotNull null
+                val id = obj.optString("id", "").trim()
+                val title = obj.optString("title", "").trim()
+                if (id.isBlank() || title.isBlank()) return@mapNotNull null
+                DeliveryOption(
+                    id = id,
+                    title = title,
+                    price = obj.optDouble("price", 0.0).coerceAtLeast(0.0)
+                )
+            }
+            parsed.ifEmpty { defaultDeliveryOptions() }
+        } catch (_: Exception) {
+            defaultDeliveryOptions()
+        }
+    }
+
+    private fun persistDeliveryOptions(list: List<DeliveryOption>) {
+        val arr = JSONArray()
+        list.forEach { opt ->
+            arr.put(JSONObject().apply {
+                put("id", opt.id)
+                put("title", opt.title)
+                put("price", opt.price)
+            })
+        }
+        adminPrefs.edit().putString("delivery_options_json", arr.toString()).apply()
+    }
+
+    // Delivery Options (Editable by Admin)
+    private val _deliveryOptions = MutableStateFlow(loadPersistedDeliveryOptions())
     val deliveryOptions: StateFlow<List<DeliveryOption>> = _deliveryOptions.asStateFlow()
 
     fun updateDeliveryOption(id: String, newTitle: String, newPrice: Double) {
+        val safePrice = newPrice.coerceAtLeast(0.0)
         val updated = _deliveryOptions.value.map { opt ->
-            if (opt.id == id) opt.copy(title = newTitle, price = newPrice) else opt
+            if (opt.id == id) opt.copy(title = newTitle.trim().ifBlank { opt.title }, price = safePrice) else opt
         }
         _deliveryOptions.value = updated
+        persistDeliveryOptions(updated)
+    }
+
+    // Admin Editable & Activatable Flat Shipping Fee
+    private val _flatShippingFeeConfig = MutableStateFlow(
+        FlatShippingFeeConfig(
+            amount = adminPrefs.getFloat("flat_shipping_fee_amount", 1500.0f).toDouble().coerceAtLeast(0.0),
+            isActive = adminPrefs.getBoolean("flat_shipping_fee_active", false)
+        )
+    )
+    val flatShippingFeeConfig: StateFlow<FlatShippingFeeConfig> = _flatShippingFeeConfig.asStateFlow()
+
+    fun updateFlatShippingFee(amount: Double, isActive: Boolean) {
+        val cleanAmount = amount.coerceAtLeast(0.0)
+        val updated = FlatShippingFeeConfig(amount = cleanAmount, isActive = isActive)
+        _flatShippingFeeConfig.value = updated
+        adminPrefs.edit()
+            .putFloat("flat_shipping_fee_amount", cleanAmount.toFloat())
+            .putBoolean("flat_shipping_fee_active", isActive)
+            .apply()
     }
 
     // Refresh / Syncing state
@@ -3151,7 +3231,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
             val summary = items.joinToString(";\n") {
-                "${it.quantity}x ${it.product.title} (${it.selectedBrand}, ${it.selectedSize}, ${it.selectedColor.name}) - ₦${(it.unitPrice * it.quantity).toInt()}"
+                val unitFormatted = String.format(Locale.US, "%,.0f", it.unitPrice)
+                val lineFormatted = String.format(Locale.US, "%,.0f", it.unitPrice * it.quantity)
+                "${it.quantity}x ${it.product.title} (${it.selectedBrand}, ${it.selectedSize}, ${it.selectedColor.name}) @ ₦$unitFormatted each = ₦$lineFormatted"
             }
             val subtotal = items.sumOf { it.unitPrice * it.quantity }
             val safeCouponDiscount = couponDiscountAmount.coerceIn(0.0, subtotal)
@@ -3520,6 +3602,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         loyaltyDiscountAmount: Double = 0.0,
         specialLoyaltyOfferClaimed: Boolean = false,
         specialLoyaltyPriorOrderIds: List<String> = emptyList(),
+        receiptImageUrl: String = "",
         onReadyToOpenUrl: (authorizationUrl: String, order: Order, reference: String) -> Unit,
         onFailure: (String) -> Unit
     ) {
@@ -3568,7 +3651,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             senderName = senderName.ifBlank { customerName },
             deliveryConditionTitle = deliveryConditionTitle,
             deliveryFeeAmount = deliveryFeeAmount,
-            receiptImageUrl = "",
+            receiptImageUrl = receiptImageUrl,
             customBargainTotal = customBargainTotal,
             appliedCouponCode = appliedCouponCode,
             couponDiscountAmount = couponDiscountAmount,
@@ -3869,6 +3952,66 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun dismissPaystackPendingState() {
         _paystackCheckoutState.value = com.example.data.remote.PaystackCheckoutUiState()
+    }
+
+    fun attachReceiptToPaystackOrder(
+        orderId: String,
+        receiptImageUrl: String,
+        senderName: String = "",
+        paymentReference: String = "",
+        onResult: ((Boolean, String) -> Unit)? = null
+    ) {
+        if (orderId.isBlank() || receiptImageUrl.isBlank()) {
+            onResult?.invoke(false, "Please select a Paystack receipt image or PDF first.")
+            return
+        }
+        viewModelScope.launch {
+            val existing = allOrders.value.find { it.orderId == orderId }
+            if (existing == null) {
+                onResult?.invoke(false, "Order $orderId not found.")
+                return@launch
+            }
+            val effectiveSender = senderName.trim().ifBlank { existing.senderName.ifBlank { existing.customerName } }
+            val effectiveRef = paymentReference.trim().ifBlank { existing.paymentReference }
+            val updatedNote = if (existing.verificationNote.contains("Paystack Verified", ignoreCase = true) ||
+                existing.verificationNote.contains("Credited", ignoreCase = true)
+            ) {
+                if (existing.verificationNote.contains("Receipt attached", ignoreCase = true)) {
+                    existing.verificationNote
+                } else {
+                    "${existing.verificationNote} • Paystack Receipt Attached"
+                }
+            } else {
+                "Paystack Order & Payment Receipt Attached (Ready for Admin Review)"
+            }
+            val res = repository.updateOrderReceiptDetails(
+                orderId = orderId,
+                receiptImageUrl = receiptImageUrl,
+                senderName = effectiveSender,
+                paymentReference = effectiveRef,
+                status = existing.status,
+                note = updatedNote
+            )
+            if (res.isSuccess) {
+                _pendingSharedReceipt.value = null
+                if (_paystackCheckoutState.value.orderId == orderId) {
+                    _paystackCheckoutState.value = _paystackCheckoutState.value.copy(
+                        statusMessage = "Paystack receipt attached to Order $orderId! Admin can verify both order & receipt together."
+                    )
+                }
+                if (_activeReceipt.value?.orderId == orderId) {
+                    _activeReceipt.value = _activeReceipt.value?.copy(
+                        receiptImageUrl = receiptImageUrl,
+                        senderName = effectiveSender,
+                        paymentReference = effectiveRef,
+                        verificationNote = updatedNote
+                    )
+                }
+                onResult?.invoke(true, "✅ Paystack receipt attached to Order $orderId!")
+            } else {
+                onResult?.invoke(false, res.exceptionOrNull()?.message ?: "Failed to attach receipt")
+            }
+        }
     }
 
     fun showReceipt(order: Order) {
@@ -4422,8 +4565,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (parsedText.detectedPaymentMethod != null || parsedText.extractedSender.isNotBlank()) {
                 persistDeliveryInfoLocally(senderName = parsedText.extractedSender)
             }
+            val activePaystackOrderId = _paystackCheckoutState.value.orderId
             val methodTag = pending.detectedPaymentMethod?.title ?: pending.sourceAppLabel
-            if (_cartItems.value.isNotEmpty()) {
+            if (activePaystackOrderId.isNotBlank() && savedFileUri != null && _cartItems.value.isEmpty()) {
+                attachReceiptToPaystackOrder(
+                    orderId = activePaystackOrderId,
+                    receiptImageUrl = savedFileUri.toString(),
+                    senderName = parsedText.extractedSender,
+                    paymentReference = parsedText.extractedReference
+                )
+                navigateTo(AppScreen.CHECKOUT)
+                onFeedback("✅ $methodTag receipt attached directly to Paystack Order $activePaystackOrderId!")
+            } else if (_cartItems.value.isNotEmpty() || activePaystackOrderId.isNotBlank()) {
                 navigateTo(AppScreen.CHECKOUT)
                 onFeedback("✅ $methodTag receipt attached directly to Checkout!")
             } else {
@@ -8164,5 +8317,185 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             incomingRequests = cur.incomingRequests.filterNot { it.roomId == cur.roomId },
             statusBanner = ""
         )
+    }
+
+    // ====================================================================
+    // HANGING ADMIN CUSTOMER NAME ALERTS (ORDERS & ALL CUSTOMER MESSAGES)
+    // Stay pinned visibly on Admin Control Room until Admin clicks the name
+    // ====================================================================
+    private val _acknowledgedAdminAlertKeys = MutableStateFlow(
+        adminPrefs.getStringSet("admin_ack_hanging_alerts", emptySet())?.toSet() ?: emptySet()
+    )
+
+    private val _focusedAdminOrderId = MutableStateFlow<String?>(null)
+    val focusedAdminOrderId: StateFlow<String?> = _focusedAdminOrderId.asStateFlow()
+
+    private val _activeAdminAlertMessage = MutableStateFlow<AdminHangingCustomerAlert?>(null)
+    val activeAdminAlertMessage: StateFlow<AdminHangingCustomerAlert?> = _activeAdminAlertMessage.asStateFlow()
+
+    val hangingAdminAlerts: StateFlow<List<AdminHangingCustomerAlert>> by lazy {
+        val primaryFlow = combine(
+            allOrders,
+            _preOrderRequests,
+            _supportTickets,
+            _returnRequests,
+            _productReviews
+        ) { orders, preOrders, tickets, returns, reviews ->
+            buildList {
+                orders.filter { it.status == OrderStatus.PENDING_VERIFICATION }.forEach { ord ->
+                    val name = ord.customerName.ifBlank { ord.senderName.ifBlank { "Customer" } }
+                    add(
+                        AdminHangingCustomerAlert(
+                            alertKey = "order_${ord.orderId}",
+                            customerName = name,
+                            customerPhone = ord.customerPhone,
+                            category = AdminAlertCategory.ORDER,
+                            title = "Order ${ord.orderId} (${ord.paymentMethod.title})",
+                            messageBody = "Total: ₦${String.format(Locale.US, "%,.0f", ord.totalAmount)}\nItems: ${ord.itemsSummary}\nRef: ${ord.paymentReference}",
+                            referenceId = ord.orderId,
+                            createdAt = ord.createdAt
+                        )
+                    )
+                }
+                preOrders.filter { it.status == com.example.data.model.PreOrderStatus.PENDING }.forEach { req ->
+                    add(
+                        AdminHangingCustomerAlert(
+                            alertKey = "preorder_${req.id}",
+                            customerName = req.customerName.ifBlank { "Customer" },
+                            customerPhone = req.customerPhone,
+                            category = AdminAlertCategory.PRE_ORDER,
+                            title = "Pre-Order: ${req.productName}",
+                            messageBody = "Brand: ${req.brandName} • Budget: ₦${String.format(Locale.US, "%,.0f", req.targetBudget)}\n${req.description}".trim(),
+                            referenceId = req.id,
+                            createdAt = req.createdAt
+                        )
+                    )
+                }
+                tickets.filter {
+                    it.status == SupportTicketStatus.OPEN || it.status == SupportTicketStatus.IN_PROGRESS
+                }.forEach { tkt ->
+                    add(
+                        AdminHangingCustomerAlert(
+                            alertKey = "ticket_${tkt.id}",
+                            customerName = tkt.customerName.ifBlank { "Customer" },
+                            customerPhone = tkt.customerPhone,
+                            category = AdminAlertCategory.SUPPORT_TICKET,
+                            title = "Support Ticket: ${tkt.subject}",
+                            messageBody = tkt.message,
+                            referenceId = tkt.id,
+                            createdAt = tkt.createdAt
+                        )
+                    )
+                }
+                returns.filter { it.status == ReturnRefundStatus.PENDING_REVIEW }.forEach { ret ->
+                    add(
+                        AdminHangingCustomerAlert(
+                            alertKey = "return_${ret.id}",
+                            customerName = ret.customerName.ifBlank { "Customer" },
+                            customerPhone = ret.customerPhone,
+                            category = AdminAlertCategory.RETURN_REQUEST,
+                            title = "Return / Refund (${ret.orderId})",
+                            messageBody = "Reason: ${ret.reason}\n${ret.details}".trim(),
+                            referenceId = ret.id,
+                            createdAt = ret.createdAt
+                        )
+                    )
+                }
+                reviews.filter { it.adminReply.isBlank() }.forEach { rev ->
+                    add(
+                        AdminHangingCustomerAlert(
+                            alertKey = "review_${rev.id}",
+                            customerName = rev.customerName.ifBlank { "Customer" },
+                            customerPhone = "",
+                            category = AdminAlertCategory.PRODUCT_REVIEW,
+                            title = "Product Review (${rev.rating}★): ${rev.productTitle}",
+                            messageBody = rev.comment,
+                            referenceId = rev.id,
+                            createdAt = rev.createdAt
+                        )
+                    )
+                }
+            }
+        }
+
+        val secondaryFlow = combine(
+            _customerChatHistory,
+            _liveCallState,
+            _partnershipInterestRequests,
+            _acknowledgedAdminAlertKeys
+        ) { chats, liveState, partners, acked ->
+            val secondaryAlerts = buildList {
+                liveState.incomingRequests.forEach { req ->
+                    add(
+                        AdminHangingCustomerAlert(
+                            alertKey = "live_${req.roomId}",
+                            customerName = req.callerName.ifBlank { "Customer" },
+                            customerPhone = req.callerPhone,
+                            category = AdminAlertCategory.LIVE_MESSAGE,
+                            title = "Live ${req.mode.label} Request",
+                            messageBody = "Topic: ${req.topic}",
+                            referenceId = req.roomId,
+                            createdAt = req.createdAt
+                        )
+                    )
+                }
+                chats.filter { !it.isFromAdmin }.forEach { msg ->
+                    val name = msg.customerName.ifBlank { msg.senderName.ifBlank { "Customer" } }
+                    add(
+                        AdminHangingCustomerAlert(
+                            alertKey = "chat_${msg.id}",
+                            customerName = name,
+                            customerPhone = msg.customerPhone,
+                            category = AdminAlertCategory.LIVE_MESSAGE,
+                            title = "Customer Message ($name)",
+                            messageBody = msg.text,
+                            referenceId = msg.roomId.ifBlank { msg.id },
+                            createdAt = msg.timestamp
+                        )
+                    )
+                }
+                partners.filter { it.status == PartnershipInterestStatus.PENDING }.forEach { p ->
+                    add(
+                        AdminHangingCustomerAlert(
+                            alertKey = "partner_${p.id}",
+                            customerName = p.customerName.ifBlank { p.businessName.ifBlank { "Customer" } },
+                            customerPhone = p.customerPhone,
+                            category = AdminAlertCategory.PARTNERSHIP,
+                            title = "Partnership Request (${p.businessName})",
+                            messageBody = p.note,
+                            referenceId = p.id,
+                            createdAt = p.createdAt
+                        )
+                    )
+                }
+            }
+            secondaryAlerts to acked
+        }
+
+        combine(primaryFlow, secondaryFlow) { primary, (secondary, acked) ->
+            (primary + secondary)
+                .filterNot { it.alertKey in acked }
+                .sortedByDescending { it.createdAt }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    }
+
+    fun acknowledgeAndOpenAdminAlert(alert: AdminHangingCustomerAlert) {
+        val updatedAck = _acknowledgedAdminAlertKeys.value + alert.alertKey
+        _acknowledgedAdminAlertKeys.value = updatedAck
+        adminPrefs.edit().putStringSet("admin_ack_hanging_alerts", updatedAck).apply()
+        selectAdminTab(alert.category.targetTab)
+        if (alert.category == AdminAlertCategory.ORDER) {
+            _focusedAdminOrderId.value = alert.referenceId
+        } else {
+            _activeAdminAlertMessage.value = alert
+        }
+    }
+
+    fun clearFocusedAdminOrder() {
+        _focusedAdminOrderId.value = null
+    }
+
+    fun dismissActiveAdminAlertMessage() {
+        _activeAdminAlertMessage.value = null
     }
 }

@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.os.Looper
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -24,6 +25,7 @@ import com.example.data.model.PaymentMethod
 import com.example.data.model.ProductColor
 import com.example.data.remote.LiveCallMode
 import com.example.data.remote.LiveCallPhase
+import com.example.ui.components.ReceiptViewDialog
 import com.example.ui.screens.AdminControlRoomScreen
 import com.example.ui.screens.CartScreen
 import com.example.ui.screens.CategoriesScreen
@@ -31,9 +33,11 @@ import com.example.ui.screens.CustomerPartnershipPage
 import com.example.ui.screens.HelpSupportScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.LiveCallScreen
+import com.example.ui.screens.OrdersReceiptsScreen
 import com.example.ui.screens.PartnerPortalScreen
 import com.example.ui.screens.ProductDetailScreen
 import com.example.ui.theme.MyApplicationTheme
+import com.example.util.OrderSlipFormatter
 import com.example.util.PartnerDocumentExporter
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -438,7 +442,7 @@ class FeatureUpgradeVerificationTest {
     }
 
     @Test
-    fun uiSmoke_homeScreenEyeCareControlAndRelocatedOfficialBar() {
+    fun uiSmoke_homeScreenEyeCareControlAndCompactBannersWithoutOfficialBar() {
         composeRule.setContent {
             MyApplicationTheme {
                 HomeScreen(viewModel = viewModel)
@@ -447,7 +451,10 @@ class FeatureUpgradeVerificationTest {
         composeRule.waitForIdle()
 
         composeRule.onNodeWithTag("home_customer_credentials_bar").assertDoesNotExist()
-        composeRule.onNodeWithTag("official_installed_horizontal_bar").assertIsDisplayed()
+        composeRule.onNodeWithTag("official_installed_horizontal_bar").assertDoesNotExist()
+        composeRule.onNodeWithTag("home_top_clock_banner").assertIsDisplayed()
+        composeRule.onNodeWithTag("home_upper_controls_row").assertIsDisplayed()
+        composeRule.onNodeWithTag("horizontal_category_strip").assertIsDisplayed()
         composeRule.onNodeWithTag("home_eye_care_button").assertIsDisplayed().performClick()
         composeRule.waitForIdle()
 
@@ -730,5 +737,228 @@ class FeatureUpgradeVerificationTest {
         composeRule.onNodeWithTag("profit_analysis_usd_summary")
             .performScrollTo()
             .assertIsDisplayed()
+    }
+
+    @Test
+    fun orderSlipFormatter_andReceiptDialog_displayIndividualProductsPricesAndExpandToggle() {
+        val sampleOrder = com.example.data.model.Order(
+            orderId = "ORD-SLIP-777",
+            customerId = "cust-777",
+            customerName = "Ngozi Nwosu",
+            customerEmail = "ngozi@example.com",
+            customerPhone = "08011223344",
+            deliveryAddress = "44 Allen Avenue, Ikeja [Delivery: Flat Shipping Fee (₦2,000)]",
+            itemsSummary = "2x Silk Gown (ODIYA, L, Red) @ ₦15,000 each = ₦30,000; 1x Leather Handbag (ODIYA, M, Black) @ ₦20,000 each = ₦20,000",
+            totalAmount = 52000.0,
+            profit = 12000.0,
+            paymentMethod = PaymentMethod.OPAY,
+            paymentAccount = "8123456789",
+            paymentReference = "REF-SLIP-777",
+            senderName = "Ngozi Nwosu",
+            status = com.example.data.model.OrderStatus.CONFIRMED,
+            verificationNote = "Order & Payment Confirmed by Admin Cashier"
+        )
+
+        val parsed = OrderSlipFormatter.parseOrderSlipDetails(sampleOrder)
+        assertEquals(2, parsed.items.size)
+        assertEquals("2x Silk Gown (ODIYA, L, Red)", parsed.items[0].titleAndSpecs)
+        assertEquals("₦15,000", parsed.items[0].unitPriceText)
+        assertEquals("₦30,000", parsed.items[0].lineTotalText)
+        assertEquals("Flat Shipping Fee (₦2,000)", parsed.deliveryConditionAndFee)
+        assertEquals("44 Allen Avenue, Ikeja", parsed.cleanDeliveryAddress)
+
+        composeRule.setContent {
+            MyApplicationTheme {
+                ReceiptViewDialog(
+                    order = sampleOrder,
+                    storeProfile = viewModel.storeProfile.value,
+                    onDismiss = {}
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("receipt_dialog").assertIsDisplayed()
+        composeRule.onNodeWithTag("receipt_items_breakdown").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("1. 2x Silk Gown (ODIYA, L, Red)", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("₦30,000", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Flat Shipping Fee (₦2,000)").assertIsDisplayed()
+        composeRule.onNodeWithTag("receipt_expand_toggle_button").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("receipt_dialog").assertIsDisplayed()
+    }
+
+    @Test
+    fun adminFlatShippingFee_editAndActivateReflectsInCartAndDeliveryTab() {
+        runBlocking {
+            assertTrue(viewModel.verifyAdminPassword(viewModel.adminPassword.value))
+            viewModel.updateFlatShippingFee(amount = 2500.0, isActive = true)
+            pumpLooper(4)
+
+            val cfg = viewModel.flatShippingFeeConfig.value
+            assertTrue(cfg.isActive)
+            assertEquals(2500.0, cfg.amount, 0.01)
+
+            val sampleProduct = viewModel.allProducts.value.first()
+            viewModel.addToCart(sampleProduct) { _, _ -> }
+            pumpLooper(4)
+        }
+
+        composeRule.setContent {
+            MyApplicationTheme {
+                CartScreen(viewModel = viewModel)
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Flat Shipping Fee (Active)", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun ordersReceiptsScreen_supportsExpandToggleAndSearchDropdownFiltering() {
+        runBlocking {
+            dao.insertOrder(
+                com.example.data.local.OrderEntity(
+                    orderId = "ORD-SEARCH-101",
+                    customerId = "",
+                    customerName = "Tunde Bakare",
+                    customerEmail = "tunde@example.com",
+                    customerPhone = "08022223333",
+                    deliveryAddress = "12 Marina, Lagos",
+                    itemsSummary = "1x Classic Loafers (ODIYA, 42, Brown) @ ₦28,000 each = ₦28,000",
+                    totalAmount = 29500.0,
+                    profit = 6000.0,
+                    paymentMethod = PaymentMethod.MONIEPOINT.title,
+                    paymentAccount = "9011223344",
+                    paymentReference = "MONIE-101",
+                    senderName = "Tunde Bakare",
+                    status = com.example.data.model.OrderStatus.CONFIRMED.name,
+                    createdAt = System.currentTimeMillis(),
+                    verificationNote = "Confirmed"
+                )
+            )
+            pumpLooper(6)
+        }
+
+        composeRule.setContent {
+            MyApplicationTheme {
+                OrdersReceiptsScreen(viewModel = viewModel)
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("orders_receipt_search_dropdown").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("orders_header_expand_button").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("expanded_receipt_details_ORD-SEARCH-101").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun adminControlRoom_hangingCustomerAlertsStayPinnedUntilClickedAndOpenTarget() {
+        runBlocking {
+            assertTrue(viewModel.verifyAdminPassword(viewModel.adminPassword.value))
+            dao.insertOrder(
+                com.example.data.local.OrderEntity(
+                    orderId = "ORD-HANG-900",
+                    customerId = "cust_hang",
+                    customerName = "Amaka Eze",
+                    customerEmail = "amaka@example.com",
+                    customerPhone = "08055443322",
+                    deliveryAddress = "5 Wuse II, Abuja",
+                    itemsSummary = "1x Royal Tote @ ₦40,000 each = ₦40,000",
+                    totalAmount = 41500.0,
+                    profit = 9000.0,
+                    paymentMethod = PaymentMethod.OPAY.title,
+                    paymentAccount = "8123456789",
+                    paymentReference = "OPAY-HANG-900",
+                    senderName = "Amaka Eze",
+                    status = com.example.data.model.OrderStatus.PENDING_VERIFICATION.name,
+                    createdAt = System.currentTimeMillis(),
+                    verificationNote = "Pending Admin Review"
+                )
+            )
+            viewModel.saveCustomerDeliveryInfo("Bola Adesanya", "08033334444", "Victoria Island, Lagos")
+            viewModel.submitSupportTicket(
+                subject = "Need Receipt Check",
+                message = "Please verify my PalmPay transfer."
+            ) { _, _ -> }
+            pumpLooper(6)
+        }
+
+        val alerts = viewModel.hangingAdminAlerts.value
+        assertTrue(alerts.any { it.customerName == "Amaka Eze" && it.alertKey == "order_ORD-HANG-900" })
+        val ticketAlert = alerts.firstOrNull { it.customerName == "Bola Adesanya" }
+        assertNotNull(ticketAlert)
+
+        composeRule.setContent {
+            MyApplicationTheme {
+                AdminControlRoomScreen(viewModel = viewModel)
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("admin_hanging_alerts_bar").assertIsDisplayed()
+        composeRule.onNodeWithTag("admin_hanging_alert_order_ORD-HANG-900").assertIsDisplayed()
+        composeRule.onNodeWithTag("admin_hanging_alert_${ticketAlert!!.alertKey}").performClick()
+        composeRule.waitForIdle()
+
+        // Message dialog opens for clicked ticket alert and alert disappears from hanging bar
+        composeRule.onNodeWithTag("admin_alert_message_dialog").assertIsDisplayed()
+        composeRule.onNodeWithTag("admin_alert_dialog_message_body")
+            .assertIsDisplayed()
+            .assertTextContains("Please verify my PalmPay transfer.", substring = true)
+        org.junit.Assert.assertFalse(viewModel.hangingAdminAlerts.value.any { it.alertKey == ticketAlert.alertKey })
+        // Order alert remains pinned until clicked
+        assertTrue(viewModel.hangingAdminAlerts.value.any { it.alertKey == "order_ORD-HANG-900" })
+    }
+
+    @Test
+    fun paystackCheckout_supportsReceiptAttachmentBeforeAndAfterGatewayLaunch() = runBlocking {
+        val sampleProduct = viewModel.allProducts.value.first()
+        var added = false
+        viewModel.addToCart(sampleProduct) { ok, _ -> added = ok }
+        pumpLooper(4)
+        assertTrue(added)
+
+        // 1. Pre-attached receipt passed into initiatePaystackCheckout
+        var callbackDone = false
+        viewModel.initiatePaystackCheckout(
+            customerName = "Kemi Adeyemi",
+            customerPhone = "08099887766",
+            deliveryAddress = "18 Victoria Island, Lagos",
+            senderName = "Kemi Adeyemi",
+            deliveryConditionTitle = "Standard Delivery",
+            deliveryFeeAmount = 1500.0,
+            receiptImageUrl = "content://media/external/images/paystack_initial.png",
+            onReadyToOpenUrl = { _, _, _ -> callbackDone = true },
+            onFailure = { callbackDone = true }
+        )
+        repeat(15) {
+            if (viewModel.paystackCheckoutState.value.orderId.isNotBlank() && callbackDone) return@repeat
+            pumpLooper(4)
+        }
+        val orderId = viewModel.paystackCheckoutState.value.orderId
+        assertTrue(orderId.isNotBlank())
+        val initialOrder = viewModel.allOrders.value.firstOrNull { it.orderId == orderId }
+        assertNotNull(initialOrder)
+        assertEquals(PaymentMethod.PAYSTACK, initialOrder!!.paymentMethod)
+        assertEquals("content://media/external/images/paystack_initial.png", initialOrder.receiptImageUrl)
+
+        // 2. Attaching/updating a Paystack receipt image/PDF after gateway return updates the same order
+        var attachOk = false
+        viewModel.attachReceiptToPaystackOrder(
+            orderId = orderId,
+            receiptImageUrl = "file:///data/user/0/com.example/files/shared_receipts/paystack_slip.jpg",
+            senderName = "Kemi Adeyemi",
+            paymentReference = "PSK-REF-9911"
+        ) { ok, _ ->
+            attachOk = ok
+        }
+        pumpLooper(6)
+        assertTrue(attachOk)
+
+        val updatedOrder = viewModel.allOrders.value.firstOrNull { it.orderId == orderId }
+        assertNotNull(updatedOrder)
+        assertEquals("file:///data/user/0/com.example/files/shared_receipts/paystack_slip.jpg", updatedOrder!!.receiptImageUrl)
+        assertEquals("PSK-REF-9911", updatedOrder.paymentReference)
+        assertTrue(updatedOrder.verificationNote.contains("Paystack", ignoreCase = true))
     }
 }

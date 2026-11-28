@@ -12,6 +12,7 @@ import android.content.pm.PackageInfo
 import android.content.pm.ResolveInfo
 import android.os.Looper
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -25,7 +26,10 @@ import com.example.data.model.PaymentMethod
 import com.example.data.model.ProductColor
 import com.example.ui.screens.CheckoutScreen
 import com.example.ui.theme.MyApplicationTheme
+import com.example.util.ActiveMerchantPaymentOverlay
 import com.example.util.MerchantAppLauncher
+import com.example.util.MerchantClipboardActionReceiver
+import com.example.util.MerchantPaymentOverlayManager
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -67,6 +71,7 @@ class MerchantAppLauncherTest {
 
     @After
     fun tearDown() {
+        MerchantPaymentOverlayManager.clearOverlay(app)
         try {
             viewModel.endLiveCall()
         } catch (_: Exception) {}
@@ -117,6 +122,13 @@ class MerchantAppLauncherTest {
         installFakeMerchantApp(shadowPm, "com.moniepoint.personal", "com.moniepoint.personal.MainActivity")
         installFakeMerchantApp(shadowPm, "com.transsnet.palmpay", "com.transsnet.palmpay.MainActivity")
 
+        val cm = app.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val capturedClips = mutableListOf<String>()
+        val listener = ClipboardManager.OnPrimaryClipChangedListener {
+            cm.primaryClip?.getItemAt(0)?.text?.toString()?.let { capturedClips.add(it) }
+        }
+        cm.addPrimaryClipChangedListener(listener)
+
         val opayResult = MerchantAppLauncher.launchInstalledMerchantApp(
             context = app,
             method = PaymentMethod.OPAY,
@@ -125,18 +137,30 @@ class MerchantAppLauncherTest {
             storeName = "ODIYA",
             payableAmount = 45000.0
         )
+        cm.removePrimaryClipChangedListener(listener)
         assertTrue(opayResult.launchedInstalledApp)
         assertEquals("team.opay.pay", opayResult.installedPackageName)
         assertTrue(opayResult.clipboardSet)
+        assertEquals("8123456789", opayResult.embeddedAccountNumber)
+        assertEquals("45000.00", opayResult.embeddedPlainAmount)
 
-        val cm = app.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        assertTrue(capturedClips.contains("45000.00"))
+        assertTrue(capturedClips.contains("8123456789"))
         assertEquals("8123456789", cm.primaryClip?.getItemAt(0)?.text?.toString())
+
+        val overlay = MerchantPaymentOverlayManager.activeOverlay.value
+        assertNotNull(overlay)
+        assertEquals("8123456789", overlay?.accountNumber)
+        assertEquals("45000.00", overlay?.plainAmount)
+        assertTrue(overlay?.formattedAmount?.contains("45,000") == true)
 
         val launchedIntent = Shadows.shadowOf(app).nextStartedActivity
         assertNotNull(launchedIntent)
         assertEquals("team.opay.pay", launchedIntent.component?.packageName ?: launchedIntent.`package`)
         assertEquals("8123456789", launchedIntent.getStringExtra("odiya_account_number"))
         assertEquals("45000.00", launchedIntent.getStringExtra("odiya_payable_amount"))
+        assertEquals("8123456789", launchedIntent.getStringExtra("account_number"))
+        assertEquals("45000.00", launchedIntent.getStringExtra("amount"))
 
         assertEquals(
             "com.moniepoint.personal",
@@ -146,6 +170,41 @@ class MerchantAppLauncherTest {
             "com.transsnet.palmpay",
             MerchantAppLauncher.findInstalledMerchantPackage(app, PaymentMethod.PALMPAY)
         )
+    }
+
+    @Test
+    fun pipEmbeddedOverlayCard_andClipboardActionReceiver_exposeAccountNumberAndAmountInFigures() {
+        val overlay = ActiveMerchantPaymentOverlay(
+            merchantTitle = "OPay",
+            packageName = "team.opay.pay",
+            accountNumber = "9012345678",
+            accountName = "ODIYA ENTERPRISE",
+            storeName = "ODIYA",
+            payableAmount = 27500.0,
+            formattedAmount = "₦27,500.00",
+            plainAmount = "27500.00"
+        )
+
+        composeRule.setContent {
+            MyApplicationTheme {
+                EmbeddedMerchantPipOverlayCard(overlay = overlay)
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("pip_embedded_payment_card").assertIsDisplayed()
+        composeRule.onNodeWithText("9012345678").assertIsDisplayed()
+        composeRule.onNodeWithText("₦27,500.00").assertIsDisplayed()
+
+        val receiver = MerchantClipboardActionReceiver()
+        val copyAmtIntent = Intent(MerchantClipboardActionReceiver.ACTION_COPY_MERCHANT_DETAIL).apply {
+            putExtra(MerchantClipboardActionReceiver.EXTRA_COPY_LABEL, "Payable Amount")
+            putExtra(MerchantClipboardActionReceiver.EXTRA_COPY_VALUE, "27500.00")
+            putExtra(MerchantClipboardActionReceiver.EXTRA_TOAST_MESSAGE, "Copied Payable Amount: ₦27,500.00")
+        }
+        receiver.onReceive(app, copyAmtIntent)
+        val cm = app.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        assertEquals("27500.00", cm.primaryClip?.getItemAt(0)?.text?.toString())
     }
 
     @Test
@@ -221,12 +280,19 @@ class MerchantAppLauncherTest {
         assertNull(Shadows.shadowOf(app).nextStartedActivity)
         composeRule.onNodeWithTag("direct_portal_dialog").assertIsDisplayed()
         composeRule.onNodeWithTag("direct_portal_app_redirect_card").assertIsDisplayed()
-        composeRule.onNodeWithTag("direct_portal_return_to_app_button").assertIsDisplayed()
-        composeRule.onNodeWithTag("direct_portal_google_play_install_button").assertIsDisplayed()
+        composeRule.onNodeWithTag("direct_portal_copy_both_button").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("direct_portal_copy_amount_button").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("direct_portal_receipt_upload_card").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("direct_portal_return_to_app_button").assertExists()
+        composeRule.onNodeWithTag("direct_portal_bottom_return_button").performScrollTo().assertIsDisplayed()
 
-        // Return to Checkout Page cleanly closes dialog back to CheckoutScreen
-        composeRule.onNodeWithTag("direct_portal_return_to_app_button").performClick()
+        // Return to Complete Payment cleanly closes dialog back to CheckoutScreen with submit order + receipt button
+        composeRule.onNodeWithTag("direct_portal_bottom_return_button").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("checkout_merchant_instruction_card").assertExists()
+        composeRule.onNodeWithTag("send_orders_and_receipt_button")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertTextContains("Submit Order and Payment Receipt", substring = true)
     }
 }
