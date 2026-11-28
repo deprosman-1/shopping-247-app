@@ -1049,4 +1049,100 @@ class FeatureUpgradeVerificationTest {
         composeRule.onNodeWithText("Installed: v1.2 → New: v2.5.0").assertIsDisplayed()
         composeRule.onNodeWithText("Faster live cloud sync and upgrade prompt.").assertIsDisplayed()
     }
+
+    @Test
+    fun merchantReceiptAutoCapture_ignoresOdiyaClipboard_capturesCopiedReceiptAndRendersSlip() = runBlocking {
+        val sampleProduct = viewModel.allProducts.value.first()
+        viewModel.addToCart(sampleProduct) { _, _ -> }
+        pumpLooper(4)
+        viewModel.navigateTo(AppScreen.CHECKOUT)
+        pumpLooper(2)
+
+        val cm = app.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+
+        // 1. ODIYA's own copied account/amount clipboard entries must NOT be mistaken for a receipt
+        com.example.util.MerchantAppLauncher.copyAccountToClipboard(app, "9012345678", "15000.00")
+        var foundOwnCopy: Boolean? = null
+        viewModel.checkClipboardForMerchantReceiptOnReturn(app, forceCheck = true) { ok, _ ->
+            foundOwnCopy = ok
+        }
+        repeat(10) {
+            if (foundOwnCopy != null) return@repeat
+            pumpLooper(4)
+        }
+        org.junit.Assert.assertFalse(foundOwnCopy ?: true)
+        org.junit.Assert.assertNull(viewModel.pendingSharedReceipt.value)
+
+        // 2. Copied OPay / Moniepoint / PalmPay receipt text triggers automatic receipt slip rendering & capture
+        val receiptText = """
+            OPay Transaction Receipt
+            Transfer Successful
+            Amount: ₦15,000.00
+            Sender Name: Chinedu Okafor
+            Session ID: OPAY-9988776655
+            Beneficiary: ODIYA STORES
+        """.trimIndent()
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("OPay Receipt", receiptText))
+
+        var foundReceipt: Boolean? = null
+        viewModel.checkClipboardForMerchantReceiptOnReturn(app, forceCheck = false) { ok, _ ->
+            foundReceipt = ok
+        }
+        repeat(15) {
+            if (foundReceipt != null && viewModel.pendingSharedReceipt.value != null) return@repeat
+            pumpLooper(4)
+        }
+        assertTrue(foundReceipt == true)
+        val captured = viewModel.pendingSharedReceipt.value
+        assertNotNull(captured)
+        assertEquals(PaymentMethod.OPAY, captured!!.detectedPaymentMethod)
+        assertEquals("OPAY-9988776655", captured.extractedReference)
+        assertEquals("Chinedu Okafor", captured.extractedSender)
+        assertTrue(captured.receiptUri.startsWith("file://"))
+        val savedFile = java.io.File(android.net.Uri.parse(captured.receiptUri).path!!)
+        assertTrue(savedFile.exists() && savedFile.length() > 500L)
+    }
+
+    @Test
+    fun uiSmoke_checkoutAutoPastesMerchantReceiptIntoUploadBoxAndShowsReadyState() {
+        runBlocking {
+            val sampleProduct = viewModel.allProducts.value.first()
+            viewModel.addToCart(sampleProduct) { _, _ -> }
+            pumpLooper(4)
+            viewModel.handleIncomingSharedReceipt(
+                context = app,
+                streamUris = emptyList(),
+                mimeTypeHint = "text/plain",
+                sharedText = "Moniepoint Transfer Successful\nAmount: ₦25,000\nPaid By: Amina Yusuf\nSession ID: MONIE-44556677",
+                sharedSubject = "Moniepoint Receipt"
+            ) {}
+            repeat(15) {
+                if (viewModel.pendingSharedReceipt.value != null) return@repeat
+                pumpLooper(4)
+            }
+            assertNotNull(viewModel.pendingSharedReceipt.value)
+        }
+
+        composeRule.setContent {
+            MyApplicationTheme {
+                com.example.ui.screens.CheckoutScreen(viewModel = viewModel)
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("checkout_upload_receipt_box")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("Merchant Payment Receipt Automatically Pasted", substring = true)
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("receipt_sender_name_input")
+            .performScrollTo()
+            .assertTextContains("Amina Yusuf", substring = true)
+        composeRule.onNodeWithTag("receipt_reference_input")
+            .performScrollTo()
+            .assertTextContains("MONIE-44556677", substring = true)
+        composeRule.onNodeWithTag("send_orders_and_receipt_button")
+            .performScrollTo()
+            .assertIsDisplayed()
+    }
 }

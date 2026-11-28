@@ -132,6 +132,7 @@ class MainActivity : ComponentActivity() {
     private val pendingAppOpenSignal = kotlinx.coroutines.flow.MutableStateFlow(0L)
     private val pendingCatalogFilter = kotlinx.coroutines.flow.MutableStateFlow<Pair<String?, String?>?>(null)
     private val pendingOpenUpdateDialog = kotlinx.coroutines.flow.MutableStateFlow(0L)
+    private val pendingWindowFocusSignal = kotlinx.coroutines.flow.MutableStateFlow(0L)
     private val isInPipModeState = kotlinx.coroutines.flow.MutableStateFlow(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -181,9 +182,17 @@ class MainActivity : ComponentActivity() {
                     pendingAppOpenSignal = pendingAppOpenSignal,
                     pendingCatalogFilter = pendingCatalogFilter,
                     pendingOpenUpdateDialog = pendingOpenUpdateDialog,
+                    pendingWindowFocusSignal = pendingWindowFocusSignal,
                     isInPipModeFlow = isInPipModeState
                 )
             }
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            pendingWindowFocusSignal.value = System.currentTimeMillis()
         }
     }
 
@@ -326,6 +335,7 @@ fun DeprosApp(
     pendingAppOpenSignal: kotlinx.coroutines.flow.MutableStateFlow<Long>? = null,
     pendingCatalogFilter: kotlinx.coroutines.flow.MutableStateFlow<Pair<String?, String?>?>? = null,
     pendingOpenUpdateDialog: kotlinx.coroutines.flow.MutableStateFlow<Long>? = null,
+    pendingWindowFocusSignal: kotlinx.coroutines.flow.MutableStateFlow<Long>? = null,
     isInPipModeFlow: kotlinx.coroutines.flow.StateFlow<Boolean>? = null
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -446,11 +456,24 @@ fun DeprosApp(
         }
     }
 
+    val incomingWindowFocusTs = pendingWindowFocusSignal?.collectAsState()?.value ?: 0L
+    LaunchedEffect(incomingWindowFocusTs) {
+        if (incomingWindowFocusTs > 0L) {
+            delay(120L)
+            viewModel.checkClipboardForMerchantReceiptOnReturn(context) { found, msg ->
+                if (found) {
+                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
     val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
                 viewModel.checkForAppUpdates(showPopupIfFound = true, onResult = null)
+                viewModel.checkClipboardForMerchantReceiptOnReturn(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)

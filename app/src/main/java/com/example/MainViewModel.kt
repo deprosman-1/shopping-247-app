@@ -313,6 +313,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // Direct OPay / Moniepoint / Banking App Shared Invoice Receipt
     private val _pendingSharedReceipt = MutableStateFlow<PendingSharedReceipt?>(null)
     val pendingSharedReceipt: StateFlow<PendingSharedReceipt?> = _pendingSharedReceipt.asStateFlow()
+    private var lastCapturedClipboardFingerprint: String = ""
 
     // Products & Filtering
     val allProducts: StateFlow<List<Product>> = repository.allProducts
@@ -3583,6 +3584,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         deliveryFeeAmount: Double,
         simulateCreditAlertReceived: Boolean = true,
         simulateNetworkDelay: Boolean = false,
+        receiptImageUrl: String = "",
         customBargainTotal: Double? = null,
         appliedCouponCode: String = "",
         couponDiscountAmount: Double = 0.0,
@@ -3614,7 +3616,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             senderName = senderName,
             deliveryConditionTitle = deliveryConditionTitle,
             deliveryFeeAmount = deliveryFeeAmount,
-            receiptImageUrl = "",
+            receiptImageUrl = receiptImageUrl,
             customBargainTotal = customBargainTotal,
             appliedCouponCode = appliedCouponCode,
             couponDiscountAmount = couponDiscountAmount,
@@ -4675,12 +4677,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 rawText = sharedText.orEmpty(),
                 subject = sharedSubject.orEmpty()
             )
-            val savedFileUri = withContext(Dispatchers.IO) {
+            var savedFileUri = withContext(Dispatchers.IO) {
                 streamUris.firstNotNullOfOrNull { rawUri ->
                     SharedReceiptHelper.persistSharedReceiptToAppStorage(
                         context = context,
                         sourceUri = rawUri,
                         mimeTypeHint = mimeTypeHint
+                    )
+                }
+            }
+            if (savedFileUri == null && (!sharedText.isNullOrBlank() || parsedText.extractedReference.isNotBlank())) {
+                val activeOverlay = com.example.util.MerchantPaymentOverlayManager.activeOverlay.value
+                val fallbackMethod = parsedText.detectedPaymentMethod?.title
+                    ?: activeOverlay?.merchantTitle
+                    ?: parsedText.sourceAppLabel.ifBlank { "Merchant Bank" }
+                savedFileUri = withContext(Dispatchers.IO) {
+                    SharedReceiptHelper.renderTextReceiptToImageFile(
+                        context = context,
+                        parsed = parsedText,
+                        rawText = listOfNotNull(sharedSubject, sharedText).filter { it.isNotBlank() }.joinToString("\n"),
+                        fallbackMethodTitle = fallbackMethod
                     )
                 }
             }
@@ -4714,10 +4730,63 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 onFeedback("✅ $methodTag receipt attached directly to Paystack Order $activePaystackOrderId!")
             } else if (_cartItems.value.isNotEmpty() || activePaystackOrderId.isNotBlank()) {
                 navigateTo(AppScreen.CHECKOUT)
-                onFeedback("✅ $methodTag receipt attached directly to Checkout!")
+                onFeedback("✅ $methodTag receipt automatically pasted into Checkout!")
             } else {
                 onFeedback("✅ $methodTag receipt saved! Add item(s) & open Checkout — it attaches automatically.")
             }
+        }
+    }
+
+    fun checkClipboardForMerchantReceiptOnReturn(
+        context: Context,
+        forceCheck: Boolean = false,
+        expectedMethod: PaymentMethod? = null,
+        onResult: ((Boolean, String) -> Unit)? = null
+    ) {
+        val activeOverlay = com.example.util.MerchantPaymentOverlayManager.activeOverlay.value
+        val activePaystackOrderId = _paystackCheckoutState.value.orderId
+        val shouldScan = forceCheck ||
+            activeOverlay != null ||
+            _currentScreen.value == AppScreen.CHECKOUT ||
+            activePaystackOrderId.isNotBlank()
+        if (!shouldScan) return
+
+        val fallbackMethod = expectedMethod
+            ?: PaymentMethod.entries.firstOrNull { it.title.equals(activeOverlay?.merchantTitle, ignoreCase = true) }
+
+        viewModelScope.launch {
+            val capture = withContext(Dispatchers.IO) {
+                SharedReceiptHelper.tryCaptureReceiptFromClipboard(
+                    context = context,
+                    defaultMethod = fallbackMethod,
+                    hasActiveMerchantSession = activeOverlay != null || activePaystackOrderId.isNotBlank()
+                )
+            }
+            if (capture == null) {
+                if (forceCheck) {
+                    onResult?.invoke(false, "No copied receipt image or transfer receipt text found in clipboard yet.")
+                }
+                return@launch
+            }
+            if (!forceCheck && capture.fingerprint == lastCapturedClipboardFingerprint) {
+                return@launch
+            }
+            lastCapturedClipboardFingerprint = capture.fingerprint
+            val pending = capture.pendingReceipt
+            _pendingSharedReceipt.value = pending
+            if (pending.extractedSender.isNotBlank()) {
+                persistDeliveryInfoLocally(senderName = pending.extractedSender)
+            }
+            if (activePaystackOrderId.isNotBlank() && pending.receiptUri.isNotBlank() && _cartItems.value.isEmpty()) {
+                attachReceiptToPaystackOrder(
+                    orderId = activePaystackOrderId,
+                    receiptImageUrl = pending.receiptUri,
+                    senderName = pending.extractedSender,
+                    paymentReference = pending.extractedReference
+                )
+            }
+            val methodTag = pending.detectedPaymentMethod?.title ?: pending.sourceAppLabel.ifBlank { "Merchant" }
+            onResult?.invoke(true, "✅ $methodTag receipt automatically pasted into Checkout!")
         }
     }
 

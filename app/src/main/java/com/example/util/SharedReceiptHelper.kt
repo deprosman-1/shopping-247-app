@@ -1,20 +1,31 @@
 package com.example.util
 
+import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Typeface
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
 import com.example.data.model.PaymentMethod
 import java.io.File
 import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 data class ParsedReceiptText(
     val detectedPaymentMethod: PaymentMethod? = null,
     val extractedReference: String = "",
     val extractedSender: String = "",
+    val extractedAmount: String = "",
     val sourceAppLabel: String = ""
 )
 
@@ -26,6 +37,11 @@ data class PendingSharedReceipt(
     val rawTextSummary: String = "",
     val sourceAppLabel: String = "",
     val receivedAtMillis: Long = System.currentTimeMillis()
+)
+
+data class ClipboardReceiptCapture(
+    val fingerprint: String,
+    val pendingReceipt: PendingSharedReceipt
 )
 
 data class ExtractedStoreSyncCredentials(
@@ -64,8 +80,9 @@ object SharedReceiptHelper {
         }
 
         val refPatterns = listOf(
-            Regex("""(?:session\s*id|transaction\s*ref(?:erence)?|reference\s*(?:id|no|number)?|payment\s*ref(?:erence)?|stan|trx\s*id)\s*[:#\-]?\s*([A-Za-z0-9\-_]{5,48})""", RegexOption.IGNORE_CASE),
-            Regex("""\bref\s*[:#\-]\s*([A-Za-z0-9\-_]{5,48})""", RegexOption.IGNORE_CASE)
+            Regex("""(?:session\s*id|transaction\s*(?:ref(?:erence)?|id|no|number)|trans\.?\s*id|reference\s*(?:id|no|number)?|payment\s*ref(?:erence)?|trxref|stan|rrn|trx\s*id)\s*[:#\-]?\s*([A-Za-z0-9\-_]{5,48})""", RegexOption.IGNORE_CASE),
+            Regex("""\bref\s*[:#\-]\s*([A-Za-z0-9\-_]{5,48})""", RegexOption.IGNORE_CASE),
+            Regex("""\b((?:PSK|ODIYA)[_-][A-Za-z0-9\-_]{4,40})\b""", RegexOption.IGNORE_CASE)
         )
         val extractedRef = refPatterns
             .asSequence()
@@ -74,7 +91,7 @@ object SharedReceiptHelper {
             ?: ""
 
         val senderPatterns = listOf(
-            Regex("""(?:sender(?:\s*name)?|payer(?:\s*name)?|paid\s*by|account\s*holder|from)\s*[:\-]\s*([A-Za-z][A-Za-z0-9 .,'\-]{2,60})""", RegexOption.IGNORE_CASE)
+            Regex("""(?:sender(?:\s*name)?|payer(?:\s*name)?|paid\s*by|account\s*holder|source\s*account|from)\s*[:\-]\s*([A-Za-z][A-Za-z0-9 .,'\-]{2,60})""", RegexOption.IGNORE_CASE)
         )
         val extractedSender = senderPatterns
             .asSequence()
@@ -83,16 +100,266 @@ object SharedReceiptHelper {
                 candidate.isNotBlank() &&
                     !candidate.equals("OPay", ignoreCase = true) &&
                     !candidate.equals("Moniepoint", ignoreCase = true) &&
-                    !candidate.equals("PalmPay", ignoreCase = true)
+                    !candidate.equals("PalmPay", ignoreCase = true) &&
+                    !candidate.equals("Paystack", ignoreCase = true)
             }
             ?: ""
+
+        val amountMatch = Regex("""(?:₦|NGN\s*|Amount\s*[:\-]?\s*₦?\s*)([0-9][0-9,]*(?:\.[0-9]{1,2})?)""", RegexOption.IGNORE_CASE)
+            .find(combined)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.trim()
+            .orEmpty()
 
         return ParsedReceiptText(
             detectedPaymentMethod = detectedMethod,
             extractedReference = extractedRef,
             extractedSender = extractedSender,
+            extractedAmount = amountMatch,
             sourceAppLabel = sourceLabel
         )
+    }
+
+    fun isLikelyMerchantReceiptText(
+        rawText: String,
+        subject: String = "",
+        hasActiveMerchantSession: Boolean = false
+    ): Boolean {
+        val combined = listOf(subject, rawText).filter { it.isNotBlank() }.joinToString("\n").trim()
+        if (combined.length < 6) return false
+
+        // Never treat store sync links or pure account/amount numbers copied by ODIYA as a receipt
+        val lower = combined.lowercase()
+        if (lower.contains("sb_url=") || lower.contains("sb_key=")) return false
+        if (Regex("""^\d{8,12}$""").matches(combined) || Regex("""^\d+(\.\d{1,2})?$""").matches(combined)) {
+            return false
+        }
+
+        val parsed = parseReceiptShareText(rawText, subject)
+        if (parsed.extractedReference.isNotBlank() && parsed.detectedPaymentMethod != null) return true
+        if (parsed.extractedReference.isNotBlank() && parsed.extractedSender.isNotBlank()) return true
+
+        val receiptSignals = listOf(
+            "receipt", "transaction", "session id", "transfer", "successful", "success",
+            "beneficiary", "sender", "payer", "amount", "ngn", "₦", "credited", "debited",
+            "reference", "stan", "rrn", "opay", "moniepoint", "palmpay", "paystack", "odiya"
+        ).count { lower.contains(it) }
+
+        if (receiptSignals >= 2) return true
+        if (hasActiveMerchantSession && (parsed.extractedReference.isNotBlank() || receiptSignals >= 1)) {
+            return true
+        }
+        return false
+    }
+
+    fun renderTextReceiptToImageFile(
+        context: Context,
+        parsed: ParsedReceiptText,
+        rawText: String,
+        fallbackMethodTitle: String = "Merchant Bank"
+    ): Uri? {
+        return try {
+            val width = 1080
+            val height = 1360
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            canvas.drawColor(Color.parseColor("#F8FAFC"))
+
+            val headerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#064E3B")
+            }
+            canvas.drawRect(0f, 0f, width.toFloat(), 230f, headerPaint)
+
+            val titlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                textSize = 46f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            }
+            canvas.drawText("ODIYA VERIFIED PAYMENT RECEIPT", 64f, 102f, titlePaint)
+
+            val methodName = parsed.detectedPaymentMethod?.title
+                ?: parsed.sourceAppLabel.takeIf { it.isNotBlank() && it != "Payment App" }
+                ?: fallbackMethodTitle
+            val subtitlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#FDE047")
+                textSize = 34f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            }
+            canvas.drawText("Source: $methodName", 64f, 165f, subtitlePaint)
+
+            val dateStr = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date())
+            val datePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#CBD5E1")
+                textSize = 26f
+            }
+            canvas.drawText("Captured: $dateStr", 64f, 206f, datePaint)
+
+            val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+            }
+            val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#10B981")
+                style = Paint.Style.STROKE
+                strokeWidth = 4f
+            }
+            val cardRect = RectF(48f, 268f, (width - 48).toFloat(), (height - 64).toFloat())
+            canvas.drawRoundRect(cardRect, 28f, 28f, cardPaint)
+            canvas.drawRoundRect(cardRect, 28f, 28f, borderPaint)
+
+            var y = 338f
+            val labelPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#0F172A")
+                textSize = 31f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            }
+            val bodyPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#334155")
+                textSize = 29f
+            }
+
+            if (parsed.extractedAmount.isNotBlank()) {
+                canvas.drawText("Amount: ₦${parsed.extractedAmount}", 84f, y, labelPaint)
+                y += 52f
+            }
+            if (parsed.extractedSender.isNotBlank()) {
+                canvas.drawText("Sender: ${parsed.extractedSender}", 84f, y, labelPaint)
+                y += 52f
+            }
+            if (parsed.extractedReference.isNotBlank()) {
+                canvas.drawText("Reference / Session ID: ${parsed.extractedReference}", 84f, y, labelPaint)
+                y += 56f
+            }
+
+            val dividerPaint = Paint().apply {
+                color = Color.parseColor("#E2E8F0")
+                strokeWidth = 3f
+            }
+            canvas.drawLine(84f, y, (width - 84).toFloat(), y, dividerPaint)
+            y += 40f
+
+            canvas.drawText("Merchant Receipt Details:", 84f, y, labelPaint)
+            y += 32f
+
+            val cleanBody = rawText.trim().ifBlank { "Payment Receipt Attached ($methodName)" }.take(1400)
+            val textWidth = width - 168
+            val staticLayout = StaticLayout.Builder
+                .obtain(cleanBody, 0, cleanBody.length, bodyPaint, textWidth)
+                .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                .setLineSpacing(6f, 1.15f)
+                .build()
+
+            canvas.save()
+            canvas.translate(84f, y)
+            staticLayout.draw(canvas)
+            canvas.restore()
+
+            val dir = File(context.filesDir, "shared_receipts").apply { mkdirs() }
+            val outFile = File(dir, "receipt_auto_${System.currentTimeMillis()}.jpg")
+            FileOutputStream(outFile).use { fos ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 92, fos)
+            }
+            bitmap.recycle()
+            if (outFile.exists() && outFile.length() > 0L) Uri.fromFile(outFile) else null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun tryCaptureReceiptFromClipboard(
+        context: Context,
+        defaultMethod: PaymentMethod? = null,
+        hasActiveMerchantSession: Boolean = false
+    ): ClipboardReceiptCapture? {
+        return try {
+            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                ?: return null
+            val clip = cm.primaryClip ?: return null
+            if (clip.itemCount <= 0) return null
+
+            val label = clip.description?.label?.toString().orEmpty()
+            // Skip ODIYA's own copied account numbers & payable amounts
+            if (label.startsWith("ODIYA ", ignoreCase = true)) {
+                return null
+            }
+
+            val mimeHint = if ((clip.description?.mimeTypeCount ?: 0) > 0) {
+                clip.description?.getMimeType(0)
+            } else {
+                null
+            }
+
+            for (i in 0 until clip.itemCount) {
+                val item = clip.getItemAt(i) ?: continue
+                val uri = item.uri
+                if (uri != null) {
+                    val uriMime = (mimeHint ?: context.contentResolver.getType(uri)).orEmpty().lowercase()
+                    val isReceiptAsset = uriMime.startsWith("image/") ||
+                        uriMime.contains("pdf") ||
+                        uri.toString().endsWith(".png", ignoreCase = true) ||
+                        uri.toString().endsWith(".jpg", ignoreCase = true) ||
+                        uri.toString().endsWith(".jpeg", ignoreCase = true) ||
+                        uri.toString().endsWith(".pdf", ignoreCase = true) ||
+                        uriMime == "application/octet-stream"
+                    if (isReceiptAsset) {
+                        val savedUri = persistSharedReceiptToAppStorage(
+                            context = context,
+                            sourceUri = uri,
+                            mimeTypeHint = uriMime.ifBlank { mimeHint }
+                        )
+                        if (savedUri != null) {
+                            val itemText = item.text?.toString().orEmpty()
+                            val parsed = parseReceiptShareText(itemText, label)
+                            val effectiveMethod = parsed.detectedPaymentMethod ?: defaultMethod
+                            val pending = PendingSharedReceipt(
+                                receiptUri = savedUri.toString(),
+                                detectedPaymentMethod = effectiveMethod,
+                                extractedReference = parsed.extractedReference,
+                                extractedSender = parsed.extractedSender,
+                                rawTextSummary = itemText.trim(),
+                                sourceAppLabel = effectiveMethod?.title ?: parsed.sourceAppLabel.ifBlank { "Merchant Receipt" },
+                                receivedAtMillis = System.currentTimeMillis()
+                            )
+                            return ClipboardReceiptCapture(
+                                fingerprint = "uri:${uri}:${clip.description?.timestamp ?: 0L}",
+                                pendingReceipt = pending
+                            )
+                        }
+                    }
+                }
+
+                val text = (item.text ?: item.coerceToText(context))?.toString()?.trim().orEmpty()
+                if (text.isNotBlank() && isLikelyMerchantReceiptText(text, label, hasActiveMerchantSession)) {
+                    val parsed = parseReceiptShareText(text, label)
+                    val effectiveMethod = parsed.detectedPaymentMethod ?: defaultMethod
+                    val fallbackLabel = effectiveMethod?.title ?: parsed.sourceAppLabel.ifBlank { "Merchant Bank" }
+                    val generatedUri = renderTextReceiptToImageFile(
+                        context = context,
+                        parsed = parsed,
+                        rawText = text,
+                        fallbackMethodTitle = fallbackLabel
+                    )
+                    if (generatedUri != null) {
+                        val pending = PendingSharedReceipt(
+                            receiptUri = generatedUri.toString(),
+                            detectedPaymentMethod = effectiveMethod,
+                            extractedReference = parsed.extractedReference,
+                            extractedSender = parsed.extractedSender,
+                            rawTextSummary = text,
+                            sourceAppLabel = fallbackLabel,
+                            receivedAtMillis = System.currentTimeMillis()
+                        )
+                        return ClipboardReceiptCapture(
+                            fingerprint = "txt:${text.hashCode()}:${text.length}",
+                            pendingReceipt = pending
+                        )
+                    }
+                }
+            }
+            null
+        } catch (_: Exception) {
+            null
+        }
     }
 
     // Extracts Supabase Store Sync URL + Anon/Publishable Key from deep links, web links,
@@ -158,6 +425,7 @@ object SharedReceiptHelper {
             if (bytes.isEmpty()) return null
 
             val isPdf = resolvedMime.contains("pdf") ||
+                sourceUri.toString().endsWith(".pdf", ignoreCase = true) ||
                 (bytes.size >= 4 &&
                     bytes[0] == '%'.code.toByte() &&
                     bytes[1] == 'P'.code.toByte() &&

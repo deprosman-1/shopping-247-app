@@ -19,10 +19,13 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -239,20 +242,27 @@ fun CheckoutScreen(
         )
     }
     var paymentReference by rememberSaveable { mutableStateOf("REF-${System.currentTimeMillis().toString().takeLast(6)}") }
-    var receiptImageUri by remember { mutableStateOf<Uri?>(null) }
+    var receiptImageUriString by rememberSaveable { mutableStateOf("") }
+    val receiptImageUri = remember(receiptImageUriString) {
+        receiptImageUriString.takeIf { it.isNotBlank() }?.let { Uri.parse(it) }
+    }
     val pendingSharedReceipt by viewModel.pendingSharedReceipt.collectAsState()
     val topPaystackUiState by viewModel.paystackCheckoutState.collectAsState()
     var lastAppliedSharedTimestamp by rememberSaveable { mutableStateOf(0L) }
 
     var currentStepName by rememberSaveable { mutableStateOf(CheckoutStep.SELECT_DELIVERY_CONDITION.name) }
     val currentStep = CheckoutStep.entries.firstOrNull { it.name == currentStepName } ?: CheckoutStep.SELECT_DELIVERY_CONDITION
+    var isPlacingOrder by remember { mutableStateOf(false) }
+    var showNoReceiptDialog by remember { mutableStateOf(false) }
+    var activeDirectPortalMethod by remember { mutableStateOf<PaymentMethod?>(null) }
+    var pendingScrollToReceiptBox by remember { mutableStateOf(false) }
 
     LaunchedEffect(pendingSharedReceipt) {
         val shared = pendingSharedReceipt ?: return@LaunchedEffect
         if (shared.receivedAtMillis != lastAppliedSharedTimestamp) {
             lastAppliedSharedTimestamp = shared.receivedAtMillis
             if (shared.receiptUri.isNotBlank()) {
-                receiptImageUri = Uri.parse(shared.receiptUri)
+                receiptImageUriString = shared.receiptUri
             }
             shared.detectedPaymentMethod?.let { selectedPaymentMethod = it }
             if (shared.extractedReference.isNotBlank()) {
@@ -261,20 +271,22 @@ fun CheckoutScreen(
             if (shared.extractedSender.isNotBlank()) {
                 senderName = shared.extractedSender
             }
+            if (activeDirectPortalMethod != null) {
+                com.example.util.MerchantPaymentOverlayManager.clearOverlay(context)
+                activeDirectPortalMethod = null
+            }
             if (currentStep == CheckoutStep.SELECT_DELIVERY_CONDITION) {
                 currentStepName = CheckoutStep.UPLOAD_PAYMENT_RECEIPT_ORDER_CONFIRMATION_AND_TOTAL.name
             }
+            pendingScrollToReceiptBox = true
             val label = shared.detectedPaymentMethod?.title ?: shared.sourceAppLabel.ifBlank { "OPay / Moniepoint" }
             Toast.makeText(
                 context,
-                "✅ $label invoice attached automatically — review & Submit Order!",
+                "✅ $label receipt automatically pasted — tap Submit Order and Payment Receipt!",
                 Toast.LENGTH_LONG
             ).show()
         }
     }
-    var isPlacingOrder by remember { mutableStateOf(false) }
-    var showNoReceiptDialog by remember { mutableStateOf(false) }
-    var activeDirectPortalMethod by remember { mutableStateOf<PaymentMethod?>(null) }
     var appliedCheckoutBargainPrice by remember { mutableStateOf<Double?>(null) }
     var proposedCheckoutBargainInput by remember { mutableStateOf("") }
     var couponCodeInput by rememberSaveable { mutableStateOf("") }
@@ -332,7 +344,7 @@ fun CheckoutScreen(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         if (uri != null) {
-            receiptImageUri = uri
+            receiptImageUriString = uri.toString()
             Toast.makeText(context, "Payment Receipt Selected!", Toast.LENGTH_SHORT).show()
         }
     }
@@ -347,7 +359,7 @@ fun CheckoutScreen(
                     Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
             }
-            receiptImageUri = uri
+            receiptImageUriString = uri.toString()
             Toast.makeText(context, "Bank Payment Receipt Attached!", Toast.LENGTH_SHORT).show()
         }
     }
@@ -516,6 +528,17 @@ fun CheckoutScreen(
                             onChooseDocumentReceipt = {
                                 documentReceiptLauncher.launch(arrayOf("image/*", "application/pdf"))
                             },
+                            onPasteCopiedReceipt = {
+                                viewModel.checkClipboardForMerchantReceiptOnReturn(
+                                    context = context,
+                                    forceCheck = true,
+                                    expectedMethod = selectedPaymentMethod
+                                ) { _, msg ->
+                                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                }
+                            },
+                            scrollToReceiptTrigger = pendingScrollToReceiptBox,
+                            onReceiptScrolledIntoView = { pendingScrollToReceiptBox = false },
                             currentCustomer = currentCustomer,
                             hasSavedDelivery = (currentCustomer != null) || savedDeliveryInfo.fullName.isNotBlank() || savedDeliveryInfo.phoneNumber.isNotBlank() || savedDeliveryInfo.deliveryAddress.isNotBlank(),
                             nairaFormat = nairaFormat,
@@ -821,8 +844,22 @@ fun CheckoutScreen(
             onChooseDocumentReceipt = {
                 documentReceiptLauncher.launch(arrayOf("image/*", "application/pdf"))
             },
+            onPasteCopiedReceipt = {
+                viewModel.checkClipboardForMerchantReceiptOnReturn(
+                    context = context,
+                    forceCheck = true,
+                    expectedMethod = portalMethod
+                ) { _, msg ->
+                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                }
+            },
             isProcessing = isPlacingOrder,
             onDismiss = {
+                viewModel.checkClipboardForMerchantReceiptOnReturn(
+                    context = context,
+                    forceCheck = false,
+                    expectedMethod = portalMethod
+                )
                 com.example.util.MerchantPaymentOverlayManager.clearOverlay(context)
                 activeDirectPortalMethod = null
             },
@@ -849,6 +886,7 @@ fun CheckoutScreen(
                     deliveryFeeAmount = deliveryFee,
                     simulateCreditAlertReceived = simulateCredited,
                     simulateNetworkDelay = simulateNetDelay,
+                    receiptImageUrl = receiptImageUri?.toString().orEmpty(),
                     customBargainTotal = appliedCheckoutBargainPrice,
                     appliedCouponCode = appliedCouponCode,
                     couponDiscountAmount = couponDiscountAmount,
@@ -2558,6 +2596,7 @@ private fun PosTransferDetailsBox(storeProfile: StoreProfileConfig = StoreProfil
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
     cartItems: List<com.example.data.model.CartItem>,
@@ -2581,6 +2620,9 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
     receiptImageUri: Uri?,
     onChooseReceipt: () -> Unit,
     onChooseDocumentReceipt: () -> Unit = onChooseReceipt,
+    onPasteCopiedReceipt: () -> Unit = {},
+    scrollToReceiptTrigger: Boolean = false,
+    onReceiptScrolledIntoView: () -> Unit = {},
     currentCustomer: com.example.data.model.Customer?,
     hasSavedDelivery: Boolean,
     nairaFormat: NumberFormat,
@@ -2620,8 +2662,17 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
     val pointsOnlyDiscountAmount = (loyaltyDiscountAmount - specialLoyaltyDiscountAmount).coerceAtLeast(0.0)
     val stageCtx = LocalContext.current
     val stageAmountNow = appliedBargainPrice ?: effectivePayableTotal
+    @OptIn(ExperimentalFoundationApi::class)
+    val receiptBoxBringIntoViewRequester = remember { BringIntoViewRequester() }
+    LaunchedEffect(scrollToReceiptTrigger, receiptImageUri) {
+        if (scrollToReceiptTrigger && receiptImageUri != null) {
+            delay(150L)
+            runCatching { receiptBoxBringIntoViewRequester.bringIntoView() }
+            onReceiptScrolledIntoView()
+        }
+    }
     LaunchedEffect(stageAmountNow) {
-        if (stageAmountNow > 0.0) {
+        if (stageAmountNow > 0.0 && receiptImageUri == null) {
             MerchantAppLauncher.copyAmountToClipboard(
                 stageCtx,
                 String.format(Locale.US, "%.2f", stageAmountNow)
@@ -3801,12 +3852,14 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
 
         var receiptPreviewZoomOpen by remember { mutableStateOf(false) }
 
+        @OptIn(ExperimentalFoundationApi::class)
         Card(
             shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
             border = BorderStroke(1.5.dp, if (receiptImageUri != null) SuccessGreen else MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
             modifier = Modifier
                 .fillMaxWidth()
+                .bringIntoViewRequester(receiptBoxBringIntoViewRequester)
                 .testTag("checkout_upload_receipt_box")
         ) {
             Column(
@@ -3850,7 +3903,7 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = if (activeSharedReceipt?.receiptUri == receiptImageUri?.toString()) {
-                                "Merchant Bank Receipt Attached — Ready to Submit!"
+                                "Merchant Payment Receipt Automatically Pasted — Ready to Submit!"
                             } else {
                                 "Payment Receipt Uploaded & Ready to Submit Together"
                             },
@@ -3899,12 +3952,25 @@ private fun UploadPaymentReceiptOrderConfirmationAndTotalStep(
                     Spacer(modifier = Modifier.height(10.dp))
                     Text("No receipt selected yet", fontWeight = FontWeight.Bold)
                     Text(
-                        text = "In OPay, Moniepoint, PalmPay, or Paystack: tap Share -> select ODIYA, or select your bank/Paystack receipt image or PDF slip below.",
+                        text = "In OPay, Moniepoint, PalmPay, or Paystack: tap Share -> ODIYA (or Copy Receipt & return to app) to auto-paste your receipt here, or choose Image/PDF below.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
                     )
                     Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedButton(
+                        onClick = onPasteCopiedReceipt,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .testTag("paste_copied_receipt_button")
+                    ) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(17.dp), tint = CyberCyan)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Paste Copied Merchant Receipt", fontWeight = FontWeight.Bold, color = CyberCyan)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
                     Button(
                         onClick = onChooseReceipt,
                         shape = RoundedCornerShape(12.dp),
@@ -4188,6 +4254,7 @@ private fun DirectPortalCheckoutDialog(
     receiptImageUri: Uri? = null,
     onChooseReceipt: () -> Unit = {},
     onChooseDocumentReceipt: () -> Unit = {},
+    onPasteCopiedReceipt: () -> Unit = {},
     isProcessing: Boolean,
     onDismiss: () -> Unit,
     onPayNow: (simulateCredited: Boolean, simulateNetworkDelay: Boolean) -> Unit
@@ -4463,13 +4530,27 @@ private fun DirectPortalCheckoutDialog(
                         )
                         Text(
                             text = if (receiptImageUri != null) {
-                                "Your ${paymentMethod.title} payment receipt is attached in Checkout's 'Upload Payment Receipt' box. Tap Return to Complete Payment, then tap Submit Order and Payment Receipt."
+                                "Your ${paymentMethod.title} payment receipt is pasted in Checkout's 'Upload Payment Receipt' box. Tap Return to Complete Payment, then tap Submit Order and Payment Receipt."
                             } else {
-                                "Attach the payment receipt generated by ${paymentMethod.title} (or share directly from ${paymentMethod.title} to ODIYA), then return to submit your order & receipt together."
+                                "Share directly from ${paymentMethod.title} to ODIYA, or Copy Receipt & return to ODIYA — it pastes automatically into Checkout's receipt box (or tap Paste/Attach below)."
                             },
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurface
                         )
+                        if (receiptImageUri == null) {
+                            OutlinedButton(
+                                onClick = onPasteCopiedReceipt,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(40.dp)
+                                    .testTag("direct_portal_paste_receipt_button")
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Paste Copied Receipt", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
