@@ -64,26 +64,46 @@ class CatalogBackgroundSyncJobService : JobService() {
                         }
                     }
 
-                    // Check if Admin published a newer APK version on Cloud
+                    // Check if Admin published a newer APK version on Cloud (manifest or store_profile)
                     val manifest = syncService.fetchAppUpdateManifest().getOrNull()
-                    if (manifest != null) {
-                        val pkgInfo = appContext.packageManager.getPackageInfo(appContext.packageName, 0)
-                        val installedCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                            pkgInfo.longVersionCode.toInt()
-                        } else {
-                            @Suppress("DEPRECATION")
-                            pkgInfo.versionCode
-                        }
-                        val lastNotified = prefs.getInt("last_notified_update_code", 0)
-                        if (manifest.versionCode > installedCode && manifest.versionCode > lastNotified) {
-                            prefs.edit().putInt("last_notified_update_code", manifest.versionCode).apply()
-                            ShopNotificationHelper.notifyAppUpdateAvailable(
-                                context = appContext,
-                                versionName = manifest.versionName,
-                                versionCode = manifest.versionCode,
-                                notes = manifest.releaseNotes
-                            )
-                        }
+                    val remoteProfile = syncService.syncStoreProfileWithCloud(
+                        localProfile = com.example.data.model.StoreProfileConfig(),
+                        preferLocal = false
+                    ).getOrNull()
+                    val effectiveCode = maxOf(
+                        manifest?.versionCode ?: 1,
+                        remoteProfile?.latestAppVersionCode ?: 1
+                    )
+                    val effectiveName = manifest?.versionName?.takeIf { it.isNotBlank() }
+                        ?: remoteProfile?.latestAppVersionName?.takeIf { it.isNotBlank() }
+                        ?: "1.0"
+                    val effectiveNotes = manifest?.releaseNotes?.takeIf { it.isNotBlank() }
+                        ?: remoteProfile?.updateReleaseNotes.orEmpty()
+
+                    val pkgInfo = appContext.packageManager.getPackageInfo(appContext.packageName, 0)
+                    val installedCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                        pkgInfo.longVersionCode.toInt()
+                    } else {
+                        @Suppress("DEPRECATION")
+                        pkgInfo.versionCode
+                    }
+                    val installedName = pkgInfo.versionName?.ifBlank { "1.0" } ?: "1.0"
+                    val isNewer = effectiveCode > installedCode ||
+                        (effectiveCode >= installedCode && !effectiveName.equals(installedName, ignoreCase = true))
+                    val versionSig = "$effectiveCode:$effectiveName"
+                    val lastNotifiedSig = prefs.getString("last_notified_update_sig", "").orEmpty()
+                    val lastNotified = prefs.getInt("last_notified_update_code", 0)
+                    if (isNewer && (lastNotifiedSig != versionSig || effectiveCode > lastNotified)) {
+                        prefs.edit()
+                            .putInt("last_notified_update_code", effectiveCode)
+                            .putString("last_notified_update_sig", versionSig)
+                            .apply()
+                        ShopNotificationHelper.notifyAppUpdateAvailable(
+                            context = appContext,
+                            versionName = effectiveName,
+                            versionCode = effectiveCode,
+                            notes = effectiveNotes
+                        )
                     }
                 }
             } catch (_: Exception) {

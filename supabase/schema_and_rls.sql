@@ -198,6 +198,40 @@ CREATE TABLE IF NOT EXISTS public.app_security_telemetry (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 1D. STORE PROFILE & LIVE APP UPDATE METADATA TABLE
+CREATE TABLE IF NOT EXISTS public.store_profile (
+    id TEXT PRIMARY KEY DEFAULT 'odiya_main',
+    store_name TEXT DEFAULT 'ODIYA',
+    tagline TEXT DEFAULT 'Shopping with ease and comfort',
+    phone_number TEXT DEFAULT '',
+    secondary_phone_number TEXT DEFAULT '',
+    whatsapp_number TEXT DEFAULT '',
+    support_email TEXT DEFAULT '',
+    store_address TEXT DEFAULT '',
+    opay_account_number TEXT DEFAULT '',
+    opay_account_name TEXT DEFAULT 'ODIYA',
+    moniepoint_account_number TEXT DEFAULT '',
+    moniepoint_account_name TEXT DEFAULT 'ODIYA',
+    palmpay_account_number TEXT DEFAULT '',
+    palmpay_account_name TEXT DEFAULT 'ODIYA',
+    pos_terminal_id TEXT DEFAULT '',
+    pos_terminal_name TEXT DEFAULT '',
+    extra_bank_name TEXT DEFAULT '',
+    extra_bank_account_number TEXT DEFAULT '',
+    extra_bank_account_name TEXT DEFAULT '',
+    apk_download_url TEXT DEFAULT '',
+    latest_app_version_code INT DEFAULT 1,
+    latest_app_version_name TEXT DEFAULT '1.0',
+    update_release_notes TEXT DEFAULT '',
+    is_maintenance_mode BOOLEAN DEFAULT FALSE,
+    maintenance_message TEXT DEFAULT '',
+    maintenance_started_at BIGINT DEFAULT 0,
+    paystack_public_key TEXT DEFAULT '',
+    paystack_callback_url TEXT DEFAULT 'depros://paystack-callback',
+    paystack_edge_function_base_url TEXT DEFAULT '',
+    updated_at BIGINT DEFAULT 0
+);
+
 -- =============================================================================
 -- 2. LEAST-PRIVILEGE GRANTS & ROW LEVEL SECURITY (RLS) POLICIES
 -- =============================================================================
@@ -208,6 +242,7 @@ GRANT SELECT, INSERT, UPDATE ON TABLE public.orders TO anon, authenticated;
 GRANT SELECT, INSERT, UPDATE ON TABLE public.pre_orders TO anon, authenticated;
 GRANT SELECT ON TABLE public.paystack_transactions TO anon, authenticated;
 GRANT INSERT, SELECT ON TABLE public.app_security_telemetry TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE ON TABLE public.store_profile TO anon, authenticated;
 
 -- Products: Public storefront catalog + Admin sync
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
@@ -265,6 +300,11 @@ CREATE POLICY "Telemetry Read & Insert" ON public.app_security_telemetry
     FOR SELECT TO anon, authenticated USING (true);
 CREATE POLICY "Telemetry Insert Only" ON public.app_security_telemetry
     FOR INSERT TO anon, authenticated WITH CHECK (true);
+
+ALTER TABLE public.store_profile ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "StoreProfile Read & Upsert" ON public.store_profile;
+CREATE POLICY "StoreProfile Read & Upsert" ON public.store_profile
+    FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
 -- =============================================================================
 -- OPTIONAL STRICT SUPABASE-AUTH JWT UPGRADE (Run only if you migrate app

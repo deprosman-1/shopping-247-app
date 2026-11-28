@@ -12279,6 +12279,13 @@ private fun AdminSecuritySettingsTab(
                         )
                     }
 
+                    Text(
+                        text = "Tip: Older test APKs (Build 1–${(installedApk.first - 1).coerceAtLeast(1)} or earlier versions) trigger automatically. If your test customer is already on Build ${installedApk.first} (v${installedApk.second}), set New Build Code to ${installedApk.first + 1} or change New Version Name before publishing.",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 10.5.sp,
+                        color = AccentGold
+                    )
+
                     OutlinedTextField(
                         value = updateNotesInput,
                         onValueChange = { updateNotesInput = it },

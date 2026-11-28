@@ -298,13 +298,29 @@ object ShopNotificationHelper {
     ) {
         if (!hasNotificationPermission(context)) return
         ensureChannels(context)
-        postNotification(
-            context = context,
-            channelId = CHANNEL_ORDERS,
-            notificationId = 24810 + versionCode,
-            title = "New ODIYA Update Ready (v$versionName)",
-            body = notes.ifBlank { "Tap to install the latest features and live upgrades on your phone." }
+        val launchIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("open_update_dialog", true)
+        }
+        val pi = PendingIntent.getActivity(
+            context,
+            1002,
+            launchIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        val bodyText = notes.ifBlank { "Tap to install the latest features and live upgrades on your phone." }
+        val builder = NotificationCompat.Builder(context, CHANNEL_ORDERS)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("New ODIYA Update Ready (v$versionName)")
+            .setContentText(bodyText)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(bodyText))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pi)
+        try {
+            NotificationManagerCompat.from(context).notify(24810 + versionCode, builder.build())
+        } catch (_: SecurityException) {
+        }
     }
 
     fun notifyNewProductAlert(

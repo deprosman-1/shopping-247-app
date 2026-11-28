@@ -131,6 +131,7 @@ class MainActivity : ComponentActivity() {
     private val pendingPaystackReference = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     private val pendingAppOpenSignal = kotlinx.coroutines.flow.MutableStateFlow(0L)
     private val pendingCatalogFilter = kotlinx.coroutines.flow.MutableStateFlow<Pair<String?, String?>?>(null)
+    private val pendingOpenUpdateDialog = kotlinx.coroutines.flow.MutableStateFlow(0L)
     private val isInPipModeState = kotlinx.coroutines.flow.MutableStateFlow(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -179,6 +180,7 @@ class MainActivity : ComponentActivity() {
                     pendingPaystackReference = pendingPaystackReference,
                     pendingAppOpenSignal = pendingAppOpenSignal,
                     pendingCatalogFilter = pendingCatalogFilter,
+                    pendingOpenUpdateDialog = pendingOpenUpdateDialog,
                     isInPipModeFlow = isInPipModeState
                 )
             }
@@ -248,6 +250,10 @@ class MainActivity : ComponentActivity() {
 
     private fun handleDeepLinkIntent(intent: android.content.Intent?) {
         if (intent == null) return
+        if (intent.getBooleanExtra("open_update_dialog", false)) {
+            pendingOpenUpdateDialog.value = System.currentTimeMillis()
+            intent.removeExtra("open_update_dialog")
+        }
         val action = intent.action
         if (action == android.content.Intent.ACTION_SEND || action == android.content.Intent.ACTION_SEND_MULTIPLE) {
             val uris = extractStreamUris(intent)
@@ -319,6 +325,7 @@ fun DeprosApp(
     pendingPaystackReference: kotlinx.coroutines.flow.MutableStateFlow<String?>? = null,
     pendingAppOpenSignal: kotlinx.coroutines.flow.MutableStateFlow<Long>? = null,
     pendingCatalogFilter: kotlinx.coroutines.flow.MutableStateFlow<Pair<String?, String?>?>? = null,
+    pendingOpenUpdateDialog: kotlinx.coroutines.flow.MutableStateFlow<Long>? = null,
     isInPipModeFlow: kotlinx.coroutines.flow.StateFlow<Boolean>? = null
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -424,6 +431,30 @@ fun DeprosApp(
             viewModel.setSearchQuery(q ?: "")
             viewModel.navigateToHome()
         }
+    }
+
+    val incomingOpenUpdateTs = pendingOpenUpdateDialog?.collectAsState()?.value ?: 0L
+    LaunchedEffect(incomingOpenUpdateTs) {
+        if (incomingOpenUpdateTs > 0L) {
+            showFullScreenBrandSplash = false
+            pendingOpenUpdateDialog?.value = 0L
+            viewModel.checkForAppUpdates(showPopupIfFound = true) { isLatest, msg ->
+                if (isLatest) {
+                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                viewModel.checkForAppUpdates(showPopupIfFound = true, onResult = null)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     LaunchedEffect(showFullScreenBrandSplash) {

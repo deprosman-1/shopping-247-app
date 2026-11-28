@@ -23,8 +23,10 @@ import com.example.data.model.PartnerAgreementStatus
 import com.example.data.model.PartnershipInterestStatus
 import com.example.data.model.PaymentMethod
 import com.example.data.model.ProductColor
+import com.example.data.model.AppUpdateManifest
 import com.example.data.remote.LiveCallMode
 import com.example.data.remote.LiveCallPhase
+import com.example.ui.components.AppUpdateDialog
 import com.example.ui.components.ReceiptViewDialog
 import com.example.ui.screens.AdminControlRoomScreen
 import com.example.ui.screens.CartScreen
@@ -960,5 +962,91 @@ class FeatureUpgradeVerificationTest {
         assertEquals("file:///data/user/0/com.example/files/shared_receipts/paystack_slip.jpg", updatedOrder!!.receiptImageUrl)
         assertEquals("PSK-REF-9911", updatedOrder.paymentReference)
         assertTrue(updatedOrder.verificationNote.contains("Paystack", ignoreCase = true))
+    }
+
+    @Test
+    fun appUpdateDetection_triggersPopupAndNotificationForOlderBuildsAndReOpensForNewerVersions() = runBlocking {
+        val (installedCode, installedName) = viewModel.getInstalledAppVersion()
+
+        // 1. Version comparison handles higher build code AND newer versionName on equal build code
+        assertTrue(viewModel.isRemoteAppVersionNewer(installedCode + 1, "9.0", installedCode, installedName))
+        assertTrue(viewModel.isRemoteAppVersionNewer(installedCode, "$installedName.1", installedCode, installedName))
+        org.junit.Assert.assertFalse(viewModel.isRemoteAppVersionNewer(installedCode, installedName, installedCode, installedName))
+        org.junit.Assert.assertFalse(viewModel.isRemoteAppVersionNewer((installedCode - 1).coerceAtLeast(1), "0.9", installedCode, installedName))
+
+        // 2. Receiving a newer manifest sets popup state + release notes + notification tracking
+        val firstManifest = AppUpdateManifest(
+            versionCode = installedCode + 1,
+            versionName = "2.0.0",
+            releaseNotes = "Paystack receipt upload and faster checkout.",
+            downloadUrl = "https://github.com/odiya/app/releases/download/v2.0.0/odiya.apk"
+        )
+        val foundFirst = viewModel.evaluateAppUpdateStatusAndNotify(
+            remoteManifest = firstManifest,
+            showPopupIfNew = true
+        )
+        pumpLooper(2)
+
+        assertTrue(foundFirst)
+        assertTrue(viewModel.updateAvailable.value)
+        assertEquals("2.0.0", viewModel.latestVersionName.value)
+        assertEquals("Paystack receipt upload and faster checkout.", viewModel.releaseNotes.value)
+        assertEquals("https://github.com/odiya/app/releases/download/v2.0.0/odiya.apk", viewModel.updateDownloadUrl.value)
+
+        // 3. Dismissing hides current signature, without blocking subsequent releases
+        val adminPrefs = app.getSharedPreferences("depros_admin_settings", Context.MODE_PRIVATE)
+        assertEquals(installedCode + 1, adminPrefs.getInt("last_notified_update_code", 0))
+        viewModel.updateStoreProfile(
+            viewModel.storeProfile.value.copy(
+                latestAppVersionCode = installedCode + 1,
+                latestAppVersionName = "2.0.0"
+            ),
+            syncToCloud = false
+        )
+        viewModel.dismissUpdateDialog()
+        org.junit.Assert.assertFalse(viewModel.updateAvailable.value)
+
+        // Same version should stay dismissed unless forced
+        viewModel.evaluateAppUpdateStatusAndNotify(remoteManifest = firstManifest, showPopupIfNew = true)
+        org.junit.Assert.assertFalse(viewModel.updateAvailable.value)
+
+        // Newer version re-triggers popup & notification
+        val secondManifest = AppUpdateManifest(
+            versionCode = installedCode + 2,
+            versionName = "2.1.0",
+            releaseNotes = "Instant update notifications enabled.",
+            downloadUrl = "https://github.com/odiya/app/releases/download/v2.1.0/odiya.apk"
+        )
+        val foundSecond = viewModel.evaluateAppUpdateStatusAndNotify(
+            remoteManifest = secondManifest,
+            showPopupIfNew = true
+        )
+        pumpLooper(2)
+
+        assertTrue(foundSecond)
+        assertTrue(viewModel.updateAvailable.value)
+        assertEquals("2.1.0", viewModel.latestVersionName.value)
+        assertEquals("Instant update notifications enabled.", viewModel.releaseNotes.value)
+        assertEquals(installedCode + 2, adminPrefs.getInt("last_notified_update_code", 0))
+    }
+
+    @Test
+    fun uiSmoke_appUpdateDialogDisplaysVersionNotesAndUpdateButton() {
+        composeRule.setContent {
+            MyApplicationTheme {
+                AppUpdateDialog(
+                    latestVersionName = "2.5.0",
+                    releaseNotes = "Faster live cloud sync and upgrade prompt.",
+                    updateUrl = "https://github.com/odiya/app/releases/download/v2.5.0/odiya.apk",
+                    installedVersionName = "1.2",
+                    onDismiss = {}
+                )
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("app_update_dialog").assertIsDisplayed()
+        composeRule.onNodeWithText("Installed: v1.2 → New: v2.5.0").assertIsDisplayed()
+        composeRule.onNodeWithText("Faster live cloud sync and upgrade prompt.").assertIsDisplayed()
     }
 }

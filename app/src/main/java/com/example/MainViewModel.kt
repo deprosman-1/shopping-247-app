@@ -553,7 +553,114 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun dismissUpdateDialog() {
+        val code = _storeProfile.value.latestAppVersionCode.coerceAtLeast(1)
+        val verName = _latestVersionName.value.ifBlank { _storeProfile.value.latestAppVersionName }
+        adminPrefs.edit().putString("dismissed_update_sig", "$code:$verName").apply()
         _updateAvailable.value = false
+    }
+
+    internal fun isRemoteAppVersionNewer(
+        remoteCode: Int,
+        remoteName: String,
+        installedCode: Int,
+        installedName: String
+    ): Boolean {
+        if (remoteCode > installedCode) return true
+        val cleanRemoteName = remoteName.trim()
+        val cleanInstalledName = installedName.trim()
+        return remoteCode >= installedCode &&
+            cleanRemoteName.isNotBlank() &&
+            !cleanRemoteName.equals(cleanInstalledName, ignoreCase = true)
+    }
+
+    internal fun evaluateAppUpdateStatusAndNotify(
+        remoteManifest: AppUpdateManifest? = null,
+        showPopupIfNew: Boolean = true,
+        forcePopup: Boolean = false
+    ): Boolean {
+        val (installedCode, installedName) = getInstalledAppVersion()
+        val profile = _storeProfile.value
+        val portalUrl = com.example.util.WebPortalExporter.getSavedCustomPortalUrl(getApplication())
+
+        val manifestBeatsProfile = remoteManifest != null && isRemoteAppVersionNewer(
+            remoteCode = remoteManifest.versionCode,
+            remoteName = remoteManifest.versionName,
+            installedCode = profile.latestAppVersionCode,
+            installedName = profile.latestAppVersionName
+        )
+        val effectiveRemoteCode = maxOf(
+            remoteManifest?.versionCode ?: 1,
+            profile.latestAppVersionCode
+        )
+        val effectiveRemoteName = if (manifestBeatsProfile) {
+            remoteManifest?.versionName?.takeIf { it.isNotBlank() }
+                ?: profile.latestAppVersionName.ifBlank { installedName }
+        } else {
+            profile.latestAppVersionName.takeIf { it.isNotBlank() }
+                ?: remoteManifest?.versionName?.takeIf { it.isNotBlank() }
+                ?: installedName
+        }
+        val effectiveNotes = if (manifestBeatsProfile) {
+            remoteManifest?.releaseNotes?.takeIf { it.isNotBlank() } ?: profile.updateReleaseNotes
+        } else {
+            profile.updateReleaseNotes.takeIf { it.isNotBlank() } ?: remoteManifest?.releaseNotes.orEmpty()
+        }
+        val directManifestUrl = remoteManifest?.downloadUrl?.let {
+            com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(it)
+        }.orEmpty().takeIf { com.example.util.WebPortalExporter.isDirectApkReleaseUrl(it) }
+        val profileDirectApkUrl = com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(profile.apkDownloadUrl)
+            .takeIf { com.example.util.WebPortalExporter.isDirectApkReleaseUrl(it) }
+
+        val effectiveDownloadUrl = listOfNotNull(
+            if (manifestBeatsProfile) directManifestUrl else profileDirectApkUrl,
+            if (manifestBeatsProfile) profileDirectApkUrl else directManifestUrl,
+            com.example.util.WebPortalExporter.DEFAULT_GITHUB_APK_RELEASE_URL,
+            remoteManifest?.downloadUrl,
+            profile.apkDownloadUrl,
+            portalUrl,
+            com.example.util.WebPortalExporter.DEFAULT_LIVE_PORTAL_URL
+        ).map { com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(it) }
+            .firstOrNull {
+                it.isNotBlank() &&
+                    !com.example.util.WebPortalExporter.isAiStudioPreviewHost(it) &&
+                    !com.example.util.WebPortalExporter.isLegacyDeprecatedHost(it)
+            }.orEmpty()
+
+        val isNewer = isRemoteAppVersionNewer(
+            remoteCode = effectiveRemoteCode,
+            remoteName = effectiveRemoteName,
+            installedCode = installedCode,
+            installedName = installedName
+        )
+
+        if (isNewer) {
+            _latestVersionName.value = effectiveRemoteName
+            _releaseNotes.value = effectiveNotes
+            _updateDownloadUrl.value = effectiveDownloadUrl
+
+            val versionSig = "$effectiveRemoteCode:$effectiveRemoteName"
+            val dismissedSig = adminPrefs.getString("dismissed_update_sig", "").orEmpty()
+            if (showPopupIfNew && (forcePopup || dismissedSig != versionSig)) {
+                _updateAvailable.value = true
+            }
+
+            val lastNotified = adminPrefs.getInt("last_notified_update_code", 0)
+            val lastNotifiedSig = adminPrefs.getString("last_notified_update_sig", "").orEmpty()
+            if (effectiveRemoteCode > lastNotified || lastNotifiedSig != versionSig) {
+                adminPrefs.edit()
+                    .putInt("last_notified_update_code", effectiveRemoteCode)
+                    .putString("last_notified_update_sig", versionSig)
+                    .apply()
+                ShopNotificationHelper.notifyAppUpdateAvailable(
+                    context = getApplication(),
+                    versionName = effectiveRemoteName,
+                    versionCode = effectiveRemoteCode,
+                    notes = effectiveNotes
+                )
+            }
+            return true
+        }
+        return false
     }
 
     fun simulateNewUpdateAvailable() {
@@ -593,10 +700,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 latestAppVersionName = cleanName,
                 updateReleaseNotes = cleanNotes
             )
-            updateStoreProfile(updatedProfile)
+            persistStoreProfileLocally(updatedProfile, pendingPush = true)
             _latestVersionName.value = cleanName
             _releaseNotes.value = cleanNotes
             _updateDownloadUrl.value = cleanUrl
+
+            val (installedCode, installedName) = getInstalledAppVersion()
+            if (!isRemoteAppVersionNewer(cleanCode, cleanName, installedCode, installedName)) {
+                val ownSig = "$cleanCode:$cleanName"
+                adminPrefs.edit()
+                    .putInt("last_notified_update_code", cleanCode)
+                    .putString("last_notified_update_sig", ownSig)
+                    .putString("dismissed_update_sig", ownSig)
+                    .apply()
+            }
+
+            val profileSyncRes = syncStoreProfileWithCloudInternal(preferLocal = true)
 
             val manifest = AppUpdateManifest(
                 versionCode = cleanCode,
@@ -605,22 +724,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 downloadUrl = cleanUrl
             )
             val res = repository.supabaseSync.publishAppUpdateManifest(manifest)
-            if (res.isSuccess) {
+
+            if (!repository.supabaseSync.isPlaceholderConfig()) {
                 startLiveCallSignalingIfConfigured()
-                liveCallClient.sendSignal(
-                    "APP_UPDATE",
-                    "global_updates",
-                    JSONObject().apply {
-                        put("versionCode", cleanCode)
-                        put("versionName", cleanName)
-                        put("releaseNotes", cleanNotes)
-                        put("updateUrl", cleanUrl)
+                val signalJson = JSONObject().apply {
+                    put("versionCode", cleanCode)
+                    put("versionName", cleanName)
+                    put("releaseNotes", cleanNotes)
+                    put("updateUrl", cleanUrl)
+                }
+                var sent = liveCallClient.sendSignal("APP_UPDATE", "global_updates", signalJson)
+                if (!sent) {
+                    var waitedMs = 0
+                    while (!liveCallClient.isConnected.value && waitedMs < 1500) {
+                        delay(150L)
+                        waitedMs += 150
                     }
-                )
+                    sent = liveCallClient.sendSignal("APP_UPDATE", "global_updates", signalJson)
+                }
+            }
+
+            if (res.isSuccess || profileSyncRes.isSuccess) {
                 _cloudStatusMessage.value = "✅ Published APK Update v$cleanName (Build $cleanCode) to Cloud & Live Customer Alerts!"
-                onComplete(true, "✅ Published APK Update v$cleanName (Build $cleanCode)! All customer phones are notified automatically with 1-tap update.")
+                onComplete(true, "✅ Published APK Update v$cleanName (Build $cleanCode)! All customer phones will receive the popup & update notification.")
             } else {
-                val err = res.exceptionOrNull()?.message ?: "Cloud not connected"
+                val err = res.exceptionOrNull()?.message
+                    ?: profileSyncRes.exceptionOrNull()?.message
+                    ?: "Cloud not connected"
                 onComplete(false, "Saved locally on this device, but cloud publish needs active Supabase: $err")
             }
         }
@@ -1636,6 +1766,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     paystackCallbackUrl = synced.paystackCallbackUrl.trim().ifBlank { "depros://paystack-callback" }
                 )
                 persistStoreProfileLocally(clean, pendingPush = false)
+                if (!preferLocal) {
+                    evaluateAppUpdateStatusAndNotify(showPopupIfNew = true)
+                }
             }
             res
         }
@@ -2654,10 +2787,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         // Real-Time Live Background Sync across all installed devices (every 10s)
         viewModelScope.launch {
+            var pollCycleCount = 0
             while (isActive) {
                 delay(if (hasCompletedInitialCloudPull) 10000 else 3000)
                 try {
                     if (!repository.supabaseSync.isPlaceholderConfig()) {
+                        pollCycleCount++
                         val wasBaselineEstablished = hasCompletedInitialCloudPull
                         val syncRes = repository.fetchAndSyncAllFromCloudDetailed()
                         val queuedPreIds = _offlineQueue.value
@@ -2675,6 +2810,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                         syncPartnerLedgerWithCloudInternal()
                         syncStoreProfileWithCloudInternal()
+                        if (pollCycleCount % 3 == 1) {
+                            val portalUrl = com.example.util.WebPortalExporter.getSavedCustomPortalUrl(getApplication())
+                            val remoteManifest = repository.supabaseSync.fetchAppUpdateManifest(portalUrl).getOrNull()
+                            evaluateAppUpdateStatusAndNotify(
+                                remoteManifest = remoteManifest,
+                                showPopupIfNew = true
+                            )
+                        }
                         syncForwardedReceiptsWithCloudInternal()
                         runAutomatic30DayHostingBilling()
                         if (syncRes.isSuccess) {
@@ -2798,6 +2941,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _isRefreshing.value = true
             _cloudStatusMessage.value = "🔄 Checking for app updates..."
             val syncRes = repository.fetchAndSyncAllFromCloud()
+            syncStoreProfileWithCloudInternal()
             val portalUrl = com.example.util.WebPortalExporter.getSavedCustomPortalUrl(getApplication())
             val remoteManifest = repository.supabaseSync.fetchAppUpdateManifest(portalUrl).getOrNull()
             _isRefreshing.value = false
@@ -2811,8 +2955,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
             val effectiveRemoteName = remoteManifest?.versionName?.takeIf { it.isNotBlank() }
                 ?: profile.latestAppVersionName.ifBlank { installedName }
-            val effectiveNotes = remoteManifest?.releaseNotes?.takeIf { it.isNotBlank() }
-                ?: profile.updateReleaseNotes
             val directManifestUrl = remoteManifest?.downloadUrl?.let {
                 com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(it)
             }.orEmpty().takeIf { com.example.util.WebPortalExporter.isDirectApkReleaseUrl(it) }
@@ -2850,24 +2992,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
-            if (effectiveRemoteCode > installedCode) {
-                _latestVersionName.value = effectiveRemoteName
-                _releaseNotes.value = effectiveNotes
-                _updateDownloadUrl.value = effectiveDownloadUrl
-                if (showPopupIfFound) {
-                    _updateAvailable.value = true
-                }
-                val lastNotified = adminPrefs.getInt("last_notified_update_code", 0)
-                if (effectiveRemoteCode > lastNotified) {
-                    adminPrefs.edit().putInt("last_notified_update_code", effectiveRemoteCode).apply()
-                    ShopNotificationHelper.notifyAppUpdateAvailable(
-                        context = getApplication(),
-                        versionName = effectiveRemoteName,
-                        versionCode = effectiveRemoteCode,
-                        notes = effectiveNotes
-                    )
-                }
-                val msg = "🚀 New update v$effectiveRemoteName (Build $effectiveRemoteCode) available!"
+            val forcePopupOnManual = showPopupIfFound && onResult != null
+            val foundUpdate = evaluateAppUpdateStatusAndNotify(
+                remoteManifest = remoteManifest,
+                showPopupIfNew = showPopupIfFound,
+                forcePopup = forcePopupOnManual
+            )
+            if (foundUpdate) {
+                val shownVer = _latestVersionName.value.ifBlank { effectiveRemoteName }
+                val msg = "🚀 New update v$shownVer (Build $effectiveRemoteCode) available!"
                 _cloudStatusMessage.value = msg
                 onResult?.invoke(false, msg)
             } else {
@@ -4471,6 +4604,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 "❌ ${res.exceptionOrNull()?.message ?: "Failed to connect to Supabase"}"
             }
             _cloudStatusMessage.value = msg
+            if (res.isSuccess) {
+                checkForAppUpdates(showPopupIfFound = true, onResult = null)
+            }
             onResult(msg)
         }
     }
@@ -4637,6 +4773,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     testRes.getOrThrow()
                 }
                 _cloudStatusMessage.value = msg
+                checkForAppUpdates(showPopupIfFound = true, onResult = null)
                 onResult?.invoke(true, msg)
             } else {
                 _isSupabaseBusy.value = false
@@ -7691,7 +7828,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             "APP_UPDATE" -> {
-                val remoteCode = ev.payload.optInt("versionCode", 1)
+                val remoteCode = ev.payload.optInt("versionCode", 1).coerceAtLeast(1)
                 val remoteName = ev.payload.optString("versionName", "1.0").trim().ifBlank { "1.0" }
                 val notes = ev.payload.optString("releaseNotes", "").trim()
                 val dlUrl = com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(
@@ -7699,18 +7836,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ).ifBlank {
                     com.example.util.WebPortalExporter.DEFAULT_GITHUB_APK_RELEASE_URL
                 }
-                val (installedCode, _) = getInstalledAppVersion()
-                if (remoteCode > installedCode) {
-                    _latestVersionName.value = remoteName
-                    _releaseNotes.value = notes
-                    _updateDownloadUrl.value = dlUrl
-                    _updateAvailable.value = true
-                    adminPrefs.edit().putInt("last_notified_update_code", remoteCode).apply()
-                    ShopNotificationHelper.notifyAppUpdateAvailable(
-                        context = getApplication(),
-                        versionName = remoteName,
-                        versionCode = remoteCode,
-                        notes = notes
+                val (installedCode, installedName) = getInstalledAppVersion()
+                if (isRemoteAppVersionNewer(remoteCode, remoteName, installedCode, installedName)) {
+                    val updatedProfile = _storeProfile.value.copy(
+                        latestAppVersionCode = maxOf(remoteCode, _storeProfile.value.latestAppVersionCode),
+                        latestAppVersionName = remoteName,
+                        updateReleaseNotes = notes.ifBlank { _storeProfile.value.updateReleaseNotes },
+                        apkDownloadUrl = dlUrl.ifBlank { _storeProfile.value.apkDownloadUrl }
+                    )
+                    persistStoreProfileLocally(updatedProfile, pendingPush = false)
+                    evaluateAppUpdateStatusAndNotify(
+                        remoteManifest = AppUpdateManifest(
+                            versionCode = remoteCode,
+                            versionName = remoteName,
+                            releaseNotes = notes,
+                            downloadUrl = dlUrl
+                        ),
+                        showPopupIfNew = true,
+                        forcePopup = true
                     )
                 }
             }

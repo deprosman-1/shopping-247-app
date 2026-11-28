@@ -2014,13 +2014,15 @@ class SupabaseSyncService(
     }
 
     suspend fun fetchAppUpdateManifest(customPortalBaseUrl: String = ""): Result<AppUpdateManifest?> = withContext(Dispatchers.IO) {
-        val candidates = mutableListOf<String>()
+        val candidates = mutableListOf<Pair<String, Boolean>>()
         if (!isPlaceholderConfig()) {
             val baseUrl = cleanUrl(config.url)
             if (baseUrl.isNotBlank()) {
                 val ts = System.currentTimeMillis()
-                candidates.add("$baseUrl/storage/v1/object/public/product-media/system/app_update.json?t=$ts")
-                candidates.add("$baseUrl/storage/v1/object/public/shop-receipts/system/app_update.json?t=$ts")
+                candidates.add("$baseUrl/storage/v1/object/public/product-media/system/app_update.json?t=$ts" to false)
+                candidates.add("$baseUrl/storage/v1/object/public/shop-receipts/system/app_update.json?t=$ts" to false)
+                candidates.add("$baseUrl/storage/v1/object/product-media/system/app_update.json?t=$ts" to true)
+                candidates.add("$baseUrl/storage/v1/object/shop-receipts/system/app_update.json?t=$ts" to true)
             }
         }
         val cleanPortal = customPortalBaseUrl.trim()
@@ -2031,13 +2033,14 @@ class SupabaseSyncService(
             !cleanPortal.contains("ais-pre-gjs6srxqc2prdx42l343un") &&
             !cleanPortal.contains("ais-dev-gjs6srxqc2prdx42l343un")
         ) {
-            candidates.add("$cleanPortal/version.json?t=${System.currentTimeMillis()}")
+            candidates.add("$cleanPortal/version.json?t=${System.currentTimeMillis()}" to false)
         }
 
-        for (candidateUrl in candidates) {
+        for ((candidateUrl, useAuth) in candidates) {
             try {
-                val req = Request.Builder().url(candidateUrl).get().build()
-                client.newCall(req).execute().use { resp ->
+                val reqBuilder = Request.Builder().url(candidateUrl).get()
+                if (useAuth) reqBuilder.addSupabaseAuthHeaders()
+                client.newCall(reqBuilder.build()).execute().use { resp ->
                     if (resp.isSuccessful) {
                         val body = resp.body?.string()?.trim().orEmpty()
                         if (body.startsWith("{")) {
@@ -2061,6 +2064,43 @@ class SupabaseSyncService(
                 }
             } catch (_: Exception) {
                 // Try next source
+            }
+        }
+
+        if (!isPlaceholderConfig()) {
+            try {
+                val baseUrl = cleanUrl(config.url)
+                if (baseUrl.isNotBlank()) {
+                    val req = Request.Builder()
+                        .url("$baseUrl/rest/v1/store_profile?id=eq.odiya_main&select=latest_app_version_code,latest_app_version_name,update_release_notes,apk_download_url&limit=1")
+                        .addSupabaseAuthHeaders()
+                        .get()
+                        .build()
+                    client.newCall(req).execute().use { resp ->
+                        val body = resp.body?.string()?.trim().orEmpty()
+                        if (resp.isSuccessful && body.startsWith("[")) {
+                            val arr = JSONArray(body)
+                            if (arr.length() > 0) {
+                                val obj = arr.getJSONObject(0)
+                                val vCode = obj.optInt("latest_app_version_code", 1).coerceAtLeast(1)
+                                val vName = obj.optString("latest_app_version_name", "1.0").trim().ifBlank { "1.0" }
+                                val notes = obj.optString("update_release_notes", "").trim()
+                                val dlUrl = com.example.util.WebPortalExporter.normalizeApkOrPortalUrl(
+                                    obj.optString("apk_download_url", "")
+                                )
+                                return@withContext Result.success(
+                                    AppUpdateManifest(
+                                        versionCode = vCode,
+                                        versionName = vName,
+                                        releaseNotes = notes,
+                                        downloadUrl = dlUrl
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {
             }
         }
         Result.success(null)
@@ -2818,7 +2858,9 @@ class SupabaseSyncService(
             profile.whatsappNumber.isNotBlank() ||
             profile.supportEmail.isNotBlank() ||
             profile.storeAddress.isNotBlank() ||
-            profile.apkDownloadUrl.isNotBlank()
+            profile.apkDownloadUrl.isNotBlank() ||
+            profile.latestAppVersionCode > 1 ||
+            profile.updateReleaseNotes.isNotBlank()
     }
 
     internal fun storeProfileToJson(profile: StoreProfileConfig, isSnakeCase: Boolean): JSONObject = JSONObject().apply {
